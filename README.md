@@ -17,7 +17,7 @@ Custos is a cross-platform, local-first, dependency-aware fault detection and au
 | --- | --- |
 | Core engine | Rust (stable, Cargo workspace) |
 | Docs site | VitePress · Node.js 24 · pnpm |
-| Scripting access | Python callable core (PyO3 bindings) |
+| Scripting access | Core callable from Python (PyO3); extension logic via Python scripts |
 | Persistence | SQLite |
 
 ## Plugin model (authoritative)

@@ -17,7 +17,7 @@ Custos 是一个用 Rust 编写的跨平台、本地自治、依赖感知的故�
 | --- | --- |
 | 核心引擎 | Rust（stable，Cargo workspace） |
 | 文档站点 | VitePress · Node.js 24 · pnpm |
-| 脚本调用 | 核心功能可被 Python 调用（PyO3 绑定） |
+| 脚本调用 | 核心经 PyO3 可被 Python 调用；扩展逻辑可用 Python 脚本编写 |
 | 持久化 | SQLite |
 
 ## 插件口径（权威）
