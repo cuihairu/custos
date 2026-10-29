@@ -1,4 +1,8 @@
-# custos
+<div align="center">
+  <img src="docs/public/logo.svg" alt="custos logo" width="140" />
+  <h1>custos</h1>
+  <p><img alt="Rust" src="https://img.shields.io/badge/Rust-stable-dea584?logo=rust&logoColor=white" /> <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24-339933?logo=nodedotjs&logoColor=white" /> <img alt="pnpm" src="https://img.shields.io/badge/pnpm-workspaces-F69220?logo=pnpm&logoColor=white" /> <img alt="Python" src="https://img.shields.io/badge/Python-PyO3%20bindings-3776AB?logo=python&logoColor=white" /> <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-blue" /> <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20BSD%20%7C%20OpenWrt-lightgrey" /></p>
+</div>
 
 Custos is a cross-platform, local-first, dependency-aware fault detection and automatic recovery engine (self-healing) written in Rust.
 
@@ -6,6 +10,19 @@ Custos is a cross-platform, local-first, dependency-aware fault detection and au
 - Plugins encapsulate concrete capabilities; the core engine owns dependency coordination, execution permission, recovery budget, audit and final verdicts.
 - Local autonomy first: detection, repair and persistence keep working while the network is down.
 - Recovery success must pass a health verification, never just an exit code.
+
+## Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| Core engine | Rust (stable, Cargo workspace) |
+| Docs site | VitePress · Node.js 24 · pnpm |
+| Scripting access | Python callable core (PyO3 bindings) |
+| Persistence | SQLite |
+
+## Plugin model (authoritative)
+
+One plugin = the complete monitoring + handling logic for ONE resource kind (probe, diagnosis, recovery actions, verification). Plugins can depend on other plugins; consumers enable them with simple configuration only — no glue code.
 
 ## Documentation
 
@@ -27,4 +44,4 @@ Design phase — the architecture document and phased plan (P0–P4) are the cur
 
 ## License
 
-See [LICENSE](LICENSE).
+Apache-2.0 — see [LICENSE](LICENSE).

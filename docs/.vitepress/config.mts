@@ -6,6 +6,7 @@ export default defineConfig({
   description: '跨平台、本地自治、依赖感知的故障检测与自动恢复引擎',
   themeConfig: {
     siteTitle: 'Custos',
+    logo: '/logo.svg',
     outline: [2, 3],
     sidebar: [
       {
