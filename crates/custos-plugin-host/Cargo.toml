@@ -6,3 +6,12 @@ license.workspace = true
 
 [dependencies]
 custos-plugin-api = { path = "../custos-plugin-api" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# Test-fixture plugin speaking the stdio protocol; referenced by the
+# integration tests via CARGO_BIN_EXE_mock-plugin.
+[[bin]]
+name = "mock-plugin"
+path = "tests/fixtures/mock_plugin.rs"

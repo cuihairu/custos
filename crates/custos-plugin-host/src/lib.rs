@@ -1,11 +1,14 @@
-//! Plugin process management, JSON-RPC, timeouts and cancellation
-//! (docs/guide/workspace.md: `custos-plugin-host`).
+//! Plugin process lifecycle: spawn, handshake, capability negotiation,
+//! compatibility validation and graceful shutdown
+//! (docs/guide/plugins.md §4.5).
 //!
-//! P1 scope (docs/guide/plugins.md §4.4): independent continuous stdout/stdio
-//! readers, message size limits (1 MiB default), unresponsive-plugin timeout,
-//! crash restarts per policy.
+//! The host treats stdout as protocol-only and stderr as plugin diagnostic
+//! logging (§4.4): each stream gets an independent, continuously-draining
+//! reader so a chatty plugin can never block on a full pipe. The message
+//! size cap and error mapping are applied at the protocol boundary.
 
-/// Placeholder until the host lands in P1.
-pub fn not_yet_implemented() -> &'static str {
-    "custos-plugin-host: plugin process management is planned for P1 (docs/guide/roadmap.md)"
-}
+mod compat;
+mod session;
+
+pub use compat::validate_capabilities;
+pub use session::{HostError, InitializeResult, PluginConfig, PluginSession};

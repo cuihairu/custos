@@ -16,6 +16,21 @@ pub enum CapabilityKind {
     NotificationChannelProvider,
 }
 
+impl CapabilityKind {
+    /// Stable snake_case name, identical to the wire form (§4.6) — used in
+    /// logs and compatibility reports.
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::ResourceProvider => "resource_provider",
+            Self::ProbeProvider => "probe_provider",
+            Self::DiagnosisProvider => "diagnosis_provider",
+            Self::RecoveryActionProvider => "recovery_action_provider",
+            Self::VerificationProvider => "verification_provider",
+            Self::NotificationChannelProvider => "notification_channel_provider",
+        }
+    }
+}
+
 /// One declared capability with the eleven mandatory metadata fields of
 /// §4.6. The host decides from these (plus configuration policy) whether an
 /// action may run — a declaration alone grants nothing.

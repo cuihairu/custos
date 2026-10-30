@@ -175,13 +175,17 @@
 
 - [ ] 平台 trait 定义：ProcessController / ServiceController / NetworkInterfaceController / NetworkConnectivityProbe / CredentialProvider / SystemRebootController
 - [ ] Capability 描述机制（不伪造平台支持，不支持要明报）
+- [ ] 服务控制跨平台矩阵（同一 ServiceController trait 下按系统选择适配器，init 系统探测失败/不认识 → 明报 Unsupported，绝不误执行）：
+  - Linux systemd（zbus 5.19 org.freedesktop.systemd1，D-Bus 探测 /run/systemd/system）
+  - Linux OpenRC（rc-service，argv 调用不经 shell）
+  - Linux SysV init（/etc/init.d/<svc> start/stop/status）
+  - Linux 其他 init（runit 等）→ Unsupported 明报
+  - macOS launchd（launchctl print/kickstart -k，system + gui 域）
+  - Windows SCM（windows-service crate ServiceManager：start/stop/status，超时 + 结果验证）
 - [ ] Linux：进程检测
-- [ ] Linux：systemd 服务控制
-- [ ] Linux：非 systemd 正确报告能力不支持（不误执行）
 - [ ] Linux：网络接口状态 / IP 路由 / DNS 检查
 - [ ] Linux：受控命令执行 + 系统重启（需授权）
 - [ ] Windows：进程检测
-- [ ] Windows：Windows Service 控制（超时 + 结果验证）
 - [ ] Windows：Wi-Fi 状态检测 + 重连（系统 API/受控命令）
 - [ ] Windows：网络接口重置（管理通道中断风险显式标记）
 - [ ] Windows：DNS 刷新 / IP 配置 / 默认网关 / 连通性检查
@@ -218,7 +222,7 @@
 - [ ] RecoveryRun 时间线
 - [ ] 通知状态页
 - [ ] 配置检查界面
-- [ ] macOS 适配（launchd/Wi-Fi/连通性/重启）
+- [ ] macOS 适配（launchd 服务控制在 P2 已做；此处补 Wi-Fi/连通性/重启）
 - [ ] BSD 适配（rc.d/网络路由/重启）
 - [ ] OpenWrt 完整能力
 - [ ] 插件签名与分发策略
