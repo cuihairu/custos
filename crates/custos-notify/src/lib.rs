@@ -13,7 +13,9 @@
 pub mod channel;
 pub mod local_log;
 pub mod webhook;
+pub mod webhook_ssrf;
 
 pub use channel::{Channel, ChannelError, ChannelErrorKind};
 pub use local_log::{format_event, severity_level, LocalLogChannel};
 pub use webhook::{sign_body, WebhookChannel, EVENT_ID_HEADER, SIGNATURE_HEADER};
+pub use webhook_ssrf::{check_ip, validate_target, SsrfBlock};

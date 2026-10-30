@@ -29,20 +29,32 @@ pub struct WebhookChannel {
 
 impl WebhookChannel {
     /// Builds the HTTP agent from the validated config. `tls_verify=false`
-    /// disables server-certificate verification (self-signed test hooks);
-    /// SSRF target policy is enforced separately (webhook_ssrf).
+    /// disables server-certificate verification (self-signed test hooks).
+    /// The SSRF policy is enforced at construction and again before every
+    /// send, and redirects are disabled when the policy blocks them.
     pub fn new(id: impl Into<String>, config: WebhookConfig) -> Result<Self, ChannelError> {
+        // Fail fast on a policy-violating target at construction time.
+        crate::webhook_ssrf::validate_target(&config.url, &config.ssrf).map_err(|block| {
+            ChannelError::new(
+                ChannelErrorKind::Config,
+                format!(
+                    "webhook target blocked by SSRF policy: {}",
+                    block.describe()
+                ),
+            )
+        })?;
         let tls = ureq::tls::TlsConfig::builder()
             .disable_verification(!config.tls_verify)
             .build();
         let timeout = Duration::from_millis(config.timeout_ms);
-        let agent = ureq::Agent::new_with_config(
-            ureq::config::Config::builder()
-                .tls_config(tls)
-                .timeout_global(Some(timeout))
-                .timeout_connect(Some(timeout))
-                .build(),
-        );
+        let mut builder = ureq::config::Config::builder()
+            .tls_config(tls)
+            .timeout_global(Some(timeout))
+            .timeout_connect(Some(timeout));
+        if config.ssrf.block_redirects {
+            builder = builder.max_redirects(0);
+        }
+        let agent = ureq::Agent::new_with_config(builder.build());
         Ok(Self {
             id: id.into(),
             config,
@@ -50,8 +62,20 @@ impl WebhookChannel {
         })
     }
 
-    /// One attempt: build the signed JSON body and POST it.
+    /// One attempt: re-check the SSRF policy against the target (fresh DNS
+    /// resolution), build the signed JSON body, and POST it.
     fn send_once(&self, event: &NotificationEvent, body: &str) -> Result<(), ChannelError> {
+        crate::webhook_ssrf::validate_target(&self.config.url, &self.config.ssrf).map_err(
+            |block| {
+                ChannelError::new(
+                    ChannelErrorKind::Config,
+                    format!(
+                        "webhook target blocked by SSRF policy: {}",
+                        block.describe()
+                    ),
+                )
+            },
+        )?;
         let mut request = self
             .agent
             .post(&self.config.url)
@@ -65,8 +89,24 @@ impl WebhookChannel {
             request = request.header(SIGNATURE_HEADER, signature.as_str());
         }
         match request.send(body.to_owned()) {
-            // 2xx: the receiver accepted the event.
-            Ok(_) => Ok(()),
+            Ok(response) => {
+                let status = response.status().as_u16();
+                if (200..300).contains(&status) {
+                    Ok(())
+                } else if (300..400).contains(&status) {
+                    // A redirect surfaced despite the block: the target
+                    // policy was violated, so this is terminal.
+                    Err(ChannelError::new(
+                        ChannelErrorKind::Rejected,
+                        format!("webhook redirected to HTTP {status} (blocked by SSRF policy)"),
+                    ))
+                } else {
+                    Err(ChannelError::new(
+                        ChannelErrorKind::Http,
+                        format!("webhook failed with HTTP {status}"),
+                    ))
+                }
+            }
             Err(ureq::Error::StatusCode(code)) if (400..500).contains(&code) => {
                 Err(ChannelError::new(
                     ChannelErrorKind::Rejected,
@@ -169,6 +209,11 @@ mod tests {
     }
 
     fn config(url: impl Into<String>) -> WebhookConfig {
+        // The transport tests talk to a loopback HTTP server, so the SSRF
+        // policy must permit loopback there; the SSRF rules themselves are
+        // covered by webhook_ssrf tests and the blocked-target test below.
+        let mut ssrf = SsrfPolicy::default_blocking();
+        ssrf.block_loopback = false;
         WebhookConfig {
             url: url.into(),
             timeout_ms: 2000,
@@ -177,7 +222,7 @@ mod tests {
             headers: Default::default(),
             hmac_secret: None,
             tls_verify: true,
-            ssrf: SsrfPolicy::default_blocking(),
+            ssrf,
         }
     }
 
@@ -366,6 +411,51 @@ mod tests {
         let mut cfg = config(format!("http://{addr}/hook"));
         cfg.retries = 0;
         let channel = WebhookChannel::new("wh", cfg).unwrap();
+        let err = channel.deliver(&event()).unwrap_err();
+        assert_eq!(err.kind, ChannelErrorKind::Transport);
+    }
+
+    #[test]
+    fn construction_rejects_ssrf_blocked_target() {
+        // Default policy blocks loopback; construction must fail fast.
+        let cfg = WebhookConfig {
+            url: "http://127.0.0.1:8080/hook".into(),
+            timeout_ms: 2000,
+            retries: 0,
+            backoff_ms: 1,
+            headers: Default::default(),
+            hmac_secret: None,
+            tls_verify: true,
+            ssrf: SsrfPolicy::default_blocking(),
+        };
+        let err = match WebhookChannel::new("wh", cfg) {
+            Err(e) => e,
+            Ok(_) => panic!("expected construction to be rejected"),
+        };
+        assert_eq!(err.kind, ChannelErrorKind::Config);
+        assert!(err.to_string().contains("SSRF"), "{err}");
+    }
+
+    #[test]
+    fn allowlisted_target_bypasses_ssrf() {
+        // An allowlisted host name is accepted even though it resolves to
+        // loopback, and the channel then fails on connect (refused) rather
+        // than on the SSRF policy.
+        let mut ssrf = SsrfPolicy::default_blocking();
+        ssrf.allowlist = vec!["internal.example.com".into()];
+        let cfg = WebhookConfig {
+            url: "http://internal.example.com:9/hook".into(),
+            timeout_ms: 500,
+            retries: 0,
+            backoff_ms: 1,
+            headers: Default::default(),
+            hmac_secret: None,
+            tls_verify: true,
+            ssrf,
+        };
+        let channel = WebhookChannel::new("wh", cfg).unwrap();
+        // Port 9 (discard) is refused; allowlist bypasses the block, so the
+        // failure is a transport error, not an SSRF block.
         let err = channel.deliver(&event()).unwrap_err();
         assert_eq!(err.kind, ChannelErrorKind::Transport);
     }
