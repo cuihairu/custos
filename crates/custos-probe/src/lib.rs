@@ -11,6 +11,7 @@ pub mod factory;
 pub mod http;
 pub mod process;
 pub mod scheduler;
+pub mod tcp;
 pub mod tls;
 
 use custos_model::ids::ResourceId;

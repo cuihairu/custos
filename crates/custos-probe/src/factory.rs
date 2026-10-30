@@ -5,6 +5,7 @@
 use crate::exec::ExecProbe;
 use crate::http::HttpProbe;
 use crate::process::ProcessProbe;
+use crate::tcp::TcpProbe;
 use crate::{http, Probe};
 use custos_model::Resource;
 use std::time::Duration;
@@ -38,8 +39,22 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
         "http-endpoint" => http::from_config(config)
             .map(|probe: HttpProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
+        "network-connectivity" => {
+            let host = config["host"].as_str().ok_or_else(|| {
+                err("`probe.host` is required for network-connectivity resources")
+            })?;
+            let port = config["port"]
+                .as_u64()
+                .and_then(|port| u16::try_from(port).ok())
+                .ok_or_else(|| err("`probe.port` must be an integer in 0..=65535"))?;
+            let timeout_ms = config["timeout_ms"].as_u64().unwrap_or(3_000);
+            Ok(Box::new(TcpProbe {
+                host: host.into(),
+                port,
+                timeout: Duration::from_millis(timeout_ms),
+            }))
+        }
         "custom-command"
-        | "network-connectivity"
         | "proxy"
         | "tunnel"
         | "service" => {
@@ -102,6 +117,24 @@ mod tests {
     #[test]
     fn http_probe_requires_url() {
         let resource = Resource::new("web", "http-endpoint");
+        assert!(build_probe(&resource).is_err());
+    }
+
+    #[test]
+    fn builds_tcp_probe_from_host_and_port() {
+        let mut resource = Resource::new("db", "network-connectivity");
+        resource.config = json!({"host": "127.0.0.1", "port": 5432});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "tcp");
+    }
+
+    #[test]
+    fn tcp_probe_requires_host_and_port() {
+        let resource = Resource::new("db", "network-connectivity");
+        assert!(build_probe(&resource).is_err());
+
+        let mut resource = Resource::new("db", "network-connectivity");
+        resource.config = json!({"host": "127.0.0.1"});
         assert!(build_probe(&resource).is_err());
     }
 }
