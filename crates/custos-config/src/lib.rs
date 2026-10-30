@@ -13,6 +13,12 @@ use custos_model::{
 };
 use serde::Deserialize;
 
+mod notification;
+pub use notification::{
+    ChannelConfig, NotificationConfig, NotificationRule, SecretString, SmtpConfig, SsrfPolicy,
+    WebhookConfig,
+};
+
 /// Supported configuration schema version.
 pub const SUPPORTED_VERSION: u32 = 1;
 
@@ -187,6 +193,9 @@ struct RawConfig {
     resources: Vec<RawResource>,
     #[serde(default)]
     alternative_groups: Vec<RawAlternativeGroup>,
+    /// Independent notification section (docs/guide/notification.md §8.5).
+    #[serde(default)]
+    notification: Option<notification::RawNotification>,
 }
 
 /// Global authorization defaults (docs/guide/security.md §12.2). Per-resource
@@ -206,6 +215,8 @@ pub struct ValidatedConfig {
     pub graph: DependencyGraph,
     /// Global authorization defaults.
     pub permissions: Permissions,
+    /// Independent notification section (docs/guide/notification.md §8.5).
+    pub notification: NotificationConfig,
 }
 
 /// Global authorization defaults carried into the runtime.
@@ -530,11 +541,18 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
         other => ConfigError::validation("dependency graph", other.to_string()),
     })?;
 
+    // Notification section, validated against the known resource set.
+    let notification = notification::build(raw.notification, &known).map_err(|err| match err {
+        ConfigError::Validation { .. } => err,
+        other => ConfigError::validation("notification", other.to_string()),
+    })?;
+
     Ok(ValidatedConfig {
         resources,
         alternative_groups,
         graph,
         permissions,
+        notification,
     })
 }
 

@@ -1,8 +1,8 @@
-# Notification wiring example.
+# Notification wiring example (docs/guide/notification.md §8).
 #
-# NOTE: notification channel configuration lands with P1
-# (docs/guide/roadmap.md P1 item 10); this file shows the resource side that
-# P1 channels will subscribe to. Local log notification is always on.
+# The `[notification]` section is independent from recovery rules: recovery
+# policy decides *how to fix*, notification rules decide *who hears about it*.
+# Local log is the always-on base audit; webhook and SMTP are remote channels.
 version = 1
 
 [[resources]]
@@ -17,8 +17,6 @@ command = ["sh", "-c", "curl -fsS -o /dev/null http://127.0.0.1:8080/healthz"]
 failure_threshold = 3
 success_threshold = 2
 
-# Recovery exhaustion will emit recovery.exhausted (critical) once P1
-# channels are configured; until then it lands in the local structured log.
 [[resources.recovery_policy.plans]]
 plan_id = "restart-httpd"
 applicable_faults = ["remote_endpoint_unreachable", "probe_timeout"]
@@ -33,3 +31,45 @@ args = ["-c", "systemctl restart httpd || service httpd restart"]
 
 [resources.recovery_policy.plans.verification]
 status_is = "healthy"
+
+# Alert ops whenever recovery is exhausted or an outcome is unknown.
+[[notification.rules]]
+id = "alert-recovery-trouble"
+event = "recovery.exhausted"
+severity_min = "warning"
+channels = ["ops-webhook"]
+log = true
+
+[[notification.rules]]
+id = "alert-outcome-unknown"
+event = "recovery.outcome_unknown"
+severity_min = "warning"
+channels = ["ops-webhook"]
+log = true
+
+# Unhealthy resources always hit the local audit log too.
+[[notification.rules]]
+id = "audit-unhealthy"
+event = "resource.unhealthy"
+severity_min = "critical"
+channels = []
+log = true
+
+[notification.channels.ops-webhook]
+type = "webhook"
+url = "https://ops.example.com/custos/hook"
+timeout_ms = 5000
+retries = 3
+backoff_ms = 30000
+headers = { Authorization = "Bearer CHANGE_ME" }
+hmac_secret = "CHANGE_ME"
+tls_verify = true
+
+[notification.channels.ops-webhook.ssrf]
+block_private = true
+block_loopback = true
+block_redirects = true
+
+[notification.channels.audit]
+type = "local-log"
+enabled = true

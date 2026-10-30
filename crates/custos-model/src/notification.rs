@@ -28,6 +28,15 @@ impl Severity {
             Severity::Critical => "critical",
         }
     }
+
+    pub fn from_wire(name: &str) -> Option<Self> {
+        match name {
+            "info" => Some(Severity::Info),
+            "warning" => Some(Severity::Warning),
+            "critical" => Some(Severity::Critical),
+            _ => None,
+        }
+    }
 }
 
 /// The eleven notification event types (docs/guide/notification.md §8.4).
@@ -73,6 +82,23 @@ impl EventType {
             EventType::PluginUnavailable => "plugin.unavailable",
             EventType::NotificationDeliveryFailed => "notification.delivery_failed",
             EventType::ConfigurationInvalid => "configuration.invalid",
+        }
+    }
+
+    pub fn from_wire(name: &str) -> Option<Self> {
+        match name {
+            "resource.unhealthy" => Some(EventType::ResourceUnhealthy),
+            "resource.degraded" => Some(EventType::ResourceDegraded),
+            "recovery.started" => Some(EventType::RecoveryStarted),
+            "recovery.action_started" => Some(EventType::RecoveryActionStarted),
+            "recovery.action_failed" => Some(EventType::RecoveryActionFailed),
+            "recovery.succeeded" => Some(EventType::RecoverySucceeded),
+            "recovery.exhausted" => Some(EventType::RecoveryExhausted),
+            "recovery.outcome_unknown" => Some(EventType::RecoveryOutcomeUnknown),
+            "plugin.unavailable" => Some(EventType::PluginUnavailable),
+            "notification.delivery_failed" => Some(EventType::NotificationDeliveryFailed),
+            "configuration.invalid" => Some(EventType::ConfigurationInvalid),
+            _ => None,
         }
     }
 }
