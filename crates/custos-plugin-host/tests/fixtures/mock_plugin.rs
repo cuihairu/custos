@@ -5,6 +5,9 @@
 //!
 //! - env `MOCK_PLUGIN_VERSION` — protocol version reported at initialize
 //!   (default "1"; set to something else to test rejection);
+//! - env `MOCK_PLUGIN_DIE_LATCH=<path>` — exit(3) at startup while the file
+//!   exists (the file is removed first, so the next spawn is healthy);
+//! - env `MOCK_PLUGIN_ALWAYS_DIE=1` — exit(3) on every spawn (crash loop);
 //! - env `MOCK_PLUGIN_STDERR_LINES=<n>` — flood stderr with n+1 lines at
 //!   startup (tests the draining reader and capped retention);
 //! - probe params: `die` (exit the process), `hang_ms` (delay the response
@@ -67,6 +70,20 @@ fn capabilities() -> Value {
 
 fn main() {
     let version = std::env::var("MOCK_PLUGIN_VERSION").unwrap_or_else(|_| "1".into());
+    // Crash-injection switches for supervisor tests: die once only while a
+    // latch file exists (removed before dying, so the NEXT spawn is
+    // healthy), or die on every spawn.
+    if let Ok(latch) = std::env::var("MOCK_PLUGIN_DIE_LATCH") {
+        let latch = std::path::PathBuf::from(latch);
+        if latch.exists() {
+            let _ = std::fs::remove_file(&latch);
+            eprintln!("mock plugin dying once at startup");
+            std::process::exit(3);
+        }
+    }
+    if std::env::var("MOCK_PLUGIN_ALWAYS_DIE").is_ok() {
+        std::process::exit(3);
+    }
     if let Ok(count) = std::env::var("MOCK_PLUGIN_STDERR_LINES") {
         let count: usize = count.parse().unwrap_or(0);
         let mut err = std::io::stderr();

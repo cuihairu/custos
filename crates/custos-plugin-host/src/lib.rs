@@ -9,6 +9,8 @@
 
 mod compat;
 mod session;
+mod supervisor;
 
-pub use compat::validate_capabilities;
-pub use session::{HostError, InitializeResult, PluginConfig, PluginSession};
+pub use compat::{validate_capabilities, CapabilityKindRequirement};
+pub use session::{CallHandle, HostError, InitializeResult, PluginConfig, PluginSession};
+pub use supervisor::{PluginStatus, PluginSupervisor, RestartPolicy};
