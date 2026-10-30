@@ -421,6 +421,11 @@ dependencies = [
 [[package]]
 name = "custos-platform"
 version = "0.1.0"
+dependencies = [
+ "custos-model",
+ "custos-probe",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "custos-plugin-api"
@@ -503,6 +508,7 @@ name = "custos-toolbox"
 version = "0.1.0"
 dependencies = [
  "custos-model",
+ "custos-platform",
  "custos-plugin-api",
  "custos-probe",
  "serde_json",

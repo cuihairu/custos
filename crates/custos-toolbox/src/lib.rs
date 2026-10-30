@@ -16,9 +16,11 @@
 //! and dangerous primitives are hardened here, once (ADR-0015).
 
 pub mod exec_tool;
+pub mod platform_tools;
 pub mod process_tool;
 pub mod registry;
 
 pub use exec_tool::ExecTool;
+pub use platform_tools::{InterfaceResetTool, RebootTool};
 pub use process_tool::ProcessStatusTool;
 pub use registry::{DispatchedOutcome, ToolOutcome, ToolRegistry, ToolboxError, ToolboxErrorKind};

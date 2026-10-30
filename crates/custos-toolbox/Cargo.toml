@@ -10,6 +10,7 @@ tempfile = "3"
 [dependencies]
 custos-model = { workspace = true }
 custos-plugin-api = { path = "../custos-plugin-api" }
+custos-platform = { path = "../custos-platform" }
 custos-probe = { path = "../custos-probe" }
 serde_json = { workspace = true }
 

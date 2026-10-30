@@ -3,3 +3,8 @@ name = "custos-platform"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[dependencies]
+custos-model = { workspace = true }
+custos-probe = { path = "../custos-probe" }
+thiserror = { workspace = true }
