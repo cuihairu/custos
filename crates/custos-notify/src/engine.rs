@@ -70,6 +70,9 @@ pub struct NotificationEngine<Q: NotificationQueue> {
     channels: HashMap<String, Box<dyn Channel>>,
     queue: Q,
     dedup: Mutex<DedupState>,
+    /// Secrets collected from the channel configs; every error string that
+    /// is persisted to the queue or logged passes through it (§8.7).
+    scrubber: crate::scrub::Scrubber,
 }
 
 impl<Q: NotificationQueue> NotificationEngine<Q> {
@@ -103,6 +106,7 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
             }
         }
         Self {
+            scrubber: crate::scrub::Scrubber::from_config(&config),
             config,
             channels,
             queue,
@@ -227,6 +231,8 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
                     format!("unknown channel `{}`", row.channel),
                 )),
             };
+            // Error strings are persisted as queue `last_error` (and would be
+            // logged below): scrub configured secrets out first (§8.7).
             let record = match &outcome {
                 Ok(()) => self.queue.mark_delivered(row.id, now_unix_ms),
                 Err(err)
@@ -235,11 +241,13 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
                         ChannelErrorKind::Rejected | ChannelErrorKind::Config
                     ) =>
                 {
-                    self.queue.mark_dead(row.id, &err.to_string(), now_unix_ms)
+                    let scrubbed = self.scrubber.scrub(&err.to_string());
+                    self.queue.mark_dead(row.id, &scrubbed, now_unix_ms)
                 }
                 Err(err) => {
                     let next = retry_at(now_unix_ms, row.attempts);
-                    self.queue.mark_retry(row.id, next, &err.to_string())
+                    let scrubbed = self.scrubber.scrub(&err.to_string());
+                    self.queue.mark_retry(row.id, next, &scrubbed)
                 }
             };
             match record {
@@ -707,6 +715,51 @@ mod tests {
         let report = engine.dispatch(&web, 2_000);
         assert_eq!(report.enqueued, 0);
         assert_eq!(report.suppressed, 1);
+    }
+
+    #[test]
+    fn persisted_errors_carry_no_configured_secrets() {
+        // A webhook URL embedding userinfo credentials + an HMAC secret: the
+        // channel fails (refused port) and whatever error text the transport
+        // produced is scrubbed before it reaches the queue.
+        let queue = MemQueue::default();
+        let mut ssrf = SsrfPolicy::default_blocking();
+        ssrf.block_loopback = false;
+        let config = NotificationConfig {
+            rules: vec![rule(
+                "r1",
+                Some(EventType::ResourceUnhealthy),
+                Severity::Info,
+                Some("web"),
+                vec!["wh"],
+            )],
+            channels: [(
+                "wh".into(),
+                ChannelConfig::Webhook(WebhookConfig {
+                    url: "http://deploy:leaky-url-pass@127.0.0.1:9/hook".into(),
+                    timeout_ms: 200,
+                    retries: 0,
+                    backoff_ms: 1,
+                    headers: Default::default(),
+                    hmac_secret: Some(custos_config::SecretString::new("leaky-hmac")),
+                    tls_verify: true,
+                    ssrf,
+                }),
+            )]
+            .into(),
+        };
+        let engine = NotificationEngine::new(config, queue);
+        engine.dispatch(
+            &event(EventType::ResourceUnhealthy, Severity::Critical),
+            1_000,
+        );
+        engine.deliver_due(1_000, 10);
+
+        let ops = engine.queue.ops();
+        for op in ops {
+            assert!(!op.contains("leaky-url-pass"), "{op}");
+            assert!(!op.contains("leaky-hmac"), "{op}");
+        }
     }
 
     #[test]
