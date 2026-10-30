@@ -159,7 +159,7 @@
 
 ### 通知（custos-notify）
 
-- [ ] NotificationEvent 模型 + 十一种事件类型全集
+- [x] NotificationEvent 模型 + 十一种事件类型全集 `955e8ca`（`custos-model/src/notification.rs`；EventId/EventType/Severity/SanitizedDetails/NotificationEvent 按 notification.md §8.4；11 种事件类型序列化为精确点分线名如 `resource.unhealthy`/`notification.delivery_failed`；Severity=info/warning/critical 三级；SanitizedDetails 扁平 BTreeMap 确定序；模型放 custos-model 使引擎（生产者）/custos-notify（消费者）/custos-store（队列持久化）共享同一形状；`notification.delivery_failed` 由引擎按防自激循环规则特殊处理）
 - [ ] 通知规则与恢复规则解耦（独立配置节）
 - [ ] 本地日志渠道（基础审计输出）
 - [ ] Webhook 渠道：超时/重试退避/事件 ID/认证头/可选 HMAC/TLS 校验
