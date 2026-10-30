@@ -136,6 +136,15 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
             }
         }
 
+        // `notification.delivery_failed` is loop-suppressed (§8.4/§8.5): a
+        // remote delivery of THIS event failing would emit another
+        // delivery_failed, which would fail again — an infinite
+        // self-amplification loop. It therefore never enqueues to remote
+        // channels; the local structured log above is its only sink.
+        if event.event_type == EventType::NotificationDeliveryFailed {
+            return report;
+        }
+
         // A verified recovery clears the resource's fault keys so the next
         // fault notifies promptly instead of waiting out the window.
         if event.event_type == EventType::RecoverySucceeded {
@@ -698,6 +707,41 @@ mod tests {
         let report = engine.dispatch(&web, 2_000);
         assert_eq!(report.enqueued, 0);
         assert_eq!(report.suppressed, 1);
+    }
+
+    #[test]
+    fn delivery_failed_never_enqueues_to_remote_channels() {
+        let queue = MemQueue::default();
+        let config = NotificationConfig {
+            rules: vec![rule(
+                "r1",
+                Some(EventType::NotificationDeliveryFailed),
+                Severity::Info,
+                None,
+                vec!["wh"],
+            )],
+            channels: [
+                ("wh".into(), webhook_channel_config()),
+                ("audit".into(), ChannelConfig::LocalLog { enabled: true }),
+            ]
+            .into(),
+        };
+        let engine = NotificationEngine::new(config, queue);
+
+        // A rule explicitly selecting a remote channel still cannot make
+        // delivery_failed enqueue: loop suppression wins over rules.
+        let failed = NotificationEvent::new(
+            EventId::new("evt-f"),
+            EventType::NotificationDeliveryFailed,
+            Severity::Warning,
+            "webhook transport error",
+            1_000,
+        );
+        let report = engine.dispatch(&failed, 1_000);
+        assert_eq!(report.enqueued, 0, "delivery_failed must not enqueue");
+        assert_eq!(report.suppressed, 0);
+        // It still lands in the local structured log.
+        assert_eq!(report.local_logged, 1);
     }
 
     #[test]
