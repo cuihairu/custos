@@ -183,9 +183,9 @@
 
 ### P1 验收门
 
-- [ ] 插件崩溃不退出核心；大 stderr 不阻塞协议；无响应按时超时
-- [ ] 断网通知留队；恢复后续发；发送失败不影响恢复
-- [ ] 敏感字段不进普通日志
+- [x] 插件崩溃不退出核心；大 stderr 不阻塞协议；无响应按时超时（plugin-host 31/31 绿：`plugin_crash_is_isolated_and_reported` / `chatty_stderr_is_drained_and_capped_never_parsed` / `request_deadline_expires_and_session_survives` 分别覆盖三条）
+- [x] 断网通知留队；恢复后续发；发送失败不影响恢复 `d30f8cb`（`custos-notify/tests/offline.rs` 验收测试：断言期间 dispatch 毫秒级返回不阻塞、条目 retry_scheduled 留队且退避未到不重试、端口恢复后到期补发 delivered；TimeAwareQueue 按真实 store 语义认领 pending+到期 retry_scheduled）
+- [x] 敏感字段不进普通日志（`5233545`：config Debug/Display 抹除 + 错误串入队/入日志前 Scrubber 抹除，engine 级不变量测试断言无密钥外泄；渠道错误仅持久化经抹除的串，不进普通日志）
 
 ## P2 平台基础能力（Linux + Windows 优先）
 
