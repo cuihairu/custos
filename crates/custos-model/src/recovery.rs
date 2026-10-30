@@ -108,9 +108,16 @@ impl RecoveryRunStatus {
         match self {
             Observing => &[ProblemDetected, Cancelled],
             ProblemDetected => &[Diagnosing, Suppressed, Cancelled],
-            Diagnosing => &[Planning, Suppressed, Escalated, Cancelled],
-            Planning => &[ResolvingDependencies, Suppressed, Escalated, Cancelled],
-            ResolvingDependencies => &[Planning, Executing, Escalated, Cancelled],
+            // A run may wait on a dependency at any point before execution.
+            Diagnosing => &[Planning, Waiting, Suppressed, Escalated, Cancelled],
+            Planning => &[
+                ResolvingDependencies,
+                Waiting,
+                Suppressed,
+                Escalated,
+                Cancelled,
+            ],
+            ResolvingDependencies => &[Planning, Waiting, Executing, Escalated, Cancelled],
             Executing => &[Verifying, Cancelled, Interrupted, OutcomeUnknown],
             Verifying => &[Recovered, Diagnosing, OutcomeUnknown, Cancelled],
             // Terminal states.
@@ -180,6 +187,12 @@ pub struct RecoveryRun {
     pub diagnosis: Option<Diagnosis>,
     pub action_attempts: Vec<ActionAttempt>,
     pub verification_results: Vec<VerificationResult>,
+    /// Why the run is suspended in `Waiting` (e.g. awaiting a dependency).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_reason: Option<String>,
+    /// Earliest wall-clock time the wait condition may clear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_until_unix_ms: Option<u64>,
     pub started_at_unix_ms: u64,
     pub updated_at_unix_ms: u64,
 }
@@ -200,6 +213,8 @@ impl RecoveryRun {
             diagnosis: None,
             action_attempts: Vec::new(),
             verification_results: Vec::new(),
+            wait_reason: None,
+            wait_until_unix_ms: None,
             started_at_unix_ms: now_unix_ms,
             updated_at_unix_ms: now_unix_ms,
         }
@@ -209,6 +224,20 @@ impl RecoveryRun {
     pub fn transition_to(&mut self, next: RecoveryRunStatus) -> Result<(), TransitionError> {
         self.status = self.status.transition_to(next)?;
         self.updated_at_unix_ms += 1; // real clock is injected by the engine
+        Ok(())
+    }
+
+    /// Suspends the run in `Waiting` with a reason (docs §6.1 Waiting:
+    /// resumption goes through `Planning`). Returns an error if the current
+    /// state cannot wait.
+    pub fn suspend(
+        &mut self,
+        reason: impl Into<String>,
+        until_unix_ms: Option<u64>,
+    ) -> Result<(), TransitionError> {
+        self.transition_to(RecoveryRunStatus::Waiting)?;
+        self.wait_reason = Some(reason.into());
+        self.wait_until_unix_ms = until_unix_ms;
         Ok(())
     }
 }
@@ -288,6 +317,47 @@ mod tests {
         assert!(RecoveryRunStatus::Waiting
             .transition_to(RecoveryRunStatus::Executing)
             .is_err());
+    }
+
+    #[test]
+    fn suspend_records_reason_and_resumes_via_planning() {
+        let mut run = RecoveryRun::new(
+            RecoveryRunId::new("run-wait"),
+            ResourceId::new("app"),
+            "failure threshold reached",
+            0,
+        );
+        run.transition_to(RecoveryRunStatus::ProblemDetected).ok();
+        run.transition_to(RecoveryRunStatus::Diagnosing).ok();
+        run.transition_to(RecoveryRunStatus::Planning).ok();
+        run.suspend("awaiting dependency `db`", Some(5_000))
+            .expect("suspend is legal from Planning");
+        assert_eq!(run.status, RecoveryRunStatus::Waiting);
+        assert_eq!(run.wait_reason.as_deref(), Some("awaiting dependency `db`"));
+        assert_eq!(run.wait_until_unix_ms, Some(5_000));
+        // Wake: Waiting -> Planning (never straight into Executing).
+        run.transition_to(RecoveryRunStatus::Planning)
+            .expect("wake is legal");
+        assert!(run.wait_reason.take().is_some(), "wake clears the reason");
+        assert!(run.wait_until_unix_ms.take().is_some());
+    }
+
+    #[test]
+    fn suspend_from_terminal_state_is_rejected() {
+        let mut run = RecoveryRun::new(
+            RecoveryRunId::new("run-term"),
+            ResourceId::new("svc"),
+            "failure threshold reached",
+            0,
+        );
+        run.transition_to(RecoveryRunStatus::ProblemDetected).ok();
+        run.transition_to(RecoveryRunStatus::Diagnosing).ok();
+        run.transition_to(RecoveryRunStatus::Suppressed)
+            .expect("suppressed is legal");
+        assert!(
+            run.suspend("nope", None).is_err(),
+            "a terminal run cannot be suspended"
+        );
     }
 
     #[test]
