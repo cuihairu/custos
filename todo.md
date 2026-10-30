@@ -61,7 +61,7 @@
 - [x] Docker 容器状态：docker.sock HTTP API 或 docker inspect，running/重启次数 `ba2dae1`（`docker.rs`；`docker inspect --format` 单次读 Status/Running/RestartCount，`max_restarts` 触发 Degraded；`docker-container` 资源类型；custos-probe 112/112 绿）
 - [x] ICMP Ping：raw socket，无权限时 TCP ping 兜底（Windows 用 IcmpSendEcho API）`4058679`（`icmp.rs`；用成熟 `ping` crate 做 ICMP（Linux/macOS 先 DGRAM 后 RAW），无权限（ping_group_range 外/非管理员 Windows，后者走调查允许的 TCP 降级而非 IcmpSendEcho）时 TCP 兜底到 `fallback_port`，`tcp_fallback` 可关；`icmp` 资源类型；custos-probe 122/122 绿）
 - [x] Windows 服务状态：sc query / QueryServiceStatus，StartType=auto 且 state≠RUNNING 判 Unhealthy `7038f18`（`windows_service.rs`；用成熟 `windows-service` crate 走 QueryServiceStatus+QueryServiceConfig（非 sc query 子进程），AutoStart 且非 Running → Unhealthy、过渡态 → Degraded、手动启动停止 → Healthy、服务不存在（1060）→ Unhealthy；classify 便携纯逻辑各平台单测，SCM 调用 cfg(windows) 已过 x86_64-pc-windows-gnu 交叉检查；`service` 类型配 unit 时 Windows 走原生（Linux systemd 的对称实现）；custos-probe 128/128 绿）
-- [ ] 数据库连通（MySQL/PostgreSQL/Redis）：SELECT 1 / PING，连接失败与超时分别归一化
+- [x] 数据库连通（MySQL/PostgreSQL/Redis）：SELECT 1 / PING，连接失败与超时分别归一化 `5e80ece`（`database.rs`；用成熟客户端 crate（mysql 28 / postgres 0.19 / redis 1.8，均 default-features=false 保持可移植，mysql 的 flate2 用 rust_backend 纯 Rust 后端避 zlib C 依赖）；SELECT 1 / PING 归 Healthy，连接拒绝与服务端拒绝（认证/坏 SQL）归 Unhealthy，传输超时与 DNS 归 Unreachable；find_io_error 沿 source 链归一化三种 crate 的 io 错误，classify_io 便携单测；`database` 资源类型已注册；Redis 健康路径用一次性 redis-server 实况测试，MySQL/PostgreSQL 走拒绝/超时路径测试；已过 x86_64-pc-windows-gnu 交叉检查；custos-probe 145/145 绿）
 
 ### 引擎（custos-engine）
 
