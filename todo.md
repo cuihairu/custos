@@ -50,9 +50,9 @@
 ### 探测类型高优缺失（probe-survey §26，13 项，按 §26.11 建议实现顺序）
 
 - [x] HTTP(S) 端点探测：状态码白名单 + 关键字/正则断言 + 响应时间阈值，一次请求覆盖，超时/重定向可配置 `b29a20f`（`crates/custos-probe/src/http.rs:36,194,215,293,397`；custos-probe 45/45 绿）
-- [ ] TCP 端口连通：connect_timeout + 连接耗时记录，可选 TLS 握手
-- [ ] DNS 解析：指定 resolver server + record type（A/AAAA/CNAME）+ 应答断言
-- [ ] TLS 证书到期：peer 证书 not_after 剩余天数阈值（<30 warn / <7 crit），不依赖 HTTP 探针可对任意 host:port
+- [x] TCP 端口连通：connect_timeout + 连接耗时记录，可选 TLS 握手 `f80f691`（connect_timeout + 延迟记录；TLS 握手 `tls`/`server_name` 在 `f127163` 补全，`tcp.rs:20-21,98-127`）
+- [x] DNS 解析：指定 resolver server + record type（A/AAAA/CNAME）+ 应答断言 `6f33921`
+- [x] TLS 证书到期：peer 证书 not_after 剩余天数阈值（<30 warn / <7 crit），不依赖 HTTP 探针可对任意 host:port `f127163`（`tls_cert.rs`；x509-parser 解析叶证书，`tls-certificate` 资源类型已注册；custos-probe 64/64 绿）
 - [ ] 磁盘空间：statvfs（Linux）/GetDiskFreeSpaceExW（Windows），挂载点 + warn/crit 双阈值
 - [ ] 内存使用：/proc/meminfo MemAvailable（Linux）/GlobalMemoryStatusEx（Windows）
 - [ ] CPU 使用率 / 负载：/proc/loadavg 与核数比值 + /proc/stat 差分采样
