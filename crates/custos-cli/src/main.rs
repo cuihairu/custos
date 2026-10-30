@@ -6,12 +6,8 @@
 //! `resources`/`graph` for configuration introspection.
 
 use custos_config::ValidatedConfig;
-use custos_engine::{BuiltinExecExecutor, Engine, SystemClock};
-use custos_model::ResourceId;
-use custos_probe::Probe;
-use std::collections::HashMap;
+use custos_core::Assembled;
 use std::process::ExitCode;
-use std::sync::Arc;
 use std::time::Duration;
 
 const USAGE: &str = "\
@@ -162,7 +158,8 @@ fn parse_start_options(args: &[String]) -> Result<StartOptions, ExitCode> {
 }
 
 /// Runs the engine: config → probes → engine, crash resume first, then the
-/// observe/recover tick loop.
+/// observe/recover tick loop. Assembly is custos-core's (`assemble`), shared
+/// with the Python bindings.
 fn start(path: &str, args: &[String]) -> ExitCode {
     let options = match parse_start_options(args) {
         Ok(options) => options,
@@ -173,57 +170,17 @@ fn start(path: &str, args: &[String]) -> ExitCode {
         Err(code) => return code,
     };
 
-    // Builtin probe per resource (user ruling 2026-10-29); a resource type
-    // without a builtin probe is a startup error, not a runtime surprise.
-    let mut probes: HashMap<ResourceId, Box<dyn Probe>> = HashMap::new();
-    for resource in &config.resources {
-        match custos_probe::factory::build_probe(resource) {
-            Ok(probe) => {
-                probes.insert(resource.id.clone(), probe);
-            }
-            Err(err) => {
-                eprintln!("error: {err}");
-                return ExitCode::FAILURE;
-            }
-        }
-    }
-
-    let store = match custos_store::Store::open(&options.db_path) {
-        Ok(store) => Arc::new(store),
+    let Assembled {
+        mut engine,
+        notification,
+        ..
+    } = match custos_core::assemble(&config, &options.db_path) {
+        Ok(assembled) => assembled,
         Err(err) => {
-            eprintln!("error: cannot open database {}: {err}", options.db_path);
+            eprintln!("error: {err}");
             return ExitCode::FAILURE;
         }
     };
-    let clock = Arc::new(SystemClock);
-    let mut engine = Engine::new(
-        &config,
-        probes,
-        Box::new(BuiltinExecExecutor),
-        store.clone(),
-        clock.clone(),
-    );
-
-    // Wire the notification engine (docs/guide/notification.md §8.1): the
-    // core produces structured events; the notify engine matches rules and
-    // enqueues. Delivery failures never block the tick (§8.1).
-    let notification = Arc::new(custos_notify::NotificationEngine::new(
-        config.notification.clone(),
-        store.clone(),
-    ));
-    let sink = notification.clone();
-    engine.set_event_emitter(Arc::new(move |event| {
-        let report = sink.dispatch(event, event.occurred_at_unix_ms);
-        if report.enqueued > 0 || report.suppressed > 0 {
-            tracing::info!(
-                target: "custos::cli",
-                event = event.event_type.as_str(),
-                enqueued = report.enqueued,
-                suppressed = report.suppressed,
-                "notification dispatched"
-            );
-        }
-    }));
 
     // Crash recovery first (§6.6): mid-execution attempts become
     // OutcomeUnknown; they are never blindly re-executed.

@@ -343,6 +343,55 @@ impl Store {
         .map_err(Into::into)
     }
 
+    /// Recent probe evidence, newest first.
+    pub fn recent_probe_results(&self, limit: u32) -> Result<Vec<ProbeRow>, StoreError> {
+        self.block(move |pool| async move {
+            let rows: Vec<(String, String, i64, String, i64)> = query_as(
+                "SELECT resource_id, probe_name, succeeded, observation, \
+                 collected_at_unix_ms FROM probe_results ORDER BY id DESC LIMIT ?",
+            )
+            .bind(limit)
+            .fetch_all(&pool)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|(resource, probe, succeeded, observation, at)| ProbeRow {
+                    resource_id: resource,
+                    probe_name: probe,
+                    succeeded: succeeded != 0,
+                    observation,
+                    collected_at_unix_ms: at as u64,
+                })
+                .collect())
+        })
+        .map_err(Into::into)
+    }
+
+    /// Latest probe evidence per resource (the persisted health view).
+    pub fn latest_health(&self) -> Result<Vec<ProbeRow>, StoreError> {
+        self.block(move |pool| async move {
+            let rows: Vec<(String, String, i64, String, i64)> = query_as(
+                "SELECT resource_id, probe_name, succeeded, observation, \
+                 collected_at_unix_ms FROM probe_results p \
+                 WHERE id = (SELECT MAX(id) FROM probe_results q WHERE q.resource_id = p.resource_id) \
+                 ORDER BY resource_id",
+            )
+            .fetch_all(&pool)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|(resource, probe, succeeded, observation, at)| ProbeRow {
+                    resource_id: resource,
+                    probe_name: probe,
+                    succeeded: succeeded != 0,
+                    observation,
+                    collected_at_unix_ms: at as u64,
+                })
+                .collect())
+        })
+        .map_err(Into::into)
+    }
+
     /// Enqueues one event for one channel. The event JSON is stored as the
     /// payload; the event id is kept as a column so dedup (docs/guide/
     /// notification.md §8.6) can query it without parsing.
@@ -746,6 +795,16 @@ pub struct IncidentRow {
     pub summary: String,
     pub opened_at_unix_ms: u64,
     pub closed_at_unix_ms: Option<u64>,
+}
+
+/// One probe evidence row, for history queries and the health view.
+#[derive(Debug, Clone)]
+pub struct ProbeRow {
+    pub resource_id: String,
+    pub probe_name: String,
+    pub succeeded: bool,
+    pub observation: String,
+    pub collected_at_unix_ms: u64,
 }
 
 impl RunStore for Store {

@@ -369,7 +369,12 @@ dependencies = [
 name = "custos-core"
 version = "0.1.0"
 dependencies = [
+ "custos-config",
+ "custos-engine",
  "custos-model",
+ "custos-notify",
+ "custos-probe",
+ "custos-store",
  "tracing",
  "tracing-subscriber",
 ]

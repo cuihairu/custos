@@ -15,6 +15,6 @@ mod store;
 pub use config::{PurgeReport, RetentionConfig, StoreConfig, SynchronousPolicy};
 pub use migrations::MIGRATIONS;
 pub use store::{
-    AuditRow, Counts, IncidentRow, NotificationCounts, NotificationQueueRow, RunRow, Store,
-    StoreError,
+    AuditRow, Counts, IncidentRow, NotificationCounts, NotificationQueueRow, ProbeRow, RunRow,
+    Store, StoreError,
 };

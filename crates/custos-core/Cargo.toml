@@ -6,6 +6,11 @@ license.workspace = true
 
 [dependencies]
 custos-model = { workspace = true }
+custos-config = { path = "../custos-config" }
+custos-engine = { path = "../custos-engine" }
+custos-notify = { path = "../custos-notify" }
+custos-probe = { path = "../custos-probe" }
+custos-store = { path = "../custos-store" }
 tracing = "0.1"
 # Default features (fmt + ansi + tracing-log) keep initialization simple;
 # env-filter is excluded — the level comes from a plain RUST_LOG keyword.
