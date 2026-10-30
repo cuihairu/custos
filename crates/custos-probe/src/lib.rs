@@ -6,12 +6,16 @@
 //! the process tree on timeout.
 
 pub mod config;
+pub mod cpu;
+pub mod disk;
 pub mod dns;
 pub mod exec;
 pub mod factory;
 pub mod http;
+pub mod mem;
 pub mod process;
 pub mod scheduler;
+pub mod sys;
 pub mod tcp;
 pub mod tls;
 pub mod tls_cert;

@@ -2,13 +2,16 @@
 //! keep the core small). P0 maps `process` and `custom-command` resources
 //! (docs/guide/probe-diagnosis.md §5.4); more types arrive with P2/P3.
 
+use crate::cpu::CpuProbe;
+use crate::disk::DiskProbe;
 use crate::dns::DnsProbe;
 use crate::exec::ExecProbe;
 use crate::http::HttpProbe;
+use crate::mem::MemProbe;
 use crate::process::ProcessProbe;
 use crate::tcp::TcpProbe;
 use crate::tls_cert::TlsCertProbe;
-use crate::{dns, http, tls_cert, Probe};
+use crate::{cpu, disk, dns, http, mem, tls_cert, Probe};
 use custos_model::Resource;
 use std::time::Duration;
 
@@ -65,6 +68,15 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
             .map_err(|reason| err(reason.as_str())),
         "tls-certificate" => tls_cert::from_config(config)
             .map(|probe: TlsCertProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
+        "disk" => disk::from_config(config)
+            .map(|probe: DiskProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
+        "memory" => mem::from_config(config)
+            .map(|probe: MemProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
+        "cpu" => cpu::from_config(config)
+            .map(|probe: CpuProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
         "custom-command" | "proxy" | "tunnel" | "service" => {
             // Any type may fall back to an exec check command in P0.
@@ -183,5 +195,35 @@ mod tests {
         });
         let probe = build_probe(&resource).unwrap();
         assert_eq!(probe.name(), "tcp");
+    }
+
+    #[test]
+    fn builds_disk_probe() {
+        let mut resource = Resource::new("root", "disk");
+        resource.config = json!({"mount_point": "/", "warn_pct": 85, "crit_pct": 95});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "disk");
+    }
+
+    #[test]
+    fn disk_probe_requires_mount_point() {
+        let resource = Resource::new("root", "disk");
+        assert!(build_probe(&resource).is_err());
+    }
+
+    #[test]
+    fn builds_memory_probe() {
+        let mut resource = Resource::new("mem", "memory");
+        resource.config = json!({"warn_pct": 75, "crit_pct": 90});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "memory");
+    }
+
+    #[test]
+    fn builds_cpu_probe() {
+        let mut resource = Resource::new("cpu", "cpu");
+        resource.config = json!({"warn_load": 0.6, "crit_load": 0.9});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "cpu");
     }
 }
