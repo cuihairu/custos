@@ -1,15 +1,19 @@
 //! Plugin protocol models and capability declarations
 //! (docs/guide/workspace.md: `custos-plugin-api`).
 //!
-//! P1 scope (docs/guide/plugins.md §4.3): versioned JSON-RPC 2.0 over stdio
-//! methods — initialize, describe_capabilities, probe, diagnose,
-//! list_recovery_actions, execute_recovery_action, verify, shutdown.
-//!
-//! The user ruling of 2026-10-29 (docs/guide/plugins.md) also requires builtin
-//! capabilities for common resources and bidirectional Python access (PyO3
-//! outbound, Python scripts inbound under the same plugin contract).
+//! P1 protocol core (docs/guide/plugins.md §4.3–§4.6): versioned JSON-RPC
+//! 2.0 method names over newline-delimited stdio, the eight logical
+//! operations, capability declarations with the eleven mandatory metadata
+//! fields, parameterized operation inputs (never shell text) and wire
+//! limits. Process lifecycle lives in `custos-plugin-host`.
 
-/// Placeholder until the protocol models land in P1.
-pub fn not_yet_implemented() -> &'static str {
-    "custos-plugin-api: JSON-RPC protocol models are planned for P1 (docs/guide/roadmap.md)"
-}
+pub mod capability;
+pub mod limits;
+pub mod rpc;
+
+pub use capability::{AffectedScope, Capability, CapabilityKind, OperationParams};
+pub use limits::{DEFAULT_MAX_MESSAGE_BYTES, MAX_STDERR_RETAINED_BYTES};
+pub use rpc::{
+    error_response, request, response, JsonRpc, Method, Request, RequestId, Response, RpcError,
+    METHOD_PREFIX, PROTOCOL_VERSION,
+};
