@@ -31,6 +31,9 @@ COMMANDS:
     status [--db PATH]         Store counters and recent audit events
     runs [--db PATH]           Recent recovery runs, newest first
     incidents [--db PATH]      Incident history, newest first
+    notify status [--db PATH]  Notification queue counts and recent entries
+    notify retry <ID> [--db PATH]
+                               Requeue a dead-lettered notification
     resources <CONFIG>         List configured resources
     graph <CONFIG>             Dependency graph in topological order
     help                       Print this message";
@@ -50,6 +53,7 @@ fn main() -> ExitCode {
         Some("status") => status(&args[1..]),
         Some("runs") => runs(&args[1..]),
         Some("incidents") => incidents(&args[1..]),
+        Some("notify") => notify(&args[1..]),
         Some("resources") => match args.get(1) {
             Some(path) => resources(path),
             None => missing_arg("resources", "CONFIG"),
@@ -335,6 +339,120 @@ fn incidents(args: &[String]) -> ExitCode {
         }
         Err(err) => {
             eprintln!("error: query failed: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Notification queue: `notify status` (counts + recent entries) and
+/// `notify retry <ID>` (requeue a dead-lettered entry, docs/guide/
+/// notification.md §8.6).
+fn notify(args: &[String]) -> ExitCode {
+    match args.first().map(String::as_str) {
+        Some("status") => notify_status(&args[1..]),
+        Some("retry") => match args.get(1) {
+            Some(id) => match id.parse::<u64>() {
+                Ok(id) => notify_retry(id, &args[2..]),
+                Err(_) => {
+                    eprintln!("error: `notify retry` requires a numeric queue id, got `{id}`");
+                    ExitCode::from(2)
+                }
+            },
+            None => {
+                eprintln!("error: `notify retry` requires a queue ID");
+                ExitCode::from(2)
+            }
+        },
+        other => {
+            eprintln!(
+                "error: unknown notify subcommand `{}` (expected status|retry)",
+                other.unwrap_or("")
+            );
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn notify_status(args: &[String]) -> ExitCode {
+    let path = match db_arg(args, "notify status") {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+    let store = match open_history(&path) {
+        Ok(store) => store,
+        Err(code) => return code,
+    };
+    let counts = match store.notification_counts() {
+        Ok(counts) => counts,
+        Err(err) => {
+            eprintln!("error: query failed: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    println!(
+        "queue: {} total ({} pending, {} sending, {} delivered, {} retry_scheduled, {} dead_letter)",
+        counts.total(),
+        counts.pending,
+        counts.sending,
+        counts.delivered,
+        counts.retry_scheduled,
+        counts.dead_letter
+    );
+    match store.list_notifications(20) {
+        Ok(rows) if rows.is_empty() => {
+            println!("no notifications recorded");
+            ExitCode::SUCCESS
+        }
+        Ok(rows) => {
+            println!(
+                "{:<6} {:<16} {:<28} {:<15} {:<9} NEXT/LAST-ERROR",
+                "ID", "CHANNEL", "EVENT", "STATE", "ATTEMPTS"
+            );
+            for row in rows {
+                let tail = row.last_error.clone().unwrap_or_else(|| {
+                    row.next_attempt_at_unix_ms
+                        .map(|at| format!("next {at}"))
+                        .unwrap_or_default()
+                });
+                println!(
+                    "{:<6} {:<16} {:<28} {:<15} {:<9} {}",
+                    row.id,
+                    row.channel,
+                    row.event.event_type.as_str(),
+                    row.state.as_str(),
+                    row.attempts,
+                    tail
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("error: query failed: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn notify_retry(id: u64, args: &[String]) -> ExitCode {
+    let path = match db_arg(args, "notify retry") {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+    let store = match open_history(&path) {
+        Ok(store) => store,
+        Err(code) => return code,
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    match store.retry_notification(id, now) {
+        Ok(()) => {
+            println!("notification {id} requeued (state: pending, next attempt: now)");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("error: retry failed: {err}");
             ExitCode::FAILURE
         }
     }
