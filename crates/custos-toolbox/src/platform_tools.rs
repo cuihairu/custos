@@ -2,6 +2,16 @@
 //! interface reset wrapped as toolbox capabilities whose `required_permission`
 //! the dispatch layer enforces — an unauthorized call is refused before the
 //! platform adapter ever runs. The adapters themselves never self-authorize.
+//! The two network-affecting operations also share a global mutex (todo.md
+//! P3 223): at most one network operation runs at a time, across resources.
+
+/// The global network-operations mutex (todo.md P3 223 网络操作互斥):
+/// AT MOST ONE network operation (reset, reboot, any future
+/// network-affecting action) may run at a time, regardless of which
+/// resource requested it — concurrent interface changes would race with
+/// each other. A second caller gets a concrete error immediately (never
+/// queues and surprises later).
+static NETWORK_OPS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 use crate::registry::{BuiltinTool, ToolOutcome, ToolboxError, ToolboxErrorKind};
 use custos_plugin_api::{AffectedScope, Capability, CapabilityKind, OperationParams};
@@ -45,6 +55,15 @@ impl BuiltinTool for RebootTool {
                 "reboot requires confirm=\"reboot\" (a second, explicit gate)",
             ));
         }
+        let _guard = match NETWORK_OPS.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return Err(ToolboxError::new(
+                    ToolboxErrorKind::Failed,
+                    "another network operation is already running; refusing to race it",
+                ))
+            }
+        };
         self.controller
             .reboot()
             .map(|_| ToolOutcome::Action {
@@ -104,6 +123,15 @@ impl BuiltinTool for InterfaceResetTool {
                     "`interface` must be a non-empty interface name",
                 )
             })?;
+        let _guard = match NETWORK_OPS.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return Err(ToolboxError::new(
+                    ToolboxErrorKind::Failed,
+                    "another network operation is already running; refusing to race it",
+                ))
+            }
+        };
         self.controller
             .reset(name)
             .map(|_| ToolOutcome::Action {
@@ -181,6 +209,46 @@ mod tests {
         assert!(cap.interrupts_network);
         assert!(cap.interrupts_remote_admin);
         assert_eq!(cap.required_permission, "host.reboot");
+    }
+
+    #[test]
+    fn concurrent_network_operations_never_race() {
+        struct SlowReset;
+        impl custos_platform::NetworkInterfaceController for SlowReset {
+            fn list(&self) -> PlatformResult<Vec<custos_platform::InterfaceStatus>> {
+                Ok(vec![])
+            }
+            fn reset(&self, _name: &str) -> PlatformResult<()> {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                Ok(())
+            }
+        }
+        // Hold the global network mutex like an in-flight operation.
+        let guard = NETWORK_OPS.try_lock().expect("mutex free at test start");
+        let tool = InterfaceResetTool::new(std::sync::Arc::new(SlowReset));
+        let err = tool
+            .execute(&OperationParams {
+                operation_id: "network.interface.reset".into(),
+                resource_id: "wan".into(),
+                run_id: None,
+                args: [("interface".into(), serde_json::json!("eth0"))].into(),
+            })
+            .unwrap_err();
+        assert!(
+            err.message.contains("already running"),
+            "{err}"
+        );
+        drop(guard);
+        // With the mutex free the same call succeeds.
+        let outcome = tool
+            .execute(&OperationParams {
+                operation_id: "network.interface.reset".into(),
+                resource_id: "wan".into(),
+                run_id: None,
+                args: [("interface".into(), serde_json::json!("eth0"))].into(),
+            })
+            .unwrap();
+        assert!(matches!(outcome, ToolOutcome::Action { succeeded: true, .. }));
     }
 
     #[test]
