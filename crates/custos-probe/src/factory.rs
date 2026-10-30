@@ -3,6 +3,7 @@
 //! (docs/guide/probe-diagnosis.md §5.4); more types arrive with P2/P3.
 
 use crate::cpu::CpuProbe;
+use crate::database::DatabaseProbe;
 use crate::disk::DiskProbe;
 use crate::dns::DnsProbe;
 use crate::exec::ExecProbe;
@@ -11,7 +12,7 @@ use crate::mem::MemProbe;
 use crate::process::ProcessProbe;
 use crate::tcp::TcpProbe;
 use crate::tls_cert::TlsCertProbe;
-use crate::{cpu, disk, dns, docker, http, icmp, log, mem, tls_cert, Probe};
+use crate::{cpu, database, disk, dns, docker, http, icmp, log, mem, tls_cert, Probe};
 use custos_model::Resource;
 use std::time::Duration;
 
@@ -86,6 +87,9 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
             .map_err(|reason| err(reason.as_str())),
         "icmp" => icmp::from_config(config)
             .map(|probe: crate::icmp::PingProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
+        "database" => database::from_config(config)
+            .map(|probe: DatabaseProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
         // `service` with a `unit` uses the native service-manager probe
         // (systemd on Linux, SCM on Windows — survey §26.11 #7/#11); with a
@@ -333,6 +337,28 @@ mod tests {
     #[test]
     fn icmp_probe_requires_host() {
         let resource = Resource::new("gw", "icmp");
+        assert!(build_probe(&resource).is_err());
+    }
+
+    #[test]
+    fn builds_database_probe_from_config() {
+        let mut resource = Resource::new("db", "database");
+        resource.config = json!({"kind": "postgres", "host": "db.local", "port": 5432});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "database");
+    }
+
+    #[test]
+    fn database_probe_requires_kind_and_host() {
+        let resource = Resource::new("db", "database");
+        assert!(build_probe(&resource).is_err());
+
+        let mut resource = Resource::new("db", "database");
+        resource.config = json!({"kind": "mysql"});
+        assert!(build_probe(&resource).is_err());
+
+        let mut resource = Resource::new("db", "database");
+        resource.config = json!({"kind": "oracle", "host": "x"});
         assert!(build_probe(&resource).is_err());
     }
 }

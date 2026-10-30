@@ -14,6 +14,10 @@ webpki-roots = "1"
 libc = "0.2"
 x509-parser = "0.16"
 ping = "0.10"
+postgres = { version = "0.19", default-features = false }
+mysql = { version = "28", default-features = false }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+redis = { version = "1.8", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8"

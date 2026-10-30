@@ -4,12 +4,14 @@
 //! Builtin probes (docs/guide/probe-survey.md §26, §26.11 order): process,
 //! exec, HTTP(S) endpoint, TCP port, DNS resolution, TLS certificate
 //! expiry, disk space, memory, CPU load/usage, log keyword, systemd unit,
-//! Windows SCM service, Docker container, and the ICMP ping probe. Every
-//! probe runs natively (std + rustls + ping + windows-service + libc /
-//! windows-sys), never a shell.
+//! Windows SCM service, Docker container, the ICMP ping probe, and database
+//! connectivity (MySQL / PostgreSQL / Redis). Every probe runs natively
+//! (std + rustls + ping + windows-service + mysql + postgres + redis +
+//! libc / windows-sys), never a shell.
 
 pub mod config;
 pub mod cpu;
+pub mod database;
 pub mod disk;
 pub mod dns;
 pub mod docker;
