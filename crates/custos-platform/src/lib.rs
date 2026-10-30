@@ -20,6 +20,7 @@ pub mod init_systems;
 pub mod init_systems;
 #[cfg(not(target_os = "macos"))]
 pub mod linux;
+pub mod openwrt;
 pub mod windows;
 
 pub use capability::PlatformCapabilitySet;
