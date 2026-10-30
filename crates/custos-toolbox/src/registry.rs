@@ -91,10 +91,12 @@ impl ToolRegistry {
     /// command execution and process status today.
     pub fn with_builtin_tools() -> Self {
         let mut registry = Self::new();
-        registry.register_builtin(Box::new(crate::exec_tool::ExecTool::new()));
+        registry
+            .register_builtin(Box::new(crate::exec_tool::ExecTool::new()))
+            .expect("builtin operation ids are unique");
         registry
             .register_builtin(Box::new(crate::process_tool::ProcessStatusTool::new()))
-            .expect("unique operation ids");
+            .expect("builtin operation ids are unique");
         registry
     }
 
