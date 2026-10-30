@@ -12,7 +12,9 @@ use crate::mem::MemProbe;
 use crate::process::ProcessProbe;
 use crate::tcp::TcpProbe;
 use crate::tls_cert::TlsCertProbe;
-use crate::{cpu, database, disk, dns, docker, http, icmp, log, mem, netif, tls_cert, Probe};
+use crate::{
+    cpu, database, disk, dns, docker, http, icmp, log, mem, netif, proxy, tls_cert, Probe,
+};
 use custos_model::Resource;
 use std::time::Duration;
 
@@ -94,6 +96,9 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
         "default-gateway" => netif::gateway_from_config(config)
             .map(|probe: crate::netif::GatewayProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
+        "proxy" => proxy::from_config(config)
+            .map(|probe: crate::proxy::ProxyProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
         "database" => database::from_config(config)
             .map(|probe: DatabaseProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
@@ -128,7 +133,7 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
                 exec_probe(config, resource)
             }
         }
-        "custom-command" | "proxy" | "tunnel" => exec_probe(config, resource),
+        "custom-command" | "tunnel" => exec_probe(config, resource),
         other => Err(err(&format!(
             "no builtin probe for type `{other}` in P0 (docs/guide/probe-diagnosis.md §5.4)"
         ))),
@@ -343,6 +348,16 @@ mod tests {
     #[test]
     fn icmp_probe_requires_host() {
         let resource = Resource::new("gw", "icmp");
+        assert!(build_probe(&resource).is_err());
+    }
+
+    #[test]
+    fn builds_proxy_probe() {
+        let mut resource = Resource::new("px", "proxy");
+        resource.config = json!({"proxy": "127.0.0.1:7890"});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "proxy");
+        let resource = Resource::new("px", "proxy");
         assert!(build_probe(&resource).is_err());
     }
 

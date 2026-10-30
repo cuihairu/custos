@@ -169,19 +169,28 @@ mod tests {
 
     #[test]
     fn closed_port_reports_unhealthy() {
-        // Bind then drop: the port is free and nothing listens on it.
-        let port = {
-            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-            listener.local_addr().unwrap().port()
-        };
-        let report = probe("127.0.0.1", port).probe(&resource());
-        assert!(!report.succeeded);
-        assert_eq!(report.status, HealthStatus::Unhealthy);
-        assert!(
-            report.observation.contains("refused"),
-            "{}",
-            report.observation
-        );
+        // Bind then drop: the port is free. A freshly-freed ephemeral port
+        // can be grabbed by a concurrent test's listener, so retry with a
+        // fresh port until nothing answers (bounded).
+        let mut last = None;
+        for _ in 0..5 {
+            let port = {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                listener.local_addr().unwrap().port()
+            };
+            let report = probe("127.0.0.1", port).probe(&resource());
+            if report.status == HealthStatus::Unhealthy {
+                assert!(!report.succeeded);
+                assert!(
+                    report.observation.contains("refused"),
+                    "{}",
+                    report.observation
+                );
+                return;
+            }
+            last = Some(report);
+        }
+        panic!("no freed port stayed closed in 5 attempts: {last:?}");
     }
 
     #[test]

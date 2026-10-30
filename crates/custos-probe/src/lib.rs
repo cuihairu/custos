@@ -23,6 +23,7 @@ pub mod log;
 pub mod mem;
 pub mod netif;
 pub mod process;
+pub mod proxy;
 pub mod scheduler;
 pub mod sys;
 pub mod systemd;
