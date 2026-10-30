@@ -14,15 +14,18 @@ pub mod health;
 pub mod ids;
 pub mod recovery;
 pub mod resource;
+pub mod snapshot;
 
 pub use audit::AuditEvent;
-pub use dependency::{Dependency, DependencyRequirement, HealthCondition};
+pub use dependency::{AlternativeGroup, Dependency, DependencyRequirement, HealthCondition};
 pub use diagnosis::{Diagnosis, FaultCode};
 pub use evidence::Evidence;
 pub use graph::{DependencyGraph, GraphError};
 pub use health::HealthStatus;
 pub use ids::{ActionId, IncidentId, RecoveryRunId, ResourceId};
 pub use recovery::{
-    ActionAttempt, ActionOutcome, RecoveryAction, RecoveryRun, RecoveryRunStatus, TransitionError,
+    ActionAttempt, ActionOutcome, ActionSpec, FailureHandling, RecoveryPlan, RecoveryRun,
+    RecoveryRunStatus, RiskLevel, TransitionError, VerificationResult,
 };
-pub use resource::{HealthPolicy, Resource};
+pub use resource::{HealthPolicy, RecoveryPolicy, Resource};
+pub use snapshot::ResourceHealthSnapshot;

@@ -1,7 +1,8 @@
 //! Recovery execution model and the RecoveryRun state machine
 //! (docs/guide/recovery-engine.md §6.1–§6.6).
 
-use crate::diagnosis::Diagnosis;
+use crate::dependency::HealthCondition;
+use crate::diagnosis::{Diagnosis, FaultCode};
 use crate::ids::{ActionId, IncidentId, RecoveryRunId, ResourceId};
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +16,66 @@ pub enum ActionOutcome {
     TimedOut,
     Cancelled,
     OutcomeUnknown,
+}
+
+/// Explicit, parameterized action input (docs/guide/plugins.md §4.3: no
+/// arbitrary user input piped into shell commands).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionSpec {
+    pub program: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+/// What happens when a plan's attempts are exhausted (§6.3 failure handling).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureHandling {
+    /// Continue with the next candidate plan.
+    TryNextPlan,
+    /// Stop automatic handling and escalate.
+    Escalate,
+    /// Stop automatic handling without escalation.
+    Stop,
+}
+
+/// Risk classification (docs/guide/security.md §12.2). High-risk actions
+/// require explicit configuration opt-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskLevel {
+    Low,
+    Medium,
+    High,
+}
+
+/// One candidate recovery plan with all mandatory metadata (§6.3).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecoveryPlan {
+    pub plan_id: String,
+    /// Fault codes this plan applies to; the engine selects by diagnosis,
+    /// never unconditionally.
+    pub applicable_faults: Vec<FaultCode>,
+    #[serde(default)]
+    pub preconditions: Vec<HealthCondition>,
+    pub risk_level: RiskLevel,
+    /// Action to execute when the plan is selected.
+    pub action: ActionSpec,
+    pub timeout_ms: u64,
+    pub max_attempts: u32,
+    pub cooldown_ms: u64,
+    pub idempotent: bool,
+    /// Health condition that confirms the recovery.
+    pub verification: HealthCondition,
+    pub failure_handling: FailureHandling,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compensation: Option<ActionId>,
+}
+
+impl RecoveryPlan {
+    pub fn applies_to(&self, fault: FaultCode) -> bool {
+        self.applicable_faults.contains(&fault)
+    }
 }
 
 /// States of a RecoveryRun (docs/guide/recovery-engine.md §6.1).
@@ -84,33 +145,28 @@ pub struct TransitionError {
     pub to: RecoveryRunStatus,
 }
 
-/// One recorded attempt to execute a recovery action.
+/// One recorded attempt to execute a recovery action. `None` outcome means
+/// the attempt was persisted as `Executing` and the process crashed before
+/// the result was recorded — the outcome is unknown (§7.3 step 6).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActionAttempt {
     pub action_id: ActionId,
-    pub outcome: ActionOutcome,
+    pub plan_id: String,
+    pub attempt_no: u32,
+    pub outcome: Option<ActionOutcome>,
     pub started_at_unix_ms: u64,
     pub finished_at_unix_ms: Option<u64>,
 }
 
-/// One candidate recovery action (docs/guide/recovery-engine.md §6.3).
+/// Independent verification of a recovery (§6.1 Verifying): never a command
+/// exit code.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RecoveryAction {
-    pub action_id: ActionId,
-    /// Applicable fault types; the engine selects by diagnosis, not blindly.
-    pub applicable_faults: Vec<crate::diagnosis::FaultCode>,
-    pub risk_level: RiskLevel,
-    pub max_attempts: u32,
-}
-
-/// Risk classification (docs/guide/security.md §12.2). High-risk actions
-/// require explicit configuration opt-in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RiskLevel {
-    Low,
-    Medium,
-    High,
+pub struct VerificationResult {
+    pub resource_id: ResourceId,
+    pub passed: bool,
+    pub summary: String,
+    pub evidence_refs: Vec<String>,
+    pub checked_at_unix_ms: u64,
 }
 
 /// One complete failure-handling process.
@@ -123,11 +179,32 @@ pub struct RecoveryRun {
     pub trigger: String,
     pub diagnosis: Option<Diagnosis>,
     pub action_attempts: Vec<ActionAttempt>,
+    pub verification_results: Vec<VerificationResult>,
     pub started_at_unix_ms: u64,
     pub updated_at_unix_ms: u64,
 }
 
 impl RecoveryRun {
+    pub fn new(
+        id: RecoveryRunId,
+        resource_id: ResourceId,
+        trigger: &str,
+        now_unix_ms: u64,
+    ) -> Self {
+        Self {
+            id,
+            resource_id,
+            incident_id: None,
+            status: RecoveryRunStatus::Observing,
+            trigger: trigger.to_owned(),
+            diagnosis: None,
+            action_attempts: Vec::new(),
+            verification_results: Vec::new(),
+            started_at_unix_ms: now_unix_ms,
+            updated_at_unix_ms: now_unix_ms,
+        }
+    }
+
     /// Moves the run to `next` through the checked transition.
     pub fn transition_to(&mut self, next: RecoveryRunStatus) -> Result<(), TransitionError> {
         self.status = self.status.transition_to(next)?;
@@ -142,17 +219,12 @@ mod tests {
 
     #[test]
     fn happy_path_transitions_are_legal() {
-        let mut run = RecoveryRun {
-            id: RecoveryRunId::new("run-1"),
-            resource_id: ResourceId::new("proxy.egress"),
-            incident_id: Some(IncidentId::new("inc-1")),
-            status: RecoveryRunStatus::Observing,
-            trigger: "failure threshold reached".into(),
-            diagnosis: None,
-            action_attempts: vec![],
-            started_at_unix_ms: 0,
-            updated_at_unix_ms: 0,
-        };
+        let mut run = RecoveryRun::new(
+            RecoveryRunId::new("run-1"),
+            ResourceId::new("proxy.egress"),
+            "failure threshold reached",
+            0,
+        );
         // Observing -> ProblemDetected -> Diagnosing -> Planning ->
         // ResolvingDependencies -> Executing -> Verifying -> Recovered
         for next in [
@@ -206,6 +278,19 @@ mod tests {
     }
 
     #[test]
+    fn waiting_resumes_to_planning_or_cancels_only() {
+        RecoveryRunStatus::Waiting
+            .transition_to(RecoveryRunStatus::Planning)
+            .unwrap();
+        RecoveryRunStatus::Waiting
+            .transition_to(RecoveryRunStatus::Cancelled)
+            .unwrap();
+        assert!(RecoveryRunStatus::Waiting
+            .transition_to(RecoveryRunStatus::Executing)
+            .is_err());
+    }
+
+    #[test]
     fn action_outcome_serializes_all_variants() {
         for outcome in [
             ActionOutcome::Succeeded,
@@ -218,5 +303,28 @@ mod tests {
             let back: ActionOutcome = serde_json::from_str(&json).unwrap();
             assert_eq!(back, outcome);
         }
+    }
+
+    #[test]
+    fn plan_applies_by_fault_code() {
+        let plan = RecoveryPlan {
+            plan_id: "restart".into(),
+            applicable_faults: vec![FaultCode::ProcessExited, FaultCode::ServiceStopped],
+            preconditions: vec![],
+            risk_level: RiskLevel::Low,
+            action: ActionSpec {
+                program: "true".into(),
+                args: vec![],
+            },
+            timeout_ms: 5_000,
+            max_attempts: 2,
+            cooldown_ms: 10_000,
+            idempotent: true,
+            verification: HealthCondition::StatusIs(crate::health::HealthStatus::Healthy),
+            failure_handling: FailureHandling::TryNextPlan,
+            compensation: None,
+        };
+        assert!(plan.applies_to(FaultCode::ProcessExited));
+        assert!(!plan.applies_to(FaultCode::DnsFailure));
     }
 }

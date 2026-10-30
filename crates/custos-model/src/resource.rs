@@ -2,6 +2,7 @@
 
 use crate::dependency::Dependency;
 use crate::ids::ResourceId;
+use crate::recovery::RecoveryPlan;
 use serde::{Deserialize, Serialize};
 
 /// Health decision policy for one resource.
@@ -24,14 +25,18 @@ impl Default for HealthPolicy {
     }
 }
 
-/// Recovery constraints for one resource. Candidate plans are added in P0
-/// engine work; the model only carries the limits.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// Recovery constraints for one resource: ordered candidate plans plus the
+/// limits that guard them (docs/guide/recovery-engine.md §6.3, §6.5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct RecoveryPolicy {
-    /// Maximum recovery attempts for this resource.
+    /// Ordered candidate plans; the engine selects by diagnosis.
+    #[serde(default)]
+    pub plans: Vec<RecoveryPlan>,
+    /// Maximum recovery attempts for this resource across plans.
     pub max_attempts: Option<u32>,
     /// High-risk actions require explicit configuration opt-in
     /// (docs/guide/security.md §12.2).
+    #[serde(default)]
     pub allow_high_risk: bool,
 }
 

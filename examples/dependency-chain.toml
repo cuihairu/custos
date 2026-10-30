@@ -1,0 +1,47 @@
+# Dependency chain: tunnel depends on proxy depends on network.
+# Recovering the tunnel recovers the proxy first (docs/guide/resources.md §3.6).
+version = 1
+
+[[alternative_groups]]
+id = "egress"
+members = ["proxy-primary", "proxy-backup"]
+required = 1
+
+[[resources]]
+id = "network"
+type = "network-connectivity"
+display_name = "base connectivity"
+
+[resources.probe]
+command = ["sh", "-c", "ip route show default >/dev/null"]
+interval_ms = 5000
+
+[[resources]]
+id = "proxy-primary"
+type = "proxy"
+display_name = "primary egress proxy"
+depends_on = ["network"]
+
+[resources.probe]
+command = ["sh", "-c", "exit 0"]
+
+[[resources]]
+id = "proxy-backup"
+type = "proxy"
+display_name = "backup egress proxy"
+depends_on = ["network"]
+
+[resources.probe]
+command = ["sh", "-c", "exit 1"]
+
+[[resources]]
+id = "tunnel"
+type = "tunnel"
+display_name = "cloudflare tunnel"
+dependencies = [
+  # Conditional: only binding in proxy mode.
+  { resource = "network", requirement = "conditional", conditional_on = "proxy_mode", condition = { status_is = "healthy" } },
+]
+
+[resources.probe]
+command = ["sh", "-c", "exit 0"]

@@ -68,7 +68,11 @@ fn validate(path: &str) -> ExitCode {
     };
     match custos_config::load(&config_text) {
         Ok(config) => {
-            println!("configuration OK: {} resources", config.resource_ids.len());
+            println!(
+                "configuration OK: {} resources, {} alternative groups",
+                config.resources.len(),
+                config.alternative_groups.len()
+            );
             println!("dependency graph: acyclic, all references resolved");
             ExitCode::SUCCESS
         }

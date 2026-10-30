@@ -21,6 +21,7 @@ version = "0.1.0"
 dependencies = [
  "custos-model",
  "serde",
+ "serde_json",
  "thiserror",
  "toml",
 ]

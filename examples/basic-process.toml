@@ -1,0 +1,32 @@
+# Basic process supervision: watch a PID file and restart via plan.
+version = 1
+
+[[resources]]
+id = "worker"
+type = "process"
+display_name = "demo worker"
+
+[resources.probe]
+pid_file = "/tmp/custos-demo-worker.pid"
+interval_ms = 1000
+timeout_ms = 2000
+
+[resources.health_policy]
+failure_threshold = 2
+success_threshold = 2
+
+[[resources.recovery_policy.plans]]
+plan_id = "restart"
+applicable_faults = ["process_exited", "probe_timeout"]
+risk = "low"
+idempotent = false
+timeout_ms = 5000
+max_attempts = 2
+cooldown_ms = 5000
+
+[resources.recovery_policy.plans.action]
+program = "sh"
+args = ["-c", "sleep 30 & echo $! > /tmp/custos-demo-worker.pid"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"

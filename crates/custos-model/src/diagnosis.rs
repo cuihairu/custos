@@ -33,6 +33,9 @@ pub struct Diagnosis {
     /// probability.
     pub confidence: Option<f32>,
     pub affected_resources: Vec<ResourceId>,
+    /// References to the evidence this judgment is based on.
+    #[serde(default)]
+    pub evidence_refs: Vec<String>,
 }
 
 #[cfg(test)]
@@ -46,12 +49,13 @@ mod tests {
     }
 
     #[test]
-    fn diagnosis_roundtrips() {
+    fn diagnosis_roundtrips_with_evidence_refs() {
         let diagnosis = Diagnosis {
             fault_code: FaultCode::ProxyConnectionFailed,
             summary: "local port open but auth rejected".into(),
             confidence: Some(0.8),
             affected_resources: vec![ResourceId::new("proxy.egress")],
+            evidence_refs: vec!["probe:proxy.port".into(), "probe:proxy.auth".into()],
         };
         let back: Diagnosis =
             serde_json::from_str(&serde_json::to_string(&diagnosis).unwrap()).unwrap();
