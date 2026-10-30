@@ -56,8 +56,8 @@
 - [x] 磁盘空间：statvfs（Linux）/GetDiskFreeSpaceExW（Windows），挂载点 + warn/crit 双阈值 `32ce953`（`disk.rs`；`disk` 资源类型；Windows cfg 路径已过 x86_64-pc-windows-gnu 交叉检查）
 - [x] 内存使用：/proc/meminfo MemAvailable（Linux）/GlobalMemoryStatusEx（Windows） `32ce953`（`mem.rs`；可选 swap 检查 `check_swap`；`memory` 资源类型）
 - [x] CPU 使用率 / 负载：/proc/loadavg 与核数比值 + /proc/stat 差分采样 `32ce953`（`cpu.rs`；差分采样跨两次 probe 调用，Windows GetSystemTimes；`cpu` 资源类型；custos-probe 87/87 绿）
-- [ ] 日志文件关键字监控：增量 offset + 正则匹配，轮转按 inode 检测，命中即 Unhealthy
-- [ ] systemd unit 状态：systemctl show ActiveState/SubState 归一化（Linux service 原生实现）
+- [x] 日志文件关键字监控：增量 offset + 正则匹配，轮转按 inode 检测，命中即 Unhealthy `f488ab4`（`log.rs`；首次探测在文件末尾建立基线不误报，同一条目不重复触发；`log` 资源类型；custos-probe 97/97 绿）
+- [x] systemd unit 状态：systemctl show ActiveState/SubState 归一化（Linux service 原生实现） `cecb9eb`（`systemd.rs`；argv 无 shell，/run/systemd/system 检测，service 类型配 unit 时走原生、否则回退 exec；custos-probe 102/102 绿）
 - [ ] Docker 容器状态：docker.sock HTTP API 或 docker inspect，running/重启次数
 - [ ] ICMP Ping：raw socket，无权限时 TCP ping 兜底（Windows 用 IcmpSendEcho API）
 - [ ] Windows 服务状态：sc query / QueryServiceStatus，StartType=auto 且 state≠RUNNING 判 Unhealthy
