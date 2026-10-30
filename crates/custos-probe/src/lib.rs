@@ -6,6 +6,7 @@
 //! the process tree on timeout.
 
 pub mod config;
+pub mod dns;
 pub mod exec;
 pub mod factory;
 pub mod http;

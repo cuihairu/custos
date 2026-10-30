@@ -2,11 +2,12 @@
 //! keep the core small). P0 maps `process` and `custom-command` resources
 //! (docs/guide/probe-diagnosis.md §5.4); more types arrive with P2/P3.
 
+use crate::dns::DnsProbe;
 use crate::exec::ExecProbe;
 use crate::http::HttpProbe;
 use crate::process::ProcessProbe;
 use crate::tcp::TcpProbe;
-use crate::{http, Probe};
+use crate::{dns, http, Probe};
 use custos_model::Resource;
 use std::time::Duration;
 
@@ -54,6 +55,9 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
                 timeout: Duration::from_millis(timeout_ms),
             }))
         }
+        "dns" => dns::from_config(config)
+            .map(|probe: DnsProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
         "custom-command"
         | "proxy"
         | "tunnel"
@@ -135,6 +139,20 @@ mod tests {
 
         let mut resource = Resource::new("db", "network-connectivity");
         resource.config = json!({"host": "127.0.0.1"});
+        assert!(build_probe(&resource).is_err());
+    }
+
+    #[test]
+    fn builds_dns_probe_from_config() {
+        let mut resource = Resource::new("dns-api", "dns");
+        resource.config = json!({"name": "example.com", "server": "1.1.1.1"});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "dns");
+    }
+
+    #[test]
+    fn dns_probe_requires_name() {
+        let resource = Resource::new("dns-api", "dns");
         assert!(build_probe(&resource).is_err());
     }
 }
