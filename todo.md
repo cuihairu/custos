@@ -282,5 +282,5 @@
 - [ ] 审核发现：`AlternativeGroup`（N-of-M 语义）在 config 中完成校验并存入 `ValidatedConfig.alternative_groups`，但引擎的 `dependencies_satisfied` 只遍历 `Dependency` 边，从未消费 `AlternativeGroup`/`satisfied_by`，N-of-M 备份组在恢复依赖解析中实际不生效。(crates/custos-engine/src/engine.rs:774)
 - [ ] 审核发现：`ResourceHealthSnapshot::record_probe` 仅接收 `succeeded: bool`，未区分 `Unreachable`（探针无法取得结果）与 `Unhealthy`（资源确实故障）；Unreachable 会按失败计数累积并可能翻转为 `Unhealthy`，与「Unreachable ≠ Unhealthy」的设计约定冲突，诊断可能误判。(crates/custos-model/src/snapshot.rs:38)
 - [ ] 审核发现：README 声称「Python 脚本扩展（双向）：PyO3 绑定 + Python 脚本执行」，但提交范围内无任何 `pyo3` 依赖或 Python 代码，该能力尚未实现，文档超前于代码。(README.md:32)
-- [ ] 审核发现：集成测试 `respawn_worker_end_to_end` 在完整工作区套件并行运行时偶发失败（断言 run.status == Recovered 得 Escalated），单测单独跑恒定通过，疑似测试对进程/定时竞态敏感（flaky）。(crates/custos-engine/tests/vertical.rs:166)
+- [x] 审核发现：集成测试 `respawn_worker_end_to_end` 在完整工作区套件并行运行时偶发失败（断言 run.status == Recovered 得 Escalated），单测单独跑恒定通过，疑似测试对进程/定时竞态敏感（flaky）。(crates/custos-engine/tests/vertical.rs:166) `dcb27cf`（修复：恢复动作在返回前等待新 pid 真正存活（`kill -0`），消除「动作返回→verify 读到旧 pid」竞态；`cargo test -p custos-engine --test vertical respawn_worker_end_to_end` 30 次隔离零失败 + `cargo test --workspace` 全绿）
 - [ ] 审核发现：工作区当前处于未完成的 rebase 状态，`crates/custos-probe/src/factory.rs` 存在未解析的 `<<<<<<< HEAD / ======= / >>>>>>> f127163` 冲突标记，工作树无法 `cargo build`（提交的 HEAD 版本无此问题，冲突仅在工作树）。。(crates/custos-probe/src/factory.rs:66)
