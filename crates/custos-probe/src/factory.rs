@@ -11,7 +11,7 @@ use crate::mem::MemProbe;
 use crate::process::ProcessProbe;
 use crate::tcp::TcpProbe;
 use crate::tls_cert::TlsCertProbe;
-use crate::{cpu, disk, dns, docker, http, log, mem, systemd, tls_cert, Probe};
+use crate::{cpu, disk, dns, docker, http, icmp, log, mem, tls_cert, Probe};
 use custos_model::Resource;
 use std::time::Duration;
 
@@ -84,13 +84,16 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
         "docker-container" => docker::from_config(config)
             .map(|probe: crate::docker::DockerProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
+        "icmp" => icmp::from_config(config)
+            .map(|probe: crate::icmp::PingProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
         // `service` with a `unit` uses the native systemd probe on Linux
         // (survey §26.11 #7); with a `command` it falls back to exec.
         "service" => {
             if config["unit"].is_string() {
                 #[cfg(target_os = "linux")]
                 {
-                    systemd::from_config(config)
+                    crate::systemd::from_config(config)
                         .map(|probe: crate::systemd::SystemdProbe| {
                             Box::new(probe) as Box<dyn Probe>
                         })
@@ -305,6 +308,20 @@ mod tests {
     #[test]
     fn docker_probe_requires_container() {
         let resource = Resource::new("web", "docker-container");
+        assert!(build_probe(&resource).is_err());
+    }
+
+    #[test]
+    fn builds_icmp_probe_from_host() {
+        let mut resource = Resource::new("gw", "icmp");
+        resource.config = json!({"host": "example.com", "timeout_ms": 2000, "fallback_port": 443});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "icmp");
+    }
+
+    #[test]
+    fn icmp_probe_requires_host() {
+        let resource = Resource::new("gw", "icmp");
         assert!(build_probe(&resource).is_err());
     }
 }

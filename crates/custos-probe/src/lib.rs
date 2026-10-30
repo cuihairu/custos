@@ -5,7 +5,7 @@
 //! exec, HTTP(S) endpoint, TCP port, DNS resolution, TLS certificate
 //! expiry, disk space, memory, CPU load/usage, log keyword, systemd unit,
 //! Docker container, and the ICMP ping probe. Every probe runs natively
-//! (std + rustls + libc / windows-sys), never a shell.
+//! (std + rustls + ping + libc / windows-sys), never a shell.
 
 pub mod config;
 pub mod cpu;
@@ -15,6 +15,7 @@ pub mod docker;
 pub mod exec;
 pub mod factory;
 pub mod http;
+pub mod icmp;
 pub mod log;
 pub mod mem;
 pub mod process;
