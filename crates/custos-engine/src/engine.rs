@@ -422,22 +422,14 @@ impl Engine {
         fault: FaultCode,
         step: &mut u32,
     ) -> RecoveryRun {
-        // Resolve dependencies before touching the resource (§3.6).
+        // Position the run for dependency resolution; every attempt
+        // re-resolves dependencies before it executes (§3.6, §16.3 case 5:
+        // a dependency re-faulting mid-recovery blocks the next upstream
+        // action).
         run.transition_to(RecoveryRunStatus::Planning).ok();
         run.transition_to(RecoveryRunStatus::ResolvingDependencies)
             .ok();
         self.store.save_run(&run);
-        if !self.dependencies_satisfied(id, &mut run, step) {
-            // Either escalated, or suspended and registered as a waiter.
-            return run;
-        }
-        self.store.save_step(
-            &run.id,
-            bump(step),
-            "resolving_dependencies",
-            "all binding dependencies healthy",
-            self.clock.now_unix_ms(),
-        );
 
         // Select and execute applicable plans, re-diagnosing between them.
         let plans = self.managed[id].resource.recovery_policy.plans.clone();
@@ -454,9 +446,27 @@ impl Engine {
             let attempts_allowed = plan.max_attempts.min(policy_max);
             for attempt_no in 1..=attempts_allowed {
                 // The state machine always passes through Planning before an
-                // execution (§6.1); execute_attempt adds the
-                // ResolvingDependencies hop into Executing.
+                // execution (§6.1).
                 run.transition_to(RecoveryRunStatus::Planning).ok();
+                run.transition_to(RecoveryRunStatus::ResolvingDependencies)
+                    .ok();
+                self.store.save_run(&run);
+                // Fresh dependency check before EVERY attempt: state must be
+                // re-read, never assumed (§2.3 rules 4/5). Stops the drive on
+                // escalation or suspension.
+                if !self.dependencies_satisfied(id, &mut run, step) {
+                    if run.status != RecoveryRunStatus::Waiting {
+                        self.apply_cooldown(id);
+                    }
+                    return run;
+                }
+                self.store.save_step(
+                    &run.id,
+                    bump(step),
+                    "resolving_dependencies",
+                    "all binding dependencies healthy",
+                    self.clock.now_unix_ms(),
+                );
                 if self.budget_gate(id, &run, plan).is_err() {
                     self.finish_escalated(&mut run, id);
                     self.apply_cooldown(id);
@@ -1215,6 +1225,104 @@ mod tests {
         );
         assert_eq!(seeded_run.status, RecoveryRunStatus::Cancelled);
         assert!(runs.is_empty(), "healthy resource needs no new run");
+    }
+
+    /// Fault injection §16.3 case 5: the dependency re-faults while the
+    /// dependent is mid-recovery; the next attempt must NOT run upstream.
+    #[test]
+    fn dependency_refault_between_attempts_blocks_next_action() {
+        let (mut engine, store, exec, _clock) = test_engine_with_clock(
+            vec![
+                // db has no recovery plan: once it re-faults it stays broken.
+                resource("db", vec![], vec![]),
+                resource(
+                    "app",
+                    vec![plan("restart", 2, RiskLevel::Low)],
+                    vec![required_dep("db")],
+                ),
+            ],
+            vec![
+                (ResourceId::new("db"), vec![]),
+                (ResourceId::new("app"), vec![ResourceId::new("db")]),
+            ],
+            // db: own observe healthy; dep-check before attempt 1 healthy;
+            // before attempt 2 unhealthy; still unhealthy after the
+            // (stopped) recovery attempt.
+            vec![vec![true, true, false, false], vec![false, false]],
+            // Only attempt 1 of the app may execute.
+            vec![ActionOutcome::Succeeded],
+        );
+        let runs = engine.tick();
+        let app_run = runs
+            .iter()
+            .find(|r| r.resource_id.as_str() == "app")
+            .expect("app run");
+        assert_eq!(app_run.status, RecoveryRunStatus::Escalated);
+        assert_eq!(
+            app_run.action_attempts.len(),
+            1,
+            "attempt 2 must be blocked by the re-faulted dependency"
+        );
+        assert_eq!(exec.remaining(), 0, "no second action executed");
+        assert!(store.event_types().contains(&"dependency.unsatisfied"));
+    }
+
+    /// Fault injection §16.3 case 8: every store write fails. The engine
+    /// degrades to running without persistence — recovery still completes
+    /// and nothing panics (a broken observability path must not break the
+    /// healing path).
+    #[test]
+    fn failing_store_degrades_without_stalling_recovery() {
+        struct WriteFailingStore;
+        impl crate::events::RunStore for WriteFailingStore {
+            fn save_run(&self, _run: &RecoveryRun) {}
+            fn save_attempt(
+                &self,
+                _run_id: &RecoveryRunId,
+                _attempt: &custos_model::ActionAttempt,
+            ) {
+            }
+            fn save_verification(&self, _result: &VerificationResult) {}
+            fn emit(&self, _event: EngineEvent) {}
+            fn unfinished_runs(&self) -> Vec<RecoveryRun> {
+                Vec::new()
+            }
+        }
+
+        let store = Arc::new(WriteFailingStore);
+        let scripted = Arc::new(ScriptedExecutor::new(vec![ActionOutcome::Succeeded]));
+        let executor: Box<dyn ActionExecutor> = {
+            let scripted = scripted.clone();
+            Box::new(
+                move |action: &custos_model::ActionSpec, timeout: Duration| {
+                    scripted.execute(action, timeout)
+                },
+            )
+        };
+        let svc = resource("svc", vec![plan("restart", 1, RiskLevel::Low)], vec![]);
+        let mut probes = HashMap::new();
+        probes.insert(
+            svc.id.clone(),
+            Box::new(ScriptedProbe::new(vec![false, true])) as Box<dyn Probe>,
+        );
+        let config = ValidatedConfig {
+            resources: vec![svc.clone()],
+            alternative_groups: vec![],
+            graph: DependencyGraph::build(vec![(svc.id.clone(), vec![])]).expect("graph"),
+            permissions: Default::default(),
+        };
+        let mut engine = Engine::new(
+            &config,
+            probes,
+            executor,
+            store,
+            Arc::new(crate::clock::FakeClock::new(1_000)),
+        );
+        // Must not panic despite every persistence call failing.
+        let runs = engine.tick();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, RecoveryRunStatus::Recovered);
+        assert_eq!(runs[0].action_attempts.len(), 1);
     }
 
     #[test]

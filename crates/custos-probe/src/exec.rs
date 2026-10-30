@@ -282,8 +282,12 @@ mod tests {
     #[test]
     fn timeout_kills_process_tree() {
         let start = Instant::now();
+        // Unique durations so the assertion can find exactly our orphans.
+        // A per-run unique duration so stale `sleep`s from earlier test
+        // runs cannot pollute the orphan check.
+        let marker = format!("sleep 187.{}", std::process::id());
         let result = run_controlled(
-            &argv("sh", &["-c", "sleep 30 & sleep 30"]),
+            &argv("sh", &["-c", &format!("{marker} & {marker}")]),
             Duration::from_millis(200),
             4096,
         );
@@ -291,6 +295,19 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_secs(2),
             "must not wait for the full sleep"
+        );
+        // Fault injection (docs/guide/testing.md §16.3): after a timeout the
+        // WHOLE process tree must be gone — no orphaned children survive.
+        // (pgrep exits non-zero when nothing matches.)
+        let orphans = Command::new("pgrep")
+            .arg("-f")
+            .arg(&marker)
+            .output()
+            .expect("pgrep runs");
+        assert!(
+            !orphans.status.success(),
+            "process tree survived the timeout: {}",
+            String::from_utf8_lossy(&orphans.stdout)
         );
     }
 

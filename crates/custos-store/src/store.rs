@@ -1003,6 +1003,17 @@ mod tests {
         assert_eq!(survivors[0].id, "run-active");
     }
 
+    /// Fault injection §16.3 case 8 (store side): an unwritable location
+    /// must surface a clear error at open, never a silent no-store.
+    #[test]
+    fn open_failure_on_missing_directory_is_reported() {
+        let err = match Store::open("/nonexistent-custos-dir/custos.db") {
+            Err(err) => err,
+            Ok(_) => panic!("opened a database in a nonexistent directory"),
+        };
+        assert!(err.to_string().contains("database error"));
+    }
+
     #[test]
     fn list_runs_orders_newest_first() {
         let dir = tempfile::tempdir().expect("tempdir");
