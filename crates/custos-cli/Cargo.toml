@@ -16,3 +16,4 @@ custos-engine = { path = "../custos-engine" }
 custos-probe = { path = "../custos-probe" }
 custos-store = { path = "../custos-store" }
 custos-notify = { path = "../custos-notify" }
+tracing = "0.1"

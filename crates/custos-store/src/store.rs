@@ -410,7 +410,7 @@ impl RunStore for Store {
                 .await
             }
         }) {
-            eprintln!("custos-store: save_run failed: {err}");
+            tracing::error!(target: "custos::store", run = run.id.as_str(), error = %err, "save_run failed");
         }
     }
 
@@ -439,7 +439,7 @@ impl RunStore for Store {
                 .await
             }
         }) {
-            eprintln!("custos-store: save_attempt failed: {err}");
+            tracing::error!(target: "custos::store", run = run_id.as_str(), error = %err, "save_attempt failed");
         }
     }
 
@@ -463,7 +463,7 @@ impl RunStore for Store {
                 .await
             }
         }) {
-            eprintln!("custos-store: save_verification failed: {err}");
+            tracing::error!(target: "custos::store", resource = result.resource_id.as_str(), error = %err, "save_verification failed");
         }
     }
 
@@ -491,7 +491,7 @@ impl RunStore for Store {
                 .await
             }
         }) {
-            eprintln!("custos-store: emit failed: {err}");
+            tracing::error!(target: "custos::store", event = event.event_type(), error = %err, "audit emit failed");
         }
     }
 
@@ -509,7 +509,7 @@ impl RunStore for Store {
                 let mut run: RecoveryRun = match serde_json::from_str(&payload) {
                     Ok(run) => run,
                     Err(err) => {
-                        eprintln!("custos-store: corrupt run `{id}`: {err}");
+                        tracing::error!(target: "custos::store", run = %id, error = %err, "corrupt run row skipped");
                         continue;
                     }
                 };
@@ -541,7 +541,7 @@ impl RunStore for Store {
         match result {
             Ok(runs) => runs,
             Err(err) => {
-                eprintln!("custos-store: unfinished_runs failed: {err}");
+                tracing::error!(target: "custos::store", error = %err, "unfinished_runs failed");
                 Vec::new()
             }
         }

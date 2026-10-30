@@ -6,7 +6,7 @@
 //! `resources`/`graph` for configuration introspection.
 
 use custos_config::ValidatedConfig;
-use custos_engine::{BuiltinExecExecutor, Clock, Engine, SystemClock};
+use custos_engine::{BuiltinExecExecutor, Engine, SystemClock};
 use custos_model::ResourceId;
 use custos_probe::Probe;
 use std::collections::HashMap;
@@ -34,6 +34,7 @@ COMMANDS:
     help                       Print this message";
 
 fn main() -> ExitCode {
+    custos_core::init_tracing();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("validate") => match args.get(1) {
@@ -209,14 +210,13 @@ fn start(path: &str, args: &[String]) -> ExitCode {
         options.db_path
     );
     loop {
-        let started = engine.tick();
-        for run in &started {
-            println!(
-                "[{}] recovery {} for `{}`: {:?}",
-                clock.now_unix_ms(),
-                run.id.as_str(),
-                run.resource_id.as_str(),
-                run.status
+        for run in &engine.tick() {
+            tracing::info!(
+                target: "custos::cli",
+                run = run.id.as_str(),
+                resource = run.resource_id.as_str(),
+                status = ?run.status,
+                "recovery run finished"
             );
         }
         if options.once {

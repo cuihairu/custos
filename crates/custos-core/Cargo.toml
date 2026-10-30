@@ -6,3 +6,7 @@ license.workspace = true
 
 [dependencies]
 custos-model = { workspace = true }
+tracing = "0.1"
+# Default features (fmt + ansi + tracing-log) keep initialization simple;
+# env-filter is excluded — the level comes from a plain RUST_LOG keyword.
+tracing-subscriber = "0.3"

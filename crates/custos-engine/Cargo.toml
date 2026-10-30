@@ -9,6 +9,7 @@ custos-config = { workspace = true }
 custos-model = { workspace = true }
 custos-probe = { path = "../custos-probe" }
 thiserror = { workspace = true }
+tracing = "0.1"
 
 [dev-dependencies]
 custos-config = { workspace = true }

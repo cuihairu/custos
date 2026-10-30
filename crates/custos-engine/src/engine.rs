@@ -143,6 +143,13 @@ impl Engine {
         };
         let snapshot = &mut self.managed.get_mut(id).unwrap().snapshot;
         snapshot.record_probe(report.succeeded, thresholds.0, thresholds.1, now_unix_ms);
+        tracing::debug!(
+            target: "custos::engine",
+            resource = id.as_str(),
+            succeeded = report.succeeded,
+            observation = %report.observation,
+            "probe collected"
+        );
         report
     }
 
@@ -201,6 +208,13 @@ impl Engine {
             fault
         };
         self.store.save_run(&run);
+        tracing::info!(
+            target: "custos::engine",
+            run = run.id.as_str(),
+            resource = id.as_str(),
+            fault = ?fault,
+            "recovery run started"
+        );
 
         // Resolve dependencies before touching the resource (§3.6).
         run.transition_to(RecoveryRunStatus::Planning).ok();
@@ -249,6 +263,13 @@ impl Engine {
                             resource_id: id.clone(),
                             at_unix_ms: at,
                         },
+                    );
+                    tracing::info!(
+                        target: "custos::engine",
+                        run = run.id.as_str(),
+                        resource = id.as_str(),
+                        plan = plan.plan_id.as_str(),
+                        "recovery succeeded and verified"
                     );
                     self.apply_cooldown(id);
                     return run;
@@ -357,6 +378,15 @@ impl Engine {
             outcome,
             at_unix_ms: now,
         });
+        tracing::info!(
+            target: "custos::engine",
+            run = run.id.as_str(),
+            resource = id.as_str(),
+            plan = plan.plan_id.as_str(),
+            attempt = attempt_no,
+            outcome = ?outcome,
+            "action attempt finished"
+        );
         outcome
     }
 
@@ -367,6 +397,13 @@ impl Engine {
 
     fn finish_escalated(&mut self, run: &mut RecoveryRun, id: &ResourceId) {
         run.transition_to(RecoveryRunStatus::Escalated).ok();
+        tracing::warn!(
+            target: "custos::engine",
+            run = run.id.as_str(),
+            resource = id.as_str(),
+            attempts = run.action_attempts.len(),
+            "recovery escalated: automatic handling stopped"
+        );
         let event = EngineEvent::RecoveryExhausted {
             run_id: run.id.clone(),
             resource_id: id.clone(),
@@ -447,6 +484,14 @@ impl Engine {
             passed,
             at_unix_ms: result.checked_at_unix_ms,
         });
+        tracing::debug!(
+            target: "custos::engine",
+            run = run.id.as_str(),
+            resource = id.as_str(),
+            plan = plan.plan_id.as_str(),
+            passed,
+            "verification checked"
+        );
         passed
     }
 
@@ -473,6 +518,13 @@ impl Engine {
                         dependency_id: target.clone(),
                         at_unix_ms: self.clock.now_unix_ms(),
                     });
+                    tracing::warn!(
+                        target: "custos::engine",
+                        run = run.id.as_str(),
+                        resource = id.as_str(),
+                        dependency = target.as_str(),
+                        "dependency unsatisfied after recovery: upstream action blocked"
+                    );
                     return false;
                 }
             }
@@ -504,9 +556,15 @@ impl Engine {
                 self.store.save_run(&run);
                 self.store.emit(EngineEvent::OutcomeUnknown {
                     run_id: run.id.clone(),
-                    resource_id,
+                    resource_id: resource_id.clone(),
                     at_unix_ms: now,
                 });
+                tracing::warn!(
+                    target: "custos::engine",
+                    run = run.id.as_str(),
+                    resource = resource_id.as_str(),
+                    "resumed unfinished run: outcome may be unknown, not re-executing"
+                );
                 affected += 1;
             }
         }
