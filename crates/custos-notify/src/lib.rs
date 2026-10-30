@@ -1,11 +1,17 @@
-//! Event rules, notification queue, retries and channel dispatch
-//! (docs/guide/workspace.md: `custos-notify`).
+//! Notification engine (docs/guide/workspace.md: `custos-notify`;
+//! docs/guide/notification.md §8).
 //!
-//! P1 scope (docs/guide/notification.md): local log, Webhook and SMTP
-//! channels; a persisted queue that keeps working while the network is down;
-//! notification failures must never block recovery (§8.1).
+//! The engine consumes `NotificationEvent`s (custos-model), matches them
+//! against the independent `[notification]` rules, and dispatches to
+//! configured channels. Delivery failures never block recovery (§8.1):
+//! channels return a typed [`ChannelError`] and the queue engine decides
+//! retry/backoff/dead-letter (§8.6).
+//!
+//! P1 scope: local log (base audit output), Webhook and SMTP channels, a
+//! persisted queue that keeps working while the network is down.
 
-/// Placeholder until the notification engine lands in P1.
-pub fn not_yet_implemented() -> &'static str {
-    "custos-notify: notification engine is planned for P1 (docs/guide/roadmap.md)"
-}
+pub mod channel;
+pub mod local_log;
+
+pub use channel::{Channel, ChannelError, ChannelErrorKind};
+pub use local_log::{format_event, severity_level, LocalLogChannel};
