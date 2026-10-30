@@ -9,3 +9,8 @@ custos-config = { workspace = true }
 custos-model = { workspace = true }
 custos-probe = { path = "../custos-probe" }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+custos-config = { workspace = true }
+custos-store = { workspace = true }
+tempfile = "3"

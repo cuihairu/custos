@@ -153,6 +153,8 @@ dependencies = [
  "custos-config",
  "custos-model",
  "custos-probe",
+ "custos-store",
+ "tempfile",
  "thiserror",
 ]
 

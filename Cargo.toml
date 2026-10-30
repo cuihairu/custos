@@ -22,6 +22,7 @@ license = "Apache-2.0"
 [workspace.dependencies]
 custos-model = { path = "crates/custos-model" }
 custos-engine = { path = "crates/custos-engine" }
+custos-store = { path = "crates/custos-store" }
 sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
 tokio = { version = "1", features = ["rt"] }
 custos-config = { path = "crates/custos-config" }
