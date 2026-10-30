@@ -87,8 +87,9 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
         "icmp" => icmp::from_config(config)
             .map(|probe: crate::icmp::PingProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
-        // `service` with a `unit` uses the native systemd probe on Linux
-        // (survey §26.11 #7); with a `command` it falls back to exec.
+        // `service` with a `unit` uses the native service-manager probe
+        // (systemd on Linux, SCM on Windows — survey §26.11 #7/#11); with a
+        // `command` it falls back to exec.
         "service" => {
             if config["unit"].is_string() {
                 #[cfg(target_os = "linux")]
@@ -99,9 +100,19 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
                         })
                         .map_err(|reason| err(reason.as_str()))
                 }
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(windows)]
                 {
-                    Err(err("the systemd probe is Linux-only"))
+                    crate::windows_service::from_config(config)
+                        .map(|probe: crate::windows_service::WindowsServiceProbe| {
+                            Box::new(probe) as Box<dyn Probe>
+                        })
+                        .map_err(|reason| err(reason.as_str()))
+                }
+                #[cfg(not(any(target_os = "linux", windows)))]
+                {
+                    Err(err(
+                        "native service probing is unsupported on this platform",
+                    ))
                 }
             } else {
                 exec_probe(config, resource)

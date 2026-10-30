@@ -36,3 +36,14 @@ pub(crate) fn string_array(config: &Value, key: &str) -> Vec<String> {
         })
         .unwrap_or_default()
 }
+
+/// Reads a service/unit name: non-empty and whitespace-free. A systemd unit
+/// or an SCM service name never contains whitespace, which would split argv
+/// or break the service-name APIs.
+pub(crate) fn service_name(config: &Value, key: &str) -> Option<String> {
+    let name = config[key].as_str()?;
+    if name.trim().is_empty() || name.chars().any(char::is_whitespace) {
+        return None;
+    }
+    Some(name.to_owned())
+}

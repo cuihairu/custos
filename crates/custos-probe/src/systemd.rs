@@ -9,7 +9,7 @@
 //! without it is Unreachable, and non-Linux targets reject the probe type
 //! at build time (factory).
 
-use crate::config::u64_or;
+use crate::config::{service_name, u64_or};
 use crate::exec::{run_controlled, ExecResult};
 use crate::{Probe, ProbeReport};
 use custos_model::{HealthStatus, Resource};
@@ -27,20 +27,11 @@ pub struct SystemdProbe {
 
 /// Builds from `[resources.probe]` (docs/guide/probe-survey.md §26.11).
 pub fn from_config(config: &serde_json::Value) -> Result<SystemdProbe, String> {
-    let unit = required_unit(config).ok_or("`probe.unit` is required for systemd probes")?;
+    let unit = service_name(config, "unit").ok_or("`probe.unit` is required for systemd probes")?;
     Ok(SystemdProbe {
         unit,
         timeout: Duration::from_millis(u64_or(config, "timeout_ms", DEFAULT_TIMEOUT_MS)),
     })
-}
-
-fn required_unit(config: &serde_json::Value) -> Option<String> {
-    let unit = config["unit"].as_str()?;
-    // Any whitespace would split the argv; a unit name never contains it.
-    if unit.trim().is_empty() || unit.chars().any(char::is_whitespace) {
-        return None;
-    }
-    Some(unit.to_owned())
 }
 
 impl Probe for SystemdProbe {
