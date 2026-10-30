@@ -167,10 +167,10 @@
 - [x] SMTP 渠道：连接与发送超时/TLS/凭据安全读取/发件收件配置/明确结果 `1c6ce1d`（`custos-notify/src/smtp.rs`；成熟 `lettre` 0.11 客户端（smtp-transport+builder+hostname+rustls-tls，ring 后端可跨编译），builder_dangerous 直连配置 host:port，socket 超时=send_timeout（同时约束连接阶段），tls=true→Tls::Required（STARTTLS 严格）、false→Tls::None（仅受信中继），凭据经 config 的 SecretString expose 且不落日志，from/to 校验为合法 Mailbox；错误谓词分类：is_permanent/is_client→Rejected 终态、is_transient/is_tls/io→Transport 可重试，重试退避交由队列引擎（§8.6）；主题 `[custos] <event_type>: <summary>` 截断 120 字符；构建消息单测（from/to/事件类型）+ 无效 from 与拒绝连接错误分类测试；已过 x86_64-pc-windows-gnu 交叉检查；custos-notify 32/32 绿）
 - [x] 通知队列持久化：Pending/Sending/Delivered/RetryScheduled/DeadLetter `282012a`（`custos-store`：V3 迁移给 `notification_queue` 加 event_id/state/attempts/next_attempt_at_unix_ms/last_error/updated_at_unix_ms 与 (state,next_attempt_at) 索引；`NotificationState` 五状态枚举放 custos-model；Store API：enqueue_notification / claim_due_notifications（到期 pending/retry_scheduled + 超 60s 的 stale sending 崩溃恢复回收，事务内置 sending）/ mark_notification_delivered / mark_notification_retry（attempts+1、退避重排）/ mark_notification_dead / retry_notification（手动复活为 pending）/ list_notifications / notification_counts；生命周期与计数聚合测试全绿，含 not-due-yet 边界；已过 x86_64-pc-windows-gnu 交叉检查；custos-store 18/18 绿）
 - [x] 断网行为：事件入队不阻塞恢复，恢复后补发 `b55e3bb`（`custos-notify/src/engine.rs` + `queue.rs`；NotificationEngine.dispatch 按规则匹配事件入队、本地结构化日志始终先写；deliver_due 认领到期条目经渠道发送并记 delivered / retry_scheduled（指数退避 30s 起 1h 封顶）/ dead_letter（终态）；持久化抽象为 `NotificationQueue` port trait，custos-notify 不依赖 custos-store，由 custos-store 实现该 trait 避免 engine↔store↔notify 环；入队与发送永不阻塞恢复（§8.1）；离线条目留队、恢复后补发（§8.6）；规则匹配/本地日志/终态与瞬态分类/退避均有 MemQueue 单测；custos-notify 38/38 绿）
-- [ ] 去重与聚合（同一故障持续抑制重复通知）
-- [ ] notification.delivery_failed 抑制（防自激循环，可仅落本地日志）
-- [ ] 敏感信息治理：Token/密码/私钥/完整认证头不落日志与队列
-- [ ] CLI：通知状态查看 + 手动重试命令
+- [x] 去重与聚合（同一故障持续抑制重复通知） `84af6ed`（规则新增 `dedup_window_ms`（默认 30 分钟，0 禁用）；引擎按 `{event_type}:{resource}` 键抑制窗口内重复，计数聚合并经 tracing 记录，窗口过期后再通知；`recovery.succeeded` 清该资源全部键使下次故障立即通知；DispatchReport 增 suppressed 计数；窗口过期/按资源独立/禁用/恢复清除均测试；custos-notify 51/51 绿）
+- [x] notification.delivery_failed 抑制（防自激循环，可仅落本地日志） `c81cd9e`（dispatch 对该事件类型在本地结构化日志之后直接返回，构造性断开自激环——远程渠道投递此事件失败只会再产生本地日志行；显式选了远程渠道的规则也无法覆盖；测试覆盖规则不可覆盖语义；custos-notify 52/52 绿）
+- [x] 敏感信息治理：Token/密码/私钥/完整认证头不落日志与队列 `5233545`（`scrub.rs` Scrubber 收集全部配置密钥——webhook HMAC/头值、smtp 密码、herald token、URL userinfo 凭据——引擎在持久化 last_error 与日志前统一抹除为 `[redacted]`；空密钥不作 needle；config Debug 抹除为第一道防线，错误串抹除为第二道；引擎级不变量测试（含 URL 凭据外泄路径）；custos-notify 58/58 绿）
+- [x] CLI：通知状态查看 + 手动重试命令 `faea6c1`（`custos notify status [--db]`：五状态计数 + 最近 20 条（ID/渠道/事件类型/状态/尝试/最后错误或下次尝试）；`custos notify retry <ID> [--db]`：死信条目重排为 pending 立即尝试；对填充队列端到端冒烟验证（dead_letter 1→0、pending 0→1）；已过 mingw 交叉检查）
 
 ### 用户裁定落地：内置能力与 Python 扩展
 
