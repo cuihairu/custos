@@ -211,9 +211,9 @@
 
 ## P3 网络、代理与真实自愈场景
 
-- [ ] 网络接口探测 / 网关路由探测 / DNS 探测
-- [ ] HTTP Probe
-- [ ] 代理连接与认证诊断（区分认证失败/连接失败/目标异常；407 ≠ 宕机）
+- [x] 网络接口探测 / 网关路由探测 / DNS 探测 `74c9b7b`（`network-interface` 资源类型：接口 operstate up→Healthy / down 或不存在→Unhealthy / 查询失败→Unreachable；`default-gateway`：默认路由必须存在 + 可选 TCP 连通性；Linux /sys+/proc/net/route 纯解析 fixture 测试，Windows netsh/route 受控执行；DNS 探测原有 `dns` 类型已覆盖）
+- [x] HTTP Probe（存量：`http.rs` HttpProbe 早于本清单落地，15/15 绿——本次核实后勾选）
+- [x] 代理连接与认证诊断（区分认证失败/连接失败/目标异常；407 ≠ 宕机） `bf50881`（`proxy` 资源类型：经代理发绝对形式 GET，按代理自身应答分类——2xx/3xx Healthy、407/401 **Degraded**（代理活着但认证失败，重启它是错误处方）、5xx Unhealthy（目标未送达）、拒绝/超时/DNS Unreachable；Basic Proxy-Authorization 可配；纯 std TCP+HTTP/1.1 零新依赖；假代理实测 200/407/502/拒绝四路）
 - [ ] mihomo 插件（一插件一资源闭环口径）
 - [ ] cloudflared 插件
 - [ ] Windows Wi-Fi 完整恢复场景
