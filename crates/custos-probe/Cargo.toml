@@ -8,3 +8,7 @@ license.workspace = true
 custos-model = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+regex = "1"
+rustls = "0.23"
+webpki-roots = "1"
+libc = "0.2"

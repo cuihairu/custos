@@ -5,10 +5,13 @@
 //! Probe only. The Exec Probe limits runtime and output size and cleans up
 //! the process tree on timeout.
 
+pub mod config;
 pub mod exec;
 pub mod factory;
+pub mod http;
 pub mod process;
 pub mod scheduler;
+pub mod tls;
 
 use custos_model::ids::ResourceId;
 use custos_model::{Evidence, HealthStatus, Resource};

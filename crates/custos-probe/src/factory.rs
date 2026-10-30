@@ -3,8 +3,9 @@
 //! (docs/guide/probe-diagnosis.md §5.4); more types arrive with P2/P3.
 
 use crate::exec::ExecProbe;
+use crate::http::HttpProbe;
 use crate::process::ProcessProbe;
-use crate::Probe;
+use crate::{http, Probe};
 use custos_model::Resource;
 use std::time::Duration;
 
@@ -34,9 +35,11 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
                 pid_file: pid_file.into(),
             }))
         }
+        "http-endpoint" => http::from_config(config)
+            .map(|probe: HttpProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
         "custom-command"
         | "network-connectivity"
-        | "http-endpoint"
         | "proxy"
         | "tunnel"
         | "service" => {
@@ -85,6 +88,20 @@ mod tests {
     #[test]
     fn unknown_type_is_rejected() {
         let resource = Resource::new("weird", "quantum-router");
+        assert!(build_probe(&resource).is_err());
+    }
+
+    #[test]
+    fn builds_http_probe_from_url() {
+        let mut resource = Resource::new("web", "http-endpoint");
+        resource.config = json!({"url": "http://127.0.0.1:8080/health", "timeout_ms": 2000});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "http");
+    }
+
+    #[test]
+    fn http_probe_requires_url() {
+        let resource = Resource::new("web", "http-endpoint");
         assert!(build_probe(&resource).is_err());
     }
 }
