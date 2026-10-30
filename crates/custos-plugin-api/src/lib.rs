@@ -10,6 +10,7 @@
 pub mod capability;
 pub mod limits;
 pub mod rpc;
+pub mod server;
 
 pub use capability::{AffectedScope, Capability, CapabilityKind, OperationParams};
 pub use limits::{DEFAULT_MAX_MESSAGE_BYTES, MAX_STDERR_RETAINED_BYTES};

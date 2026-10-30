@@ -1,0 +1,19 @@
+[package]
+name = "custos-mihomo-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# One plugin process, one resource loop (todo.md 217: 一插件一资源闭环口径).
+[[bin]]
+name = "mihomo-plugin"
+path = "src/main.rs"
+
+[dependencies]
+custos-plugin-api = { path = "../../crates/custos-plugin-api" }
+custos-probe = { path = "../../crates/custos-probe" }
+serde_json = { workspace = true }
+ureq = "3"
+
+[dev-dependencies]
+custos-plugin-host = { path = "../../crates/custos-plugin-host" }

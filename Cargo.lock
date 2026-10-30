@@ -355,6 +355,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "custos-cloudflared-plugin"
+version = "0.1.0"
+dependencies = [
+ "custos-plugin-api",
+ "custos-plugin-host",
+ "custos-probe",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "custos-config"
 version = "0.1.0"
 dependencies = [
@@ -390,6 +401,17 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+]
+
+[[package]]
+name = "custos-mihomo-plugin"
+version = "0.1.0"
+dependencies = [
+ "custos-plugin-api",
+ "custos-plugin-host",
+ "custos-probe",
+ "serde_json",
+ "ureq",
 ]
 
 [[package]]

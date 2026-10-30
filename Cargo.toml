@@ -14,6 +14,8 @@ members = [
     "crates/custos-notify",
     "crates/custos-python",
     "crates/custos-cli",
+    "plugins/mihomo",
+    "plugins/cloudflared",
 ]
 
 [workspace.package]

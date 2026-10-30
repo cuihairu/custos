@@ -1,0 +1,19 @@
+[package]
+name = "custos-cloudflared-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# One plugin process, one resource loop (todo.md 218).
+[[bin]]
+name = "cloudflared-plugin"
+path = "src/main.rs"
+
+[dependencies]
+custos-plugin-api = { path = "../../crates/custos-plugin-api" }
+custos-probe = { path = "../../crates/custos-probe" }
+serde_json = { workspace = true }
+ureq = "3"
+
+[dev-dependencies]
+custos-plugin-host = { path = "../../crates/custos-plugin-host" }
