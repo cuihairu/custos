@@ -58,10 +58,7 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
         "dns" => dns::from_config(config)
             .map(|probe: DnsProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
-        "custom-command"
-        | "proxy"
-        | "tunnel"
-        | "service" => {
+        "custom-command" | "proxy" | "tunnel" | "service" => {
             // Any type may fall back to an exec check command in P0.
             let command = config["command"]
                 .as_array()
