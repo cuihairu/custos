@@ -59,7 +59,7 @@
 - [x] 日志文件关键字监控：增量 offset + 正则匹配，轮转按 inode 检测，命中即 Unhealthy `f488ab4`（`log.rs`；首次探测在文件末尾建立基线不误报，同一条目不重复触发；`log` 资源类型；custos-probe 97/97 绿）
 - [x] systemd unit 状态：systemctl show ActiveState/SubState 归一化（Linux service 原生实现） `cecb9eb`（`systemd.rs`；argv 无 shell，/run/systemd/system 检测，service 类型配 unit 时走原生、否则回退 exec；custos-probe 102/102 绿）
 - [x] Docker 容器状态：docker.sock HTTP API 或 docker inspect，running/重启次数 `ba2dae1`（`docker.rs`；`docker inspect --format` 单次读 Status/Running/RestartCount，`max_restarts` 触发 Degraded；`docker-container` 资源类型；custos-probe 112/112 绿）
-- [ ] ICMP Ping：raw socket，无权限时 TCP ping 兜底（Windows 用 IcmpSendEcho API）
+- [x] ICMP Ping：raw socket，无权限时 TCP ping 兜底（Windows 用 IcmpSendEcho API）`4058679`（`icmp.rs`；用成熟 `ping` crate 做 ICMP（Linux/macOS 先 DGRAM 后 RAW），无权限（ping_group_range 外/非管理员 Windows，后者走调查允许的 TCP 降级而非 IcmpSendEcho）时 TCP 兜底到 `fallback_port`，`tcp_fallback` 可关；`icmp` 资源类型；custos-probe 122/122 绿）
 - [ ] Windows 服务状态：sc query / QueryServiceStatus，StartType=auto 且 state≠RUNNING 判 Unhealthy
 - [ ] 数据库连通（MySQL/PostgreSQL/Redis）：SELECT 1 / PING，连接失败与超时分别归一化
 
