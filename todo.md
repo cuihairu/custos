@@ -189,25 +189,25 @@
 
 ## P2 平台基础能力（Linux + Windows 优先）
 
-- [ ] 平台 trait 定义：ProcessController / ServiceController / NetworkInterfaceController / NetworkConnectivityProbe / CredentialProvider / SystemRebootController
-- [ ] Capability 描述机制（不伪造平台支持，不支持要明报）
-- [ ] 服务控制跨平台矩阵（同一 ServiceController trait 下按系统选择适配器，init 系统探测失败/不认识 → 明报 Unsupported，绝不误执行）：
-  - Linux systemd（zbus 5.19 org.freedesktop.systemd1，D-Bus 探测 /run/systemd/system）
-  - Linux OpenRC（rc-service，argv 调用不经 shell）
-  - Linux SysV init（/etc/init.d/<svc> start/stop/status）
-  - Linux 其他 init（runit 等）→ Unsupported 明报
-  - macOS launchd（launchctl print/kickstart -k，system + gui 域）
-  - Windows SCM（windows-service crate ServiceManager：start/stop/status，超时 + 结果验证）
-- [ ] Linux：进程检测
-- [ ] Linux：网络接口状态 / IP 路由 / DNS 检查
-- [ ] Linux：受控命令执行 + 系统重启（需授权）
-- [ ] Windows：进程检测
-- [ ] Windows：Wi-Fi 状态检测 + 重连（系统 API/受控命令）
-- [ ] Windows：网络接口重置（管理通道中断风险显式标记）
-- [ ] Windows：DNS 刷新 / IP 配置 / 默认网关 / 连通性检查
-- [ ] 平台权限检查（高风险动作无授权即拒绝）
-- [ ] 平台特有错误 → 统一故障结果转换
-- [ ] 平台适配器集成测试（Linux + Windows 各一套）
+- [x] 平台 trait 定义：ProcessController / ServiceController / NetworkInterfaceController / NetworkConnectivityProbe / CredentialProvider / SystemRebootController `7d9e8f9`（`controller.rs` 六接口，全部 Send+Sync，只定义跨平台共同语义；ServiceState 归一化 Running/Stopped/Transitioning/Failed/Unknown(原文保留)）
+- [x] Capability 描述机制（不伪造平台支持，不支持要明报） `7d9e8f9`（`PlatformCapabilitySet`：操作→Native/Unsupported(原因) 数据化声明，require() 守门——未声明即 Unsupported 绝不猜测执行；Linux 声明与实测 init 匹配有测试，Windows 声明全集）
+- [x] 服务控制跨平台矩阵（同一 ServiceController trait 下按系统选择适配器，init 系统探测失败/不认识 → 明报 Unsupported，绝不误执行） `c2f7325`：
+  - [x] Linux systemd（zbus 5.19 org.freedesktop.systemd1，D-Bus 探测 /run/systemd/system） `c2f7325`（zbus 6 org.freedesktop.systemd1：LoadUnit→Properties.Get ActiveState，StartUnit/StopUnit/RestartUnit 以 replace 模式；zbus::block_on 桥接保持引擎同步；探测= /run/systemd/system + D-Bus 可连，仅标记不算支持）
+  - [x] Linux OpenRC（rc-service，argv 调用不经 shell） `7d9e8f9`（run_controlled 受控执行，无 shell）
+  - [x] Linux SysV init（/etc/init.d/<svc> start/stop/status） `c2f7325`（路径穿越安全检查；status 退出码 3 语义归一）
+  - [x] Linux 其他 init（runit 等）→ Unsupported 明报 `7d9e8f9`（NoInitController 拒绝全部操作并给具体原因）
+  - [x] macOS launchd（launchctl print/kickstart -k，system + gui 域） `c2f7325`（LaunchdController cfg(macos)：print 状态解析、kickstart/-k、kill SIGTERM，域可配 system/gui）
+  - [x] Windows SCM（windows-service crate ServiceManager：start/stop/status，超时 + 结果验证） `c2f7325`（ScmController：QUERY_STATUS/START/STOP + 15s 轮询等待目标态；1060→NotFound；sc.exe argv 兜底保留）
+- [x] Linux：进程检测 `7d9e8f9`（/proc comm 精确匹配 + pid 存活；实测找到自身进程）
+- [x] Linux：网络接口状态 / IP 路由 / DNS 检查 `c2f7325`（/sys/class/net operstate 只读列表；/proc/net/route 小端 hex 解析默认网关（纯函数 fixture 测试）；dns_resolves 归一化布尔）
+- [x] Linux：受控命令执行 + 系统重启（需授权） `7d9e8f9`（受控执行复用 toolbox exec.run（超时/输出上限/进程树清理）；重启经检测到的 init 系统下发，未知 init 拒绝；toolbox 侧 host.reboot 权限门 + confirm 双闸）
+- [x] Windows：进程检测 `7d9e8f9`（tasklist CSV 纯解析（跳过 INFO 行、按 pid 过滤），执行 cfg(windows)，非 Windows 明报 Unsupported 不伪造存活）
+- [x] Windows：Wi-Fi 状态检测 + 重连（系统 API/受控命令） `7d9e8f9`（netsh wlan show interfaces 状态/SSID 纯解析 + netsh wlan connect name=<profile> 受控 argv；能力声明含 wifi.reconnect）
+- [x] Windows：网络接口重置（管理通道中断风险显式标记） `7d9e8f9`（netsh interface set interface 显式 down+up 绝不清空式重置；toolbox 注册处 interrupts_remote_admin=true + host.network 权限门）
+- [x] Windows：DNS 刷新 / IP 配置 / 默认网关 / 连通性检查 `c2f7325`（ipconfig /flushdns argv；route print -4 默认网关纯解析（fixture）；netsh interface show interface 列表解析；TCP 连通性归一化含时延）
+- [x] 平台权限检查（高风险动作无授权即拒绝） `7d9e8f9`（RebootTool/InterfaceResetTool 注册进 toolbox：required_permission（host.reboot/host.network）在 dispatch 层先于适配器执行，测试断言未授权时适配器零调用；reboot 另需 confirm 双闸）
+- [x] 平台特有错误 → 统一故障结果转换 `7d9e8f9`（PlatformError 六类：Unsupported/NotFound/PermissionDenied/TimedOut/Busy/Failed；From<ExecResult>：工具缺失=Unsupported、systemctl 未装载退出码=NotFound、输出截断封顶）
+- [x] 平台适配器集成测试（Linux + Windows 各一套） `c2f7325`（Linux 套件活体 /proc、/sys、init 矩阵、loopback、连通性拒绝归一化；Windows 套件以真实格式 fixture 测全部解析器并抓出两处真 bug（sc STATE 缩进、状态码+名归一）；执行路径 cfg(windows) 并过 mingw 交叉检查）
 
 ## P3 网络、代理与真实自愈场景
 
