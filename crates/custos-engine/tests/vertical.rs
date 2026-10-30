@@ -108,7 +108,7 @@ cooldown_ms = 60_000
 
 [resources.recovery_policy.plans.action]
 program = "sh"
-args = ["-c", "setsid sh -c 'echo $$ > {pid_file}; exec sleep 30' >/dev/null 2>&1 </dev/null &"]
+args = ["-c", "rm -f {pid_file}; setsid sh -c 'echo $$ > {pid_file}; exec sleep 30' >/dev/null 2>&1 </dev/null & i=0; while [ $i -lt 200 ]; do [ -s {pid_file} ] && kill -0 $(cat {pid_file}) 2>/dev/null && break; i=$((i+1)); sleep 0.01; done"]
 
 [resources.recovery_policy.plans.verification]
 status_is = "healthy"
