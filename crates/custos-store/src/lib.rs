@@ -1,13 +1,12 @@
-//! SQLite persistence, migrations, transactions and recovery task state
-//! (docs/guide/workspace.md: `custos-store`; schema in
-//! docs/guide/persistence.md §7.2).
+//! SQLite persistence for recovery state (docs/guide/persistence.md §7).
 //!
-//! P0 TODO: resources, resource_dependencies, resource_health, incidents,
-//! recovery_runs, recovery_steps, probe_results, diagnoses, action_attempts,
-//! verification_results, audit_events tables. High-risk actions must persist
-//! state before execution and treat post-crash outcomes as unknown (§7.3).
+//! P0 subset of the §7.2 schema: `recovery_runs`, `action_attempts`,
+//! `verification_results`, `audit_events`. WAL is enabled on open. The
+//! crash-consistency contract (§7.3) lives in the write order the engine
+//! already guarantees: attempts are persisted with `outcome = NULL`
+//! (`Executing`) before the external action runs, so a post-crash NULL
+//! outcome means "result may be unknown", never "action did not run".
 
-/// Placeholder until SQLite persistence lands in P0.
-pub fn not_yet_implemented() -> &'static str {
-    "custos-store: SQLite persistence is planned for P0 (docs/guide/roadmap.md)"
-}
+mod store;
+
+pub use store::{Store, StoreError};
