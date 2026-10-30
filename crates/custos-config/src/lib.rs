@@ -182,9 +182,20 @@ fn default_required_count() -> usize {
 struct RawConfig {
     version: u32,
     #[serde(default)]
+    permissions: Option<RawPermissions>,
+    #[serde(default)]
     resources: Vec<RawResource>,
     #[serde(default)]
     alternative_groups: Vec<RawAlternativeGroup>,
+}
+
+/// Global authorization defaults (docs/guide/security.md §12.2). Per-resource
+/// `recovery_policy.allow_high_risk` overrides the global default.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPermissions {
+    #[serde(default)]
+    default_allow_high_risk: bool,
 }
 
 /// Validated configuration ready for the runtime registry.
@@ -193,6 +204,14 @@ pub struct ValidatedConfig {
     pub resources: Vec<Resource>,
     pub alternative_groups: Vec<AlternativeGroup>,
     pub graph: DependencyGraph,
+    /// Global authorization defaults.
+    pub permissions: Permissions,
+}
+
+/// Global authorization defaults carried into the runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Permissions {
+    pub default_allow_high_risk: bool,
 }
 
 impl ValidatedConfig {
@@ -213,6 +232,15 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
             supported: SUPPORTED_VERSION,
         });
     }
+
+    // Global authorization defaults, resolved before per-resource checks so
+    // a resource may either opt in itself or inherit the global switch.
+    let permissions = Permissions {
+        default_allow_high_risk: raw
+            .permissions
+            .as_ref()
+            .is_some_and(|p| p.default_allow_high_risk),
+    };
 
     // Unique resource IDs.
     let mut seen = std::collections::HashSet::new();
@@ -375,10 +403,11 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
             }
             let risk = raw_plan.risk.unwrap_or(custos_model::RiskLevel::Low);
             if risk == custos_model::RiskLevel::High {
-                let allow = raw_resource
-                    .recovery_policy
-                    .as_ref()
-                    .is_some_and(|r| r.allow_high_risk);
+                let allow = permissions.default_allow_high_risk
+                    || raw_resource
+                        .recovery_policy
+                        .as_ref()
+                        .is_some_and(|r| r.allow_high_risk);
                 if !allow {
                     return Err(ConfigError::validation(
                         format!("{path}.risk"),
@@ -419,16 +448,33 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
                     .map(custos_model::ActionId::new),
             });
         }
+        // Compensation must reference a plan that exists in this same
+        // resource (a cross-resource rollback is a design error, §6.5).
+        for (p, plan) in plans.iter().enumerate() {
+            if let Some(comp) = &plan.compensation {
+                let target_exists = plans.iter().any(|q| q.plan_id == comp.as_str());
+                if !target_exists {
+                    return Err(ConfigError::validation(
+                        format!("{base}.recovery_policy.plans[{p}].compensation"),
+                        format!(
+                            "compensation references unknown plan `{comp}` \
+                             (must be a plan_id in the same resource)"
+                        ),
+                    ));
+                }
+            }
+        }
         let recovery_policy = RecoveryPolicy {
             plans,
             max_attempts: raw_resource
                 .recovery_policy
                 .as_ref()
                 .and_then(|r| r.max_attempts),
-            allow_high_risk: raw_resource
-                .recovery_policy
-                .as_ref()
-                .is_some_and(|r| r.allow_high_risk),
+            allow_high_risk: permissions.default_allow_high_risk
+                || raw_resource
+                    .recovery_policy
+                    .as_ref()
+                    .is_some_and(|r| r.allow_high_risk),
         };
 
         let health_policy =
@@ -488,6 +534,7 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
         resources,
         alternative_groups,
         graph,
+        permissions,
     })
 }
 
@@ -755,6 +802,133 @@ program = "ip"
 args = ["link", "set", "eth0", "down"]
 "#;
         assert!(load(config).is_ok());
+    }
+
+    #[test]
+    fn global_default_allows_high_risk_without_per_resource_opt_in() {
+        let config = r#"
+version = 1
+
+[permissions]
+default_allow_high_risk = true
+
+[[resources]]
+id = "router"
+type = "custom-command"
+
+[[resources.recovery_policy.plans]]
+plan_id = "reset-nic"
+applicable_faults = ["network_disconnected"]
+risk = "high"
+
+[resources.recovery_policy.plans.action]
+program = "ip"
+args = ["link", "set", "eth0", "down"]
+"#;
+        let validated = load(config).expect("global default permits high risk");
+        assert!(validated.permissions.default_allow_high_risk);
+        let resource = validated.resource(&ResourceId::new("router")).unwrap();
+        assert!(
+            resource.recovery_policy.allow_high_risk,
+            "resource inherits the global default"
+        );
+    }
+
+    #[test]
+    fn per_resource_opt_in_wins_over_global_false() {
+        let config = r#"
+version = 1
+
+[permissions]
+default_allow_high_risk = false
+
+[[resources]]
+id = "router"
+type = "custom-command"
+
+[resources.recovery_policy]
+allow_high_risk = true
+
+[[resources.recovery_policy.plans]]
+plan_id = "reset-nic"
+applicable_faults = ["network_disconnected"]
+risk = "high"
+
+[resources.recovery_policy.plans.action]
+program = "ip"
+args = ["link", "set", "eth0", "down"]
+"#;
+        assert!(load(config).is_ok());
+    }
+
+    #[test]
+    fn rejects_compensation_referencing_unknown_plan() {
+        let config = r#"
+version = 1
+
+[[resources]]
+id = "app"
+type = "custom-command"
+
+[[resources.recovery_policy.plans]]
+plan_id = "restart"
+applicable_faults = ["process_exited"]
+compensation = "stop-other-resource"
+
+[resources.recovery_policy.plans.action]
+program = "true"
+
+[[resources.recovery_policy.plans]]
+plan_id = "stop"
+applicable_faults = ["process_exited"]
+
+[resources.recovery_policy.plans.action]
+program = "true"
+"#;
+        let err = load(config).unwrap_err();
+        assert!(
+            err.to_string().contains("compensation")
+                && err.to_string().contains("stop-other-resource"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_compensation_referencing_same_resource_plan() {
+        let config = r#"
+version = 1
+
+[[resources]]
+id = "app"
+type = "custom-command"
+
+[[resources.recovery_policy.plans]]
+plan_id = "restart"
+applicable_faults = ["process_exited"]
+compensation = "stop"
+
+[resources.recovery_policy.plans.action]
+program = "true"
+
+[[resources.recovery_policy.plans]]
+plan_id = "stop"
+applicable_faults = ["process_exited"]
+
+[resources.recovery_policy.plans.action]
+program = "true"
+"#;
+        let validated = load(config).expect("compensation targets a sibling plan");
+        let app = validated.resource(&ResourceId::new("app")).unwrap();
+        let restart = app
+            .recovery_policy
+            .plans
+            .iter()
+            .find(|p| p.plan_id == "restart")
+            .unwrap();
+        assert_eq!(
+            restart.compensation.as_ref().map(|a| a.as_str()),
+            Some("stop")
+        );
     }
 
     #[test]

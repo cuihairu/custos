@@ -622,6 +622,7 @@ mod tests {
             resources,
             alternative_groups: vec![],
             graph: DependencyGraph::build(edges).expect("test graph"),
+            permissions: Default::default(),
         };
         let engine = Engine::new(
             &config,
