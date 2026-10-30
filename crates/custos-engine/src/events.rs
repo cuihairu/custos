@@ -138,11 +138,49 @@ pub trait RunStore: Send + Sync {
 
     fn save_verification(&self, result: &custos_model::VerificationResult);
 
+    /// Persists one probe evidence row (`probe_results`, §7.2).
+    fn save_probe_result(&self, _evidence: &custos_model::Evidence) {}
+
+    /// Persists a diagnosis row (`diagnoses`, §7.2), optionally linked to
+    /// the run that produced it.
+    fn save_diagnosis(
+        &self,
+        _run_id: Option<&RecoveryRunId>,
+        _diagnosis: &custos_model::Diagnosis,
+        _at_unix_ms: u64,
+    ) {
+    }
+
+    /// Upserts an incident (`incidents`, §7.2): open on first save, closed
+    /// by a later save with `closed_at_unix_ms` set.
+    fn save_incident(&self, _incident: &custos_model::Incident) {}
+
+    /// Persists one ordered recovery step (`recovery_steps`, §7.2).
+    fn save_step(
+        &self,
+        _run_id: &RecoveryRunId,
+        _step_no: u32,
+        _phase: &str,
+        _detail: &str,
+        _at_unix_ms: u64,
+    ) {
+    }
+
     /// Emits an audit/notification event.
     fn emit(&self, event: EngineEvent);
 
     /// Runs that never reached a terminal state — the crash-recovery input.
     fn unfinished_runs(&self) -> Vec<RecoveryRun>;
+}
+
+/// One recorded recovery step, for MemoryStore assertions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepRecord {
+    pub run_id: RecoveryRunId,
+    pub step_no: u32,
+    pub phase: String,
+    pub detail: String,
+    pub at_unix_ms: u64,
 }
 
 /// In-memory store for tests: full run bookkeeping plus an event log.
@@ -156,6 +194,10 @@ struct MemoryInner {
     runs: Vec<RecoveryRun>,
     verifications: Vec<custos_model::VerificationResult>,
     events: Vec<EngineEvent>,
+    evidence: Vec<custos_model::Evidence>,
+    diagnoses: Vec<(Option<RecoveryRunId>, custos_model::Diagnosis)>,
+    incidents: Vec<custos_model::Incident>,
+    steps: Vec<StepRecord>,
 }
 
 impl MemoryStore {
@@ -179,6 +221,50 @@ impl MemoryStore {
             .iter()
             .find(|r| &r.id == id)
             .cloned()
+    }
+
+    /// All recorded probe evidence, oldest first.
+    pub fn evidence(&self) -> Vec<custos_model::Evidence> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .evidence
+            .clone()
+    }
+
+    /// All recorded diagnoses with their optional run link, oldest first.
+    pub fn diagnoses(&self) -> Vec<(Option<RecoveryRunId>, custos_model::Diagnosis)> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .diagnoses
+            .clone()
+    }
+
+    /// Incidents by id, in insertion order (upserts replace in place).
+    pub fn incidents(&self) -> Vec<custos_model::Incident> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .incidents
+            .clone()
+    }
+
+    /// All recorded recovery steps, oldest first.
+    pub fn steps(&self) -> Vec<StepRecord> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .steps
+            .clone()
+    }
+
+    /// Steps recorded for one run, in order.
+    pub fn steps_of(&self, run_id: &RecoveryRunId) -> Vec<StepRecord> {
+        self.steps()
+            .into_iter()
+            .filter(|s| &s.run_id == run_id)
+            .collect()
     }
 }
 
@@ -211,6 +297,56 @@ impl RunStore for MemoryStore {
             .unwrap_or_else(|e| e.into_inner())
             .verifications
             .push(result.clone());
+    }
+
+    fn save_probe_result(&self, evidence: &custos_model::Evidence) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .evidence
+            .push(evidence.clone());
+    }
+
+    fn save_diagnosis(
+        &self,
+        run_id: Option<&RecoveryRunId>,
+        diagnosis: &custos_model::Diagnosis,
+        _at_unix_ms: u64,
+    ) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .diagnoses
+            .push((run_id.cloned(), diagnosis.clone()));
+    }
+
+    fn save_incident(&self, incident: &custos_model::Incident) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        match inner.incidents.iter_mut().find(|i| i.id == incident.id) {
+            Some(existing) => *existing = incident.clone(),
+            None => inner.incidents.push(incident.clone()),
+        }
+    }
+
+    fn save_step(
+        &self,
+        run_id: &RecoveryRunId,
+        step_no: u32,
+        phase: &str,
+        detail: &str,
+        at_unix_ms: u64,
+    ) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .steps
+            .push(StepRecord {
+                run_id: run_id.clone(),
+                step_no,
+                phase: phase.to_owned(),
+                detail: detail.to_owned(),
+                at_unix_ms,
+            });
     }
 
     fn emit(&self, event: EngineEvent) {

@@ -53,7 +53,32 @@ pub struct Engine {
     /// Active-mode keys that switch Conditional dependencies on/off.
     pub active_modes: HashSet<String>,
     active_runs: HashSet<ResourceId>,
+    /// Runs suspended in `Waiting`, keyed by the dependency they await
+    /// (§3.6 dependency dedup): every dependent waits on the SAME recovery
+    /// result and is re-evaluated when that dependency's health changes.
+    waiters: HashMap<ResourceId, Vec<RecoveryRun>>,
+    /// How many times each waiting run has been re-suspended; bounded so a
+    /// permanently failing dependency cannot hold dependents forever.
+    wait_cycles: HashMap<RecoveryRunId, u32>,
+    /// Waiting runs restored from the store at startup; re-driven (and
+    /// re-keyed) on the first tick.
+    resume_queue: Vec<RecoveryRun>,
     seq: u64,
+}
+
+/// A dependent gives up waiting after this many re-suspensions on the same
+/// dependency cycle (escalation takes over).
+const MAX_WAIT_CYCLES: u32 = 5;
+
+/// Increments the run-local step counter and returns its new value.
+fn bump(step: &mut u32) -> u32 {
+    *step += 1;
+    *step
+}
+
+/// `now < until` with a default of "not cooling down" when until is 0.
+fn now_lt(now: u64, until: u64) -> bool {
+    until > 0 && now < until
 }
 
 impl Engine {
@@ -94,6 +119,9 @@ impl Engine {
             budget_state: BudgetState::default(),
             active_modes: HashSet::new(),
             active_runs: HashSet::new(),
+            waiters: HashMap::new(),
+            wait_cycles: HashMap::new(),
+            resume_queue: Vec::new(),
             seq: 0,
         }
     }
@@ -111,7 +139,7 @@ impl Engine {
     /// failure threshold.
     pub fn tick(&mut self) -> Vec<RecoveryRun> {
         let now = self.clock.now_unix_ms();
-        let mut started = Vec::new();
+        let mut finished = Vec::new();
         for id in self.probe_order.clone() {
             let interval_ms = self.managed[&id].interval_ms;
             if !self.tracker.is_due(&id, interval_ms, now) {
@@ -119,10 +147,155 @@ impl Engine {
             }
             self.probe_one(&id, now);
             if let Ok(run) = self.try_recover(&id) {
-                started.push(run);
+                finished.push(run);
             }
         }
-        started
+        // Waiting runs restored from a previous process re-enter the cycle
+        // here: dependencies are re-checked and the run is either re-suspended
+        // under the right key or driven to a terminal state.
+        for run in std::mem::take(&mut self.resume_queue) {
+            self.redrive(run, &mut finished);
+        }
+        // §3.6 dedup: wake every waiter whose dependency's health changed.
+        self.wake_ready_waiters(&mut finished);
+        finished
+    }
+
+    /// Re-drives a `Waiting` run: `Waiting -> Planning` is the only legal
+    /// resume (§6.1); `drive` re-checks dependencies first.
+    fn redrive(&mut self, run: RecoveryRun, out: &mut Vec<RecoveryRun>) {
+        let id = run.resource_id.clone();
+        if run.status != RecoveryRunStatus::Waiting || self.active_runs.contains(&id) {
+            return; // safety: nothing to resume
+        }
+        // The wait condition may have cleared itself.
+        if self.managed[&id].snapshot.status == HealthStatus::Healthy {
+            self.finish_cancelled(run);
+            return;
+        }
+        let fault = run
+            .diagnosis
+            .as_ref()
+            .map(|d| d.fault_code)
+            .unwrap_or(FaultCode::UnknownFailure);
+        let mut step = (run.action_attempts.len() + run.verification_results.len()) as u32;
+        self.active_runs.insert(id.clone());
+        let finished = self.drive(run, &id, fault, &mut step);
+        self.active_runs.remove(&id);
+        out.push(finished);
+    }
+
+    /// Cancels a waiting run whose resource is already healthy (the wait
+    /// condition cleared itself).
+    fn finish_cancelled(&mut self, mut run: RecoveryRun) {
+        run.transition_to(RecoveryRunStatus::Cancelled).ok();
+        self.store.save_run(&run);
+        self.wait_cycles.remove(&run.id);
+        tracing::info!(
+            target: "custos::engine",
+            run = run.id.as_str(),
+            resource = run.resource_id.as_str(),
+            "waiting run cancelled: resource healthy again"
+        );
+    }
+
+    /// Wakes waiters whose dependency turned healthy (health change →
+    /// re-evaluate). A dependency that is due for another attempt is retried
+    /// here — parked dependents make its recovery urgent even when its own
+    /// probe interval has not elapsed. Escalates waiters on a dependency
+    /// that can never recover (no plans) or that exhausts their wait budget.
+    fn wake_ready_waiters(&mut self, out: &mut Vec<RecoveryRun>) {
+        let deps: Vec<ResourceId> = self
+            .waiters
+            .iter()
+            .filter(|(_, parked)| !parked.is_empty())
+            .map(|(dep, _)| dep.clone())
+            .collect();
+        for dep in deps {
+            let now = self.clock.now_unix_ms();
+            self.probe_one(&dep, now);
+            let mut healthy = self.managed[&dep].snapshot.status == HealthStatus::Healthy;
+            if !healthy {
+                let cooling_down = now_lt(now, self.managed[&dep].cooldown_until_ms);
+                let has_plans = !self.managed[&dep].resource.recovery_policy.plans.is_empty();
+                if !has_plans {
+                    // The dependency cannot recover by itself: stop holding
+                    // the dependents hostage (§15 rule 5 already blocked
+                    // their upstream actions).
+                    self.escalate_waiters(&dep, out, "dependency has no recovery plans");
+                    continue;
+                }
+                if !cooling_down && !self.active_runs.contains(&dep) {
+                    // Retry the dependency now (its own budgets still apply),
+                    // then re-evaluate on the freshest evidence.
+                    let _ = self.try_recover(&dep);
+                    self.probe_one(&dep, self.clock.now_unix_ms());
+                    healthy = self.managed[&dep].snapshot.status == HealthStatus::Healthy;
+                    if !healthy {
+                        // The retry burned one wait cycle for every parked
+                        // dependent; over-budget ones escalate.
+                        self.burn_wait_cycles(&dep, out);
+                    }
+                }
+            }
+            if healthy {
+                let waiters = self.waiters.remove(&dep).unwrap_or_default();
+                tracing::debug!(
+                    target: "custos::engine",
+                    dependency = dep.as_str(),
+                    count = waiters.len(),
+                    "dependency healthy: waking waiters"
+                );
+                for run in waiters {
+                    self.wait_cycles.remove(&run.id);
+                    self.redrive(run, out);
+                }
+            }
+        }
+    }
+
+    /// Escalates every waiter parked on `dep` (dependency hopeless).
+    fn escalate_waiters(&mut self, dep: &ResourceId, out: &mut Vec<RecoveryRun>, why: &str) {
+        for mut run in self.waiters.remove(dep).unwrap_or_default() {
+            let id = run.resource_id.clone();
+            self.wait_cycles.remove(&run.id);
+            tracing::warn!(
+                target: "custos::engine",
+                run = run.id.as_str(),
+                dependency = dep.as_str(),
+                "{why}: escalating waiter"
+            );
+            self.finish_escalated(&mut run, &id);
+            out.push(run);
+        }
+    }
+
+    /// Consumes one wait cycle for every waiter parked on `dep`; escalates
+    /// the ones past [`MAX_WAIT_CYCLES`].
+    fn burn_wait_cycles(&mut self, dep: &ResourceId, out: &mut Vec<RecoveryRun>) {
+        let mut still_parked = Vec::new();
+        for mut run in self.waiters.remove(dep).unwrap_or_default() {
+            let cycles = self.wait_cycles.entry(run.id.clone()).or_insert(0);
+            *cycles += 1;
+            if *cycles > MAX_WAIT_CYCLES {
+                self.wait_cycles.remove(&run.id);
+                let id = run.resource_id.clone();
+                tracing::warn!(
+                    target: "custos::engine",
+                    run = run.id.as_str(),
+                    dependency = dep.as_str(),
+                    cycles = MAX_WAIT_CYCLES,
+                    "wait budget exhausted: escalating waiter"
+                );
+                self.finish_escalated(&mut run, &id);
+                out.push(run);
+            } else {
+                still_parked.push(run);
+            }
+        }
+        if !still_parked.is_empty() {
+            self.waiters.insert(dep.clone(), still_parked);
+        }
     }
 
     /// Probes one resource and applies jitter-suppressed threshold logic.
@@ -133,8 +306,18 @@ impl Engine {
                 .probes
                 .get(id)
                 .expect("probe wired for every resource at construction");
+            let report = probe.probe(&managed.resource);
+            // Evidence is persisted for every probe (§7.2 probe_results):
+            // diagnosis must be re-derivable from stored facts.
+            self.store.save_probe_result(&custos_model::Evidence {
+                resource_id: id.clone(),
+                probe_name: probe.name().to_owned(),
+                succeeded: report.succeeded,
+                observation: report.observation.clone(),
+                collected_at_unix_ms: now_unix_ms,
+            });
             (
-                probe.probe(&managed.resource),
+                report,
                 (
                     managed.resource.health_policy.failure_threshold,
                     managed.resource.health_policy.success_threshold,
@@ -184,13 +367,14 @@ impl Engine {
         format!("{prefix}-{}", self.seq)
     }
 
-    /// The full recovery cycle for one resource.
+    /// The full recovery cycle for one resource: open the run, diagnose,
+    /// then hand over to [`Engine::drive`].
     fn recover(&mut self, id: &ResourceId) -> RecoveryRun {
         let now = self.clock.now_unix_ms();
         let run_id = RecoveryRunId::new(self.next_id("run"));
         let incident = IncidentId::new(self.next_id("inc"));
         let mut run = RecoveryRun::new(run_id, id.clone(), "failure threshold reached", now);
-        run.incident_id = Some(incident);
+        run.incident_id = Some(incident.clone());
         run.transition_to(RecoveryRunStatus::ProblemDetected).ok();
         self.store.save_run(&run);
         self.store.emit(EngineEvent::RecoveryStarted {
@@ -204,6 +388,14 @@ impl Engine {
         let fault = {
             let diagnosis = self.diagnose(id, now);
             let fault = diagnosis.fault_code;
+            self.store.save_diagnosis(Some(&run.id), &diagnosis, now);
+            self.store.save_incident(&custos_model::Incident::open(
+                incident,
+                id.clone(),
+                fault,
+                diagnosis.summary.clone(),
+                now,
+            ));
             run.diagnosis = Some(diagnosis);
             fault
         };
@@ -216,16 +408,36 @@ impl Engine {
             "recovery run started"
         );
 
+        let mut step = 0u32;
+        self.drive(run, id, fault, &mut step)
+    }
+
+    /// Continues a run from `Planning`: dependency resolution, plan loop,
+    /// verification, terminal state. Also the resume path for `Waiting`
+    /// runs (`Waiting -> Planning` is legal, §6.1).
+    fn drive(
+        &mut self,
+        mut run: RecoveryRun,
+        id: &ResourceId,
+        fault: FaultCode,
+        step: &mut u32,
+    ) -> RecoveryRun {
         // Resolve dependencies before touching the resource (§3.6).
         run.transition_to(RecoveryRunStatus::Planning).ok();
         run.transition_to(RecoveryRunStatus::ResolvingDependencies)
             .ok();
         self.store.save_run(&run);
-        if !self.dependencies_satisfied(id, &mut run) {
-            // §15 rule 5: upstream actions must not run on unsatisfied deps.
-            self.finish_escalated(&mut run, id);
+        if !self.dependencies_satisfied(id, &mut run, step) {
+            // Either escalated, or suspended and registered as a waiter.
             return run;
         }
+        self.store.save_step(
+            &run.id,
+            bump(step),
+            "resolving_dependencies",
+            "all binding dependencies healthy",
+            self.clock.now_unix_ms(),
+        );
 
         // Select and execute applicable plans, re-diagnosing between them.
         let plans = self.managed[id].resource.recovery_policy.plans.clone();
@@ -250,10 +462,25 @@ impl Engine {
                     self.apply_cooldown(id);
                     return run;
                 }
+                self.store.save_step(
+                    &run.id,
+                    bump(step),
+                    "executing",
+                    &format!("plan `{}` attempt {attempt_no}", plan.plan_id),
+                    self.clock.now_unix_ms(),
+                );
                 self.execute_attempt(id, plan, attempt_no, &mut run);
                 run.transition_to(RecoveryRunStatus::Verifying).ok();
                 if self.verify(id, plan, &mut run) {
                     run.transition_to(RecoveryRunStatus::Recovered).ok();
+                    self.store.save_step(
+                        &run.id,
+                        bump(step),
+                        "recovered",
+                        &format!("plan `{}` verified", plan.plan_id),
+                        self.clock.now_unix_ms(),
+                    );
+                    self.close_incident_of(&run);
                     let run_id = run.id.clone();
                     let at = self.clock.now_unix_ms();
                     self.finish_run(
@@ -280,6 +507,8 @@ impl Engine {
                 // verification decide.
                 run.transition_to(RecoveryRunStatus::Diagnosing).ok();
                 let diagnosis = self.diagnose(id, self.clock.now_unix_ms());
+                self.store
+                    .save_diagnosis(Some(&run.id), &diagnosis, self.clock.now_unix_ms());
                 run.diagnosis = Some(diagnosis);
                 self.store.save_run(&run);
             }
@@ -395,8 +624,37 @@ impl Engine {
         self.store.emit(event);
     }
 
+    /// Closes the incident of a verified-recovered run; escalated runs keep
+    /// their incident open for the human (§6.3).
+    fn close_incident_of(&mut self, run: &RecoveryRun) {
+        if let Some(incident_id) = &run.incident_id {
+            let mut incident = custos_model::Incident::open(
+                incident_id.clone(),
+                run.resource_id.clone(),
+                run.diagnosis
+                    .as_ref()
+                    .map(|d| d.fault_code)
+                    .unwrap_or(FaultCode::UnknownFailure),
+                run.diagnosis
+                    .as_ref()
+                    .map(|d| d.summary.clone())
+                    .unwrap_or_default(),
+                run.started_at_unix_ms,
+            );
+            incident.close(self.clock.now_unix_ms());
+            self.store.save_incident(&incident);
+        }
+    }
+
     fn finish_escalated(&mut self, run: &mut RecoveryRun, id: &ResourceId) {
         run.transition_to(RecoveryRunStatus::Escalated).ok();
+        self.store.save_step(
+            &run.id,
+            (run.action_attempts.len() + run.verification_results.len() + 1) as u32,
+            "escalated",
+            "automatic handling stopped",
+            self.clock.now_unix_ms(),
+        );
         tracing::warn!(
             target: "custos::engine",
             run = run.id.as_str(),
@@ -497,27 +755,65 @@ impl Engine {
 
     /// §3.6 dependency resolution: re-probe binding dependencies, recover
     /// unhealthy ones (recursively), then re-verify — never assume success.
-    fn dependencies_satisfied(&mut self, id: &ResourceId, run: &mut RecoveryRun) -> bool {
+    ///
+    /// Returns false when the run must stop driving. That is either an
+    /// escalation or a suspension: when the dependency is already being
+    /// recovered (or is cooling down towards its next attempt), the run
+    /// waits on that SAME result instead of escalating alongside it — all
+    /// dependents of one dependency share a single recovery (dedup).
+    fn dependencies_satisfied(
+        &mut self,
+        id: &ResourceId,
+        run: &mut RecoveryRun,
+        step: &mut u32,
+    ) -> bool {
         let dependencies = self.managed[id].resource.dependencies.clone();
         for dep in &dependencies {
             if !dep.is_binding(&self.active_modes) {
                 continue;
             }
-            let target = &dep.target_resource_id;
+            let target = dep.target_resource_id.clone();
             // Re-probe: state must be fresh, not assumed (§2.3 rules 4/5).
-            self.probe_one(target, self.clock.now_unix_ms());
-            if self.managed[target].snapshot.status != HealthStatus::Healthy {
-                // Recover the dependency first (its own policy and budgets).
-                let _ = self.try_recover(target);
+            self.probe_one(&target, self.clock.now_unix_ms());
+            if self.managed[&target].snapshot.status != HealthStatus::Healthy {
+                // Recover the dependency first (its own policy and budgets),
+                // unless a recovery is already in flight or its next attempt
+                // is scheduled behind a cooldown — then wait on that result.
+                if self.active_runs.contains(&target)
+                    || now_lt(
+                        self.clock.now_unix_ms(),
+                        self.managed[&target].cooldown_until_ms,
+                    )
+                {
+                    self.suspend_on(run, &target, step);
+                    return false;
+                }
+                let _ = self.try_recover(&target);
                 // Re-verify after dependency recovery.
-                self.probe_one(target, self.clock.now_unix_ms());
-                if self.managed[target].snapshot.status != HealthStatus::Healthy {
+                self.probe_one(&target, self.clock.now_unix_ms());
+                if self.managed[&target].snapshot.status != HealthStatus::Healthy {
+                    if now_lt(
+                        self.clock.now_unix_ms(),
+                        self.managed[&target].cooldown_until_ms,
+                    ) {
+                        // The dependency just failed an attempt and is cooling
+                        // down towards its next one: wait for that result.
+                        self.suspend_on(run, &target, step);
+                        return false;
+                    }
                     self.store.emit(EngineEvent::DependencyUnsatisfied {
                         run_id: run.id.clone(),
                         resource_id: id.clone(),
                         dependency_id: target.clone(),
                         at_unix_ms: self.clock.now_unix_ms(),
                     });
+                    self.store.save_step(
+                        &run.id,
+                        bump(step),
+                        "resolving_dependencies",
+                        &format!("dependency `{}` unsatisfied", target.as_str()),
+                        self.clock.now_unix_ms(),
+                    );
                     tracing::warn!(
                         target: "custos::engine",
                         run = run.id.as_str(),
@@ -525,11 +821,62 @@ impl Engine {
                         dependency = target.as_str(),
                         "dependency unsatisfied after recovery: upstream action blocked"
                     );
+                    self.finish_escalated(run, id);
                     return false;
                 }
             }
         }
         true
+    }
+
+    /// Suspends the run in `Waiting` on `target`, registering it as a
+    /// waiter (§3.6 dedup). On wait-budget exhaustion the run escalates
+    /// instead. Either way driving stops for this tick.
+    fn suspend_on(&mut self, run: &mut RecoveryRun, target: &ResourceId, step: &mut u32) {
+        let cycles = self.wait_cycles.entry(run.id.clone()).or_insert(0);
+        *cycles += 1;
+        if *cycles > MAX_WAIT_CYCLES {
+            self.wait_cycles.remove(&run.id);
+            tracing::warn!(
+                target: "custos::engine",
+                run = run.id.as_str(),
+                resource = run.resource_id.as_str(),
+                dependency = target.as_str(),
+                cycles = MAX_WAIT_CYCLES,
+                "wait budget exhausted: escalating"
+            );
+            let id = run.resource_id.clone();
+            self.finish_escalated(run, &id);
+            return;
+        }
+        let until = self.managed[target].cooldown_until_ms;
+        let reason = format!("awaiting dependency `{}` recovery", target.as_str());
+        let run_id = run.id.clone();
+        if run.suspend(reason, Some(until)).is_err() {
+            let id = run.resource_id.clone();
+            self.finish_escalated(run, &id);
+            return;
+        }
+        self.store.save_step(
+            &run_id,
+            bump(step),
+            "waiting",
+            &format!("dependency `{}` recovery in flight", target.as_str()),
+            self.clock.now_unix_ms(),
+        );
+        self.waiters
+            .entry(target.clone())
+            .or_default()
+            .push(run.clone());
+        tracing::info!(
+            target: "custos::engine",
+            run = run.id.as_str(),
+            resource = run.resource_id.as_str(),
+            dependency = target.as_str(),
+            wait_until_unix_ms = until,
+            "run waiting on dependency recovery"
+        );
+        self.store.save_run(run);
     }
 
     /// Crash recovery (§6.6, §7.3): attempts persisted as `Executing` have
@@ -539,6 +886,13 @@ impl Engine {
         let unfinished = self.store.unfinished_runs();
         let mut affected = 0;
         for mut run in unfinished {
+            if run.status == RecoveryRunStatus::Waiting {
+                // A waiting run is not an unknown outcome: its dependency
+                // key is re-derived when it re-enters the cycle on the next
+                // tick (dependencies re-probed, then re-suspended or driven).
+                self.resume_queue.push(run);
+                continue;
+            }
             let resource_id = run.resource_id.clone();
             let now = self.clock.now_unix_ms();
             let mut changed = false;
@@ -658,6 +1012,22 @@ mod tests {
         probe_results: Vec<Vec<bool>>,
         executor_steps: Vec<ActionOutcome>,
     ) -> (Engine, Arc<crate::MemoryStore>, Arc<ScriptedExecutor>) {
+        let (engine, store, scripted, _clock) =
+            test_engine_with_clock(resources, edges, probe_results, executor_steps);
+        (engine, store, scripted)
+    }
+
+    fn test_engine_with_clock(
+        resources: Vec<Resource>,
+        edges: Vec<(ResourceId, Vec<ResourceId>)>,
+        probe_results: Vec<Vec<bool>>,
+        executor_steps: Vec<ActionOutcome>,
+    ) -> (
+        Engine,
+        Arc<crate::MemoryStore>,
+        Arc<ScriptedExecutor>,
+        Arc<crate::clock::FakeClock>,
+    ) {
         let store = Arc::new(crate::MemoryStore::default());
         // Shared handle so tests can assert which actions actually ran.
         let scripted = std::sync::Arc::new(ScriptedExecutor::new(executor_steps));
@@ -682,14 +1052,169 @@ mod tests {
             graph: DependencyGraph::build(edges).expect("test graph"),
             permissions: Default::default(),
         };
-        let engine = Engine::new(
-            &config,
-            probes,
-            executor,
-            store.clone(),
-            Arc::new(crate::clock::FakeClock::new(1_000)),
+        let clock = Arc::new(crate::clock::FakeClock::new(1_000));
+        let engine = Engine::new(&config, probes, executor, store.clone(), clock.clone());
+        (engine, store, scripted, clock)
+    }
+
+    fn required_dep(target: &str) -> Dependency {
+        Dependency::required(ResourceId::new(target))
+    }
+
+    /// Two dependents park on the SAME dependency recovery (dedup): the
+    /// dependency is retried once per opportunity, both dependents resume
+    /// through `Waiting -> Planning` when it turns healthy.
+    #[test]
+    fn dependents_wait_on_one_dependency_recovery_and_resume() {
+        let (mut engine, store, exec, clock) = test_engine_with_clock(
+            vec![
+                resource("db", vec![plan("restart-db", 1, RiskLevel::Low)], vec![]),
+                resource(
+                    "app1",
+                    vec![plan("restart-app1", 1, RiskLevel::Low)],
+                    vec![required_dep("db")],
+                ),
+                resource(
+                    "app2",
+                    vec![plan("restart-app2", 1, RiskLevel::Low)],
+                    vec![required_dep("db")],
+                ),
+            ],
+            vec![
+                (ResourceId::new("db"), vec![]),
+                (ResourceId::new("app1"), vec![ResourceId::new("db")]),
+                (ResourceId::new("app2"), vec![ResourceId::new("db")]),
+            ],
+            // db: observe fail, verify fail (action 1 fails), two dep checks
+            // by app1/app2, tick1-end wake observe fail, tick2 wake observe
+            // fail, retry-verify true, re-probe true, dep checks by both
+            // redriven apps.
+            vec![
+                vec![
+                    false, false, false, false, false, false, true, true, true, true,
+                ],
+                // app1: observe fail, verify true (after its own action).
+                vec![false, true],
+                // app2: observe fail, verify true.
+                vec![false, true],
+            ],
+            // db action fails first, succeeds on the retry; apps succeed.
+            vec![
+                ActionOutcome::Failed,
+                ActionOutcome::Succeeded,
+                ActionOutcome::Succeeded,
+                ActionOutcome::Succeeded,
+            ],
         );
-        (engine, store, scripted)
+
+        // Tick 1: db's own recovery fails and cools down; both apps see the
+        // unsatisfied dependency cooling down and suspend on the SAME result.
+        let runs = engine.tick();
+        assert_eq!(runs.len(), 3, "db escalated + two apps waiting");
+        let db_run = runs
+            .iter()
+            .find(|r| r.resource_id.as_str() == "db")
+            .unwrap();
+        assert_eq!(db_run.status, RecoveryRunStatus::Escalated);
+        for app in ["app1", "app2"] {
+            let run = runs.iter().find(|r| r.resource_id.as_str() == app).unwrap();
+            assert_eq!(run.status, RecoveryRunStatus::Waiting);
+            assert_eq!(
+                run.wait_reason.as_deref(),
+                Some("awaiting dependency `db` recovery")
+            );
+            assert!(run.action_attempts.is_empty(), "no upstream action ran");
+        }
+
+        // Cooldown (1s) expires; the wake pass retries db once and both apps
+        // resume on the shared result.
+        clock.advance_ms(1_500);
+        let resumed = engine.tick();
+        assert_eq!(resumed.len(), 2, "both apps drove to completion");
+        for run in &resumed {
+            assert_eq!(run.status, RecoveryRunStatus::Recovered);
+            assert_eq!(run.action_attempts.len(), 1);
+        }
+
+        // Dedup: db was recovered exactly twice in total (initial failure +
+        // one retry) — never once per dependent.
+        assert_eq!(exec.remaining(), 0, "every scripted action consumed");
+        let db_attempts: usize = store
+            .steps()
+            .iter()
+            .filter(|s| s.phase == "executing" && s.detail.contains("restart-db"))
+            .count();
+        assert_eq!(
+            db_attempts, 2,
+            "db executed once per attempt, not per dependent"
+        );
+
+        // Persistence: waiting steps and closed incidents are recorded.
+        let phases: Vec<String> = store.steps().into_iter().map(|s| s.phase).collect();
+        assert!(
+            phases.contains(&"waiting".to_owned()),
+            "waiting steps recorded: {phases:?}"
+        );
+        assert!(phases.contains(&"resolving_dependencies".to_owned()));
+        let incidents = store.incidents();
+        assert_eq!(incidents.len(), 4, "one incident per run");
+        assert_eq!(
+            incidents.iter().filter(|i| i.is_open()).count(),
+            1,
+            "only db's escalated incident stays open"
+        );
+    }
+
+    /// A `Waiting` run restored from the store after a crash is re-driven,
+    /// never marked outcome-unknown (§6.6 applies to executed actions only).
+    #[test]
+    fn waiting_run_from_store_resumes_instead_of_unknown() {
+        let (mut engine, store, _exec, _clock) = test_engine_with_clock(
+            vec![resource(
+                "svc",
+                vec![plan("restart", 1, RiskLevel::Low)],
+                vec![],
+            )],
+            vec![(ResourceId::new("svc"), vec![])],
+            // The resource is healthy again by the time the engine observes.
+            vec![vec![true]],
+            vec![],
+        );
+
+        // A previous process died with the run parked in Waiting.
+        let mut seeded = RecoveryRun::new(
+            RecoveryRunId::new("run-seeded"),
+            ResourceId::new("svc"),
+            "failure threshold reached",
+            900,
+        );
+        seeded
+            .transition_to(RecoveryRunStatus::ProblemDetected)
+            .ok();
+        seeded.transition_to(RecoveryRunStatus::Diagnosing).ok();
+        seeded.transition_to(RecoveryRunStatus::Planning).ok();
+        seeded
+            .suspend("awaiting dependency `db` recovery", None)
+            .expect("suspend from planning");
+        seeded.diagnosis = Some(Diagnosis {
+            fault_code: FaultCode::ProcessExited,
+            summary: "seeded".into(),
+            confidence: None,
+            affected_resources: vec![ResourceId::new("svc")],
+            evidence_refs: vec![],
+        });
+        store.save_run(&seeded);
+
+        assert_eq!(engine.resume_unfinished(), 0, "waiting is not unknown");
+        let runs = engine.tick();
+        let seeded_run = store.run(&RecoveryRunId::new("run-seeded")).unwrap();
+        assert_ne!(
+            seeded_run.status,
+            RecoveryRunStatus::OutcomeUnknown,
+            "waiting runs never become outcome-unknown"
+        );
+        assert_eq!(seeded_run.status, RecoveryRunStatus::Cancelled);
+        assert!(runs.is_empty(), "healthy resource needs no new run");
     }
 
     #[test]

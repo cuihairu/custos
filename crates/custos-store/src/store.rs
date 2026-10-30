@@ -467,6 +467,110 @@ impl RunStore for Store {
         }
     }
 
+    fn save_probe_result(&self, evidence: &custos_model::Evidence) {
+        if let Err(err) = self.block(|pool| {
+            let evidence = evidence.clone();
+            async move {
+                query(
+                    "INSERT INTO probe_results                      (resource_id, probe_name, succeeded, observation, collected_at_unix_ms)                      VALUES (?1, ?2, ?3, ?4, ?5)",
+                )
+                .bind(evidence.resource_id.as_str())
+                .bind(&evidence.probe_name)
+                .bind(evidence.succeeded)
+                .bind(&evidence.observation)
+                .bind(evidence.collected_at_unix_ms as i64)
+                .execute(&pool)
+                .await
+            }
+        }) {
+            tracing::error!(target: "custos::store", resource = evidence.resource_id.as_str(), error = %err, "save_probe_result failed");
+        }
+    }
+
+    fn save_diagnosis(
+        &self,
+        run_id: Option<&RecoveryRunId>,
+        diagnosis: &custos_model::Diagnosis,
+        at_unix_ms: u64,
+    ) {
+        let evidence_refs = serde_json::to_string(&diagnosis.evidence_refs).unwrap_or_default();
+        if let Err(err) = self.block(|pool| {
+            let run_id = run_id.cloned();
+            let diagnosis = diagnosis.clone();
+            let evidence_refs = evidence_refs.clone();
+            async move {
+                query(
+                    "INSERT INTO diagnoses                      (run_id, resource_id, fault_code, summary, evidence_refs, at_unix_ms)                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                )
+                .bind(run_id.as_ref().map(|id| id.as_str()))
+                .bind(
+                    diagnosis
+                        .affected_resources
+                        .first()
+                        .map(|id| id.as_str()),
+                )
+                .bind(enum_key(&diagnosis.fault_code))
+                .bind(&diagnosis.summary)
+                .bind(&evidence_refs)
+                .bind(at_unix_ms as i64)
+                .execute(&pool)
+                .await
+            }
+        }) {
+            tracing::error!(target: "custos::store", error = %err, "save_diagnosis failed");
+        }
+    }
+
+    fn save_incident(&self, incident: &custos_model::Incident) {
+        if let Err(err) = self.block(|pool| {
+            let incident = incident.clone();
+            async move {
+                query(
+                    "INSERT INTO incidents                      (id, resource_id, fault_code, summary, opened_at_unix_ms, closed_at_unix_ms)                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)                      ON CONFLICT(id) DO UPDATE SET closed_at_unix_ms=?6",
+                )
+                .bind(incident.id.as_str())
+                .bind(incident.resource_id.as_str())
+                .bind(enum_key(&incident.fault_code))
+                .bind(&incident.summary)
+                .bind(incident.opened_at_unix_ms as i64)
+                .bind(incident.closed_at_unix_ms.map(|t| t as i64))
+                .execute(&pool)
+                .await
+            }
+        }) {
+            tracing::error!(target: "custos::store", incident = incident.id.as_str(), error = %err, "save_incident failed");
+        }
+    }
+
+    fn save_step(
+        &self,
+        run_id: &RecoveryRunId,
+        step_no: u32,
+        phase: &str,
+        detail: &str,
+        at_unix_ms: u64,
+    ) {
+        if let Err(err) = self.block(|pool| {
+            let run_id = run_id.clone();
+            let phase = phase.to_owned();
+            let detail = detail.to_owned();
+            async move {
+                query(
+                    "INSERT INTO recovery_steps                      (run_id, step_no, phase, detail, at_unix_ms)                      VALUES (?1, ?2, ?3, ?4, ?5)",
+                )
+                .bind(run_id.as_str())
+                .bind(step_no as i64)
+                .bind(&phase)
+                .bind(&detail)
+                .bind(at_unix_ms as i64)
+                .execute(&pool)
+                .await
+            }
+        }) {
+            tracing::error!(target: "custos::store", run = run_id.as_str(), error = %err, "save_step failed");
+        }
+    }
+
     fn emit(&self, event: EngineEvent) {
         let severity = format!("{:?}", event.severity());
         let run_id = run_id_of(&event).map(|s| s.to_owned());
@@ -552,6 +656,14 @@ impl RunStore for Store {
 /// bare snake_case key so SQL comparisons (NOT IN terminal) work.
 fn status_key(status: &custos_model::RecoveryRunStatus) -> String {
     serde_json::to_string(status)
+        .unwrap_or_default()
+        .trim_matches('"')
+        .to_owned()
+}
+
+/// Serde enum key without the surrounding quotes (see `status_key`).
+fn enum_key<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value)
         .unwrap_or_default()
         .trim_matches('"')
         .to_owned()

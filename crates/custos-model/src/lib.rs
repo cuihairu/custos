@@ -12,6 +12,7 @@ pub mod evidence;
 pub mod graph;
 pub mod health;
 pub mod ids;
+pub mod incident;
 pub mod recovery;
 pub mod resource;
 pub mod snapshot;
@@ -23,6 +24,7 @@ pub use evidence::Evidence;
 pub use graph::{DependencyGraph, GraphError};
 pub use health::HealthStatus;
 pub use ids::{ActionId, IncidentId, RecoveryRunId, ResourceId};
+pub use incident::Incident;
 pub use recovery::{
     ActionAttempt, ActionOutcome, ActionSpec, FailureHandling, RecoveryPlan, RecoveryRun,
     RecoveryRunStatus, RiskLevel, TransitionError, VerificationResult,

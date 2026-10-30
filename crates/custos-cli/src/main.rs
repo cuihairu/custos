@@ -29,6 +29,8 @@ COMMANDS:
         --interval MS          Tick interval override (default: 5s)
         --once                 Run one observation tick and exit
     status [--db PATH]         Store counters and recent audit events
+    runs [--db PATH]           Recent recovery runs, newest first
+    incidents [--db PATH]      Incident history, newest first
     resources <CONFIG>         List configured resources
     graph <CONFIG>             Dependency graph in topological order
     help                       Print this message";
@@ -46,6 +48,8 @@ fn main() -> ExitCode {
             None => missing_arg("start", "CONFIG"),
         },
         Some("status") => status(&args[1..]),
+        Some("runs") => runs(&args[1..]),
+        Some("incidents") => incidents(&args[1..]),
         Some("resources") => match args.get(1) {
             Some(path) => resources(path),
             None => missing_arg("resources", "CONFIG"),
@@ -225,6 +229,115 @@ fn start(path: &str, args: &[String]) -> ExitCode {
         std::thread::sleep(Duration::from_millis(options.interval_ms));
     }
     ExitCode::SUCCESS
+}
+
+/// Parses a lone `--db PATH` option shared by the history commands.
+fn db_arg(args: &[String], command: &str) -> Result<String, ExitCode> {
+    let mut path = "custos.db".to_owned();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--db" => {
+                path = args.get(i + 1).cloned().ok_or_else(|| {
+                    eprintln!("error: --db requires a path");
+                    ExitCode::from(2)
+                })?;
+                i += 2;
+            }
+            other => {
+                eprintln!("error: unknown option `{other}` for `{command}`");
+                return Err(ExitCode::from(2));
+            }
+        }
+    }
+    Ok(path)
+}
+
+/// Opens the store for read-only history queries.
+fn open_history(path: &str) -> Result<custos_store::Store, ExitCode> {
+    custos_store::Store::open(path).map_err(|err| {
+        eprintln!("error: cannot open database {path}: {err}");
+        ExitCode::FAILURE
+    })
+}
+
+/// Recent recovery runs, newest first.
+fn runs(args: &[String]) -> ExitCode {
+    let path = match db_arg(args, "runs") {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+    let store = match open_history(&path) {
+        Ok(store) => store,
+        Err(code) => return code,
+    };
+    match store.list_runs(20) {
+        Ok(rows) if rows.is_empty() => {
+            println!("no recovery runs recorded");
+            ExitCode::SUCCESS
+        }
+        Ok(rows) => {
+            println!(
+                "{:<16} {:<20} {:<14} {:<8} UPDATED",
+                "RUN", "RESOURCE", "STATUS", "ATTEMPTS"
+            );
+            for row in rows {
+                let attempts = match store.run(&custos_model::ids::RecoveryRunId::new(&row.id)) {
+                    Ok(Some(run)) => run.action_attempts.len().to_string(),
+                    _ => "-".to_owned(),
+                };
+                println!(
+                    "{:<16} {:<20} {:<14} {:<8} {}",
+                    row.id, row.resource_id, row.status, attempts, row.updated_at_unix_ms
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("error: query failed: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Incident history, newest first; open incidents are marked.
+fn incidents(args: &[String]) -> ExitCode {
+    let path = match db_arg(args, "incidents") {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+    let store = match open_history(&path) {
+        Ok(store) => store,
+        Err(code) => return code,
+    };
+    match store.list_incidents(20) {
+        Ok(rows) if rows.is_empty() => {
+            println!("no incidents recorded");
+            ExitCode::SUCCESS
+        }
+        Ok(rows) => {
+            println!(
+                "{:<12} {:<20} {:<24} {:<8} OPENED",
+                "INCIDENT", "RESOURCE", "FAULT", "STATE"
+            );
+            for row in rows {
+                let state = if row.closed_at_unix_ms.is_some() {
+                    "closed"
+                } else {
+                    "OPEN"
+                };
+                println!(
+                    "{:<12} {:<20} {:<24} {:<8} {}",
+                    row.id, row.resource_id, row.fault_code, state, row.opened_at_unix_ms
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("error: query failed: {err}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Store counters and the newest audit events.
