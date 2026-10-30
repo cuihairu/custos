@@ -6,6 +6,7 @@ members = [
     "crates/custos-engine",
     "crates/custos-probe",
     "crates/custos-plugin-api",
+    "crates/custos-toolbox",
     "crates/custos-plugin-host",
     "crates/custos-platform",
     "crates/custos-config",

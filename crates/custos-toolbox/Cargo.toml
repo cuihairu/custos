@@ -1,0 +1,16 @@
+[package]
+name = "custos-toolbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[dependencies]
+custos-model = { workspace = true }
+custos-plugin-api = { path = "../custos-plugin-api" }
+custos-probe = { path = "../custos-probe" }
+serde_json = { workspace = true }
+
+tempfile = "3"
