@@ -17,3 +17,6 @@ thiserror = { workspace = true }
 [[bin]]
 name = "mock-plugin"
 path = "tests/fixtures/mock_plugin.rs"
+
+[dev-dependencies]
+tempfile = "3"

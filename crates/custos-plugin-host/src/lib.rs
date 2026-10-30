@@ -9,10 +9,12 @@
 
 mod compat;
 mod plugin_probe;
+mod python;
 mod session;
 mod supervisor;
 
 pub use compat::{validate_capabilities, CapabilityKindRequirement};
 pub use plugin_probe::PluginProbe;
+pub use python::{resolve_shim, script_plugin_config, INTERPRETER_ENV, PYTHON_SHIM_PATH, SHIM_ENV};
 pub use session::{CallHandle, HostError, InitializeResult, PluginConfig, PluginSession};
 pub use supervisor::{PluginStatus, PluginSupervisor, RestartPolicy};
