@@ -24,6 +24,11 @@ Custos is a cross-platform, local-first, dependency-aware fault detection and au
 
 One plugin = the complete monitoring + handling logic for ONE resource kind (probe, diagnosis, recovery actions, verification). Plugins can depend on other plugins; consumers enable them with simple configuration only — no glue code.
 
+## Builtin capabilities and Python script extension (authoritative)
+
+- **Builtin capabilities**: the core engine ships builtin base adapters for common resources (services, processes, disks, network connectivity, etc.) that work out of the box — basic scenarios need no plugin development at all.
+- **Python script extension (bidirectional)**: outbound — core functionality is callable from Python scripts via PyO3 bindings; inbound — custom probes and recovery actions can be written as Python scripts, loaded and executed by the core under the plugin contract (timeouts, permissions and budgets follow the same plugin rules).
+
 ## Documentation
 
 The full architecture design and phased implementation plan live in the VitePress site under `docs/`:
@@ -40,7 +45,7 @@ Or read the sources directly: [docs/guide/overview.md](docs/guide/overview.md).
 
 ## Status
 
-Design phase — the architecture document and phased plan (P0–P4) are the current deliverable; implementation has not started.
+P0 in progress — the Cargo workspace skeleton has landed (domain model, dependency-graph cycle detection, configuration validation, the `custos validate` CLI command); the remaining P0 items follow the [phased implementation plan](docs/guide/roadmap.md).
 
 ## License
 
