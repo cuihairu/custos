@@ -1,3 +1,5 @@
+[English](README.md) | [中文](README.zh.md)
+
 <div align="center">
   <img src="docs/public/logo.svg" alt="custos logo" width="64" height="64" />
   <h1>custos</h1>
