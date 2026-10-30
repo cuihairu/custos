@@ -11,7 +11,7 @@ use custos_model::{
     ActionSpec, AlternativeGroup, Dependency, DependencyGraph, FaultCode, GraphError,
     HealthCondition, HealthPolicy, RecoveryPlan, RecoveryPolicy, Resource, ResourceId,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 mod notification;
 pub use notification::{
@@ -42,7 +42,13 @@ impl ConfigError {
 }
 
 /// Probe wiring as written per resource; carried into `Resource::config`.
-#[derive(Debug, Clone, Deserialize)]
+///
+/// The native probes (survey §26.11) read resource-type-specific fields from
+/// the same `[resources.probe]` table. Every field the builtin probes can
+/// consume is declared here so a probe table passes `custos validate`; the
+/// fields are carried through verbatim into `Resource::config` (§10.3:
+/// unknown fields are still errors).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawProbe {
     /// `custom-command`: check command argv.
@@ -57,6 +63,98 @@ struct RawProbe {
     timeout_ms: u64,
     #[serde(default = "default_max_output_bytes")]
     max_output_bytes: usize,
+    // http-endpoint.
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    fail_if_matches: Option<String>,
+    #[serde(default)]
+    contains: Option<String>,
+    #[serde(default)]
+    allowed_statuses: Option<Vec<String>>,
+    #[serde(default)]
+    max_redirects: Option<u64>,
+    #[serde(default)]
+    max_response_bytes: Option<u64>,
+    #[serde(default)]
+    response_time_threshold_ms: Option<u64>,
+    #[serde(default)]
+    follow_redirects: Option<bool>,
+    #[serde(default)]
+    verify_tls: Option<bool>,
+    // network-connectivity / tls-certificate / icmp / database.
+    #[serde(default)]
+    host: Option<String>,
+    #[serde(default)]
+    port: Option<u64>,
+    #[serde(default)]
+    tls: Option<bool>,
+    #[serde(default)]
+    server_name: Option<String>,
+    #[serde(default)]
+    warn_days: Option<u64>,
+    #[serde(default)]
+    crit_days: Option<u64>,
+    #[serde(default)]
+    fallback_port: Option<u64>,
+    #[serde(default)]
+    tcp_fallback: Option<bool>,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    query: Option<String>,
+    #[serde(default)]
+    user: Option<String>,
+    #[serde(default)]
+    password: Option<String>,
+    #[serde(default)]
+    database: Option<String>,
+    // dns.
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    server: Option<String>,
+    #[serde(default)]
+    record_type: Option<String>,
+    #[serde(default)]
+    expect: Option<String>,
+    // proxy.
+    #[serde(default)]
+    proxy: Option<String>,
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    username: Option<String>,
+    // service / systemd.
+    #[serde(default)]
+    unit: Option<String>,
+    // disk / memory / cpu / log / docker / network-interface.
+    #[serde(default)]
+    mount_point: Option<String>,
+    #[serde(default)]
+    warn_pct: Option<u64>,
+    #[serde(default)]
+    crit_pct: Option<u64>,
+    #[serde(default)]
+    check_swap: Option<bool>,
+    #[serde(default)]
+    warn_load: Option<f64>,
+    #[serde(default)]
+    crit_load: Option<f64>,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    pattern: Option<String>,
+    #[serde(default)]
+    max_bytes_per_check: Option<u64>,
+    #[serde(default)]
+    container: Option<String>,
+    #[serde(default)]
+    max_restarts: Option<u64>,
+    #[serde(default)]
+    interface: Option<String>,
+    #[serde(default)]
+    connect_port: Option<u64>,
 }
 
 fn default_interval_ms() -> u64 {
@@ -500,13 +598,10 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
         let probe_config = raw_resource.probe.clone().map_or_else(
             || serde_json::Value::Null,
             |p| {
-                serde_json::json!({
-                    "command": p.command,
-                    "pid_file": p.pid_file,
-                    "interval_ms": p.interval_ms,
-                    "timeout_ms": p.timeout_ms,
-                    "max_output_bytes": p.max_output_bytes,
-                })
+                // Carry the full probe table verbatim so the native probes
+                // (http/tcp/dns/tls-cert/disk/mem/cpu/log/docker/icmp/proxy/
+                // database/systemd) see their own fields at runtime.
+                serde_json::to_value(p).unwrap_or(serde_json::Value::Null)
             },
         );
 
@@ -982,5 +1077,114 @@ id = "network"
 type = "network-connectivity"
 "#;
         assert!(load(config).is_err());
+    }
+
+    #[test]
+    fn native_probe_fields_are_accepted_and_carried_through() {
+        // §26.11 probes read resource-type-specific fields from the same
+        // `[resources.probe]` table; `custos validate` must accept them and
+        // the runtime config must carry them verbatim.
+        let config = r#"
+version = 1
+
+[[resources]]
+id = "web"
+type = "http-endpoint"
+
+[resources.probe]
+url = "https://example.com/health"
+allowed_statuses = ["2xx", "200-299"]
+follow_redirects = true
+verify_tls = true
+response_time_threshold_ms = 500
+max_response_bytes = 65536
+
+[[resources]]
+id = "net"
+type = "network-connectivity"
+
+[resources.probe]
+host = "1.1.1.1"
+port = 53
+tls = false
+server_name = "one.one.one.one"
+timeout_ms = 2000
+
+[[resources]]
+id = "cert"
+type = "tls-certificate"
+
+[resources.probe]
+host = "example.com"
+port = 443
+warn_days = 30
+crit_days = 7
+
+[[resources]]
+id = "resolve"
+type = "dns"
+
+[resources.probe]
+name = "api.example.com"
+server = "1.1.1.1"
+record_type = "AAAA"
+
+[[resources]]
+id = "cache"
+type = "memory"
+
+[resources.probe]
+check_swap = true
+warn_pct = 80
+crit_pct = 90
+"#;
+        let cfg = load(config).expect("native probe tables must validate");
+        let by_id = |id: &str| {
+            cfg.resources
+                .iter()
+                .find(|r| r.id.as_str() == id)
+                .expect("resource exists")
+        };
+        let web = by_id("web");
+        assert_eq!(web.config["url"], "https://example.com/health");
+        assert_eq!(web.config["follow_redirects"], true);
+        assert_eq!(web.config["response_time_threshold_ms"], 500);
+        assert_eq!(web.config["max_response_bytes"], 65536);
+        let net = by_id("net");
+        assert_eq!(net.config["host"], "1.1.1.1");
+        assert_eq!(net.config["port"], 53);
+        assert_eq!(net.config["server_name"], "one.one.one.one");
+        assert_eq!(net.config["timeout_ms"], 2000);
+        let cert = by_id("cert");
+        assert_eq!(cert.config["warn_days"], 30);
+        assert_eq!(cert.config["crit_days"], 7);
+        let resolve = by_id("resolve");
+        assert_eq!(resolve.config["record_type"], "AAAA");
+        let cache = by_id("cache");
+        assert_eq!(cache.config["check_swap"], true);
+        assert_eq!(cache.config["warn_pct"], 80);
+    }
+
+    #[test]
+    fn unknown_probe_field_is_still_rejected() {
+        // deny_unknown_fields still applies: a typo in a probe table is a
+        // configuration error, not silently dropped.
+        let config = r#"
+version = 1
+
+[[resources]]
+id = "net"
+type = "network-connectivity"
+
+[resources.probe]
+host = "1.1.1.1"
+port = 53
+hostt = "typo"
+"#;
+        let err = load(config).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown field"),
+            "got: {err}"
+        );
     }
 }
