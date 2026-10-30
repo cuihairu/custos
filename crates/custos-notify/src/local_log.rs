@@ -114,17 +114,27 @@ mod tests {
         assert!(channel.deliver(&event()).is_ok());
     }
 
+    /// A process-global capture so the tracing emit is deterministic even
+    /// under the parallel test harness (a thread-local default subscriber is
+    /// racy across threads). Installed once via `set_global_default`.
+    static CAPTURED: std::sync::OnceLock<std::sync::Arc<std::sync::Mutex<Vec<String>>>> =
+        std::sync::OnceLock::new();
+    static INIT: std::sync::Once = std::sync::Once::new();
+
     #[test]
     fn deliver_emits_structured_line() {
-        let captured: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let writer = CapturedWriter(captured.clone());
-        let subscriber = tracing_subscriber::fmt()
-            .with_writer(move || writer.clone())
-            .with_max_level(tracing::Level::TRACE)
-            .finish();
-        let _guard = tracing::subscriber::set_default(subscriber);
+        let captured =
+            CAPTURED.get_or_init(|| std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
+        INIT.call_once(|| {
+            let writer = CapturedWriter(captured.clone());
+            let subscriber = tracing_subscriber::fmt()
+                .with_writer(move || writer.clone())
+                .with_max_level(tracing::Level::TRACE)
+                .finish();
+            let _ = tracing::subscriber::set_global_default(subscriber);
+        });
 
+        captured.lock().unwrap().clear();
         let channel = LocalLogChannel::new("audit", true);
         channel.deliver(&event()).unwrap();
         let lines = captured.lock().unwrap();

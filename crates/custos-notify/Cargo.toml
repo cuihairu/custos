@@ -5,10 +5,14 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+custos-config = { path = "../custos-config" }
 custos-model = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = "0.1"
+ureq = "3"
+hmac = "0.12"
+sha2 = "0.10"
 
 [dev-dependencies]
 tracing-subscriber = "0.3"

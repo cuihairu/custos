@@ -464,7 +464,9 @@ fn build_channel(id: &str, mut table: toml::Table) -> Result<ChannelConfig, Stri
 }
 
 impl SsrfPolicy {
-    fn default_blocking() -> Self {
+    /// The default policy: block private, loopback and redirect targets
+    /// (docs/guide/notification.md §8.2 SSRF protection).
+    pub fn default_blocking() -> Self {
         SsrfPolicy {
             block_private: true,
             block_loopback: true,
