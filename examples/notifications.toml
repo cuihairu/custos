@@ -37,14 +37,14 @@ status_is = "healthy"
 id = "alert-recovery-trouble"
 event = "recovery.exhausted"
 severity_min = "warning"
-channels = ["ops-webhook"]
+channels = ["ops-webhook", "herald-alerts"]
 log = true
 
 [[notification.rules]]
 id = "alert-outcome-unknown"
 event = "recovery.outcome_unknown"
 severity_min = "warning"
-channels = ["ops-webhook"]
+channels = ["ops-webhook", "herald-alerts"]
 log = true
 
 # Unhealthy resources always hit the local audit log too.
@@ -73,3 +73,16 @@ block_redirects = true
 [notification.channels.audit]
 type = "local-log"
 enabled = true
+
+# Herald (github.com/cuihairu/herald) app integration: custos dispatches to
+# the app API with severity→urgency mapping, fault events as state=down and
+# recovery.succeeded as state=ok, so herald-side dedup collapses repeats and
+# a state flip resends.
+[notification.channels.herald-alerts]
+type = "herald"
+base_url = "http://127.0.0.1:8080"
+app = "custos"
+token = "CHANGE_ME_trigger_scope"
+auth = "api-key"        # or "bearer"
+category = "alerts"
+audiences = ["log"]     # bare channel names, "user:<id>", "group:<id>"

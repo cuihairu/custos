@@ -52,6 +52,7 @@ pub enum ChannelConfig {
     LocalLog { enabled: bool },
     Webhook(WebhookConfig),
     Smtp(SmtpConfig),
+    Herald(HeraldConfig),
 }
 
 impl std::fmt::Debug for ChannelConfig {
@@ -63,6 +64,7 @@ impl std::fmt::Debug for ChannelConfig {
                 .finish(),
             ChannelConfig::Webhook(cfg) => write!(f, "Webhook({cfg:?})"),
             ChannelConfig::Smtp(cfg) => write!(f, "Smtp({cfg:?})"),
+            ChannelConfig::Herald(cfg) => write!(f, "Herald({cfg:?})"),
         }
     }
 }
@@ -139,6 +141,58 @@ impl std::fmt::Debug for SmtpConfig {
             .field("tls", &self.tls)
             .field("connect_timeout_ms", &self.connect_timeout_ms)
             .field("send_timeout_ms", &self.send_timeout_ms)
+            .finish()
+    }
+}
+
+/// Which auth header carries the app token (github.com/cuihairu/herald
+/// accepts both; the curl examples use `X-API-Key`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HeraldAuth {
+    /// `X-API-Key: <token>` (default).
+    #[default]
+    ApiKey,
+    /// `Authorization: Bearer <token>`.
+    Bearer,
+}
+
+/// Herald channel settings (github.com/cuihairu/herald): POSTs each event to
+/// the app dispatch endpoint `/api/v1/apps/{app}/dispatch`, mapping Custos
+/// severity to herald urgency and fault events to herald's `down`/`ok`
+/// state so herald-side dedup collapses repeats and a recovery flip resends.
+#[derive(Clone, PartialEq)]
+pub struct HeraldConfig {
+    /// Herald base URL, e.g. `http://127.0.0.1:8080`.
+    pub base_url: String,
+    /// The registered app id.
+    pub app: String,
+    /// App token with `trigger` scope. Debug-redacted; omit when herald runs
+    /// with auth disabled (loopback only per its config rules).
+    pub token: Option<SecretString>,
+    pub auth: HeraldAuth,
+    /// Registered dispatch category (default `alerts`).
+    pub category: String,
+    /// Audiences to dispatch to (bare channel names, `user:<id>`,
+    /// `group:<id>`; default `["log"]`).
+    pub audiences: Vec<String>,
+    pub timeout_ms: u64,
+    pub retries: u32,
+    /// Base retry backoff; the channel doubles it per attempt.
+    pub backoff_ms: u64,
+}
+
+impl std::fmt::Debug for HeraldConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HeraldConfig")
+            .field("base_url", &self.base_url)
+            .field("app", &self.app)
+            .field("token", &self.token)
+            .field("auth", &self.auth)
+            .field("category", &self.category)
+            .field("audiences", &self.audiences)
+            .field("timeout_ms", &self.timeout_ms)
+            .field("retries", &self.retries)
+            .field("backoff_ms", &self.backoff_ms)
             .finish()
     }
 }
@@ -276,6 +330,36 @@ struct RawSmtp {
     connect_timeout_ms: u64,
     #[serde(default = "default_webhook_timeout_ms")]
     send_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawHerald {
+    base_url: String,
+    app: String,
+    #[serde(default)]
+    token: Option<SecretString>,
+    /// `api-key` (default) or `bearer`.
+    #[serde(default)]
+    auth: Option<String>,
+    #[serde(default = "default_herald_category")]
+    category: String,
+    #[serde(default = "default_herald_audiences")]
+    audiences: Vec<String>,
+    #[serde(default = "default_webhook_timeout_ms")]
+    timeout_ms: u64,
+    #[serde(default = "default_webhook_retries")]
+    retries: u32,
+    #[serde(default = "default_backoff_ms")]
+    backoff_ms: u64,
+}
+
+fn default_herald_category() -> String {
+    "alerts".to_owned()
+}
+
+fn default_herald_audiences() -> Vec<String> {
+    vec!["log".to_owned()]
 }
 
 fn default_true() -> bool {
@@ -457,8 +541,57 @@ fn build_channel(id: &str, mut table: toml::Table) -> Result<ChannelConfig, Stri
                 send_timeout_ms: raw.send_timeout_ms,
             }))
         }
+        "herald" => {
+            let raw: RawHerald = rest.try_into().map_err(|e| err_unknown_fields(&kind, &e))?;
+            if raw.base_url.is_empty() {
+                return Err("herald `base_url` must not be empty".to_owned());
+            }
+            let scheme = raw
+                .base_url
+                .split_once("://")
+                .map(|(s, _)| s.to_ascii_lowercase());
+            if !matches!(scheme.as_deref(), Some("http" | "https")) {
+                return Err(format!(
+                    "herald `base_url` must be http or https, got `{}`",
+                    raw.base_url
+                ));
+            }
+            if raw.app.trim().is_empty() {
+                return Err("herald `app` must not be empty".to_owned());
+            }
+            if raw.audiences.is_empty() {
+                return Err(
+                    "herald `audiences` must list at least one audience (herald rejects empty)"
+                        .to_owned(),
+                );
+            }
+            if raw.category.trim().is_empty() {
+                return Err("herald `category` must not be empty".to_owned());
+            }
+            let auth = match raw.auth.as_deref() {
+                None => HeraldAuth::ApiKey,
+                Some("api-key") => HeraldAuth::ApiKey,
+                Some("bearer") => HeraldAuth::Bearer,
+                Some(other) => {
+                    return Err(format!(
+                        "herald `auth` must be api-key or bearer, got `{other}`"
+                    ))
+                }
+            };
+            Ok(ChannelConfig::Herald(HeraldConfig {
+                base_url: raw.base_url.trim_end_matches('/').to_owned(),
+                app: raw.app,
+                token: raw.token,
+                auth,
+                category: raw.category,
+                audiences: raw.audiences,
+                timeout_ms: raw.timeout_ms,
+                retries: raw.retries,
+                backoff_ms: raw.backoff_ms,
+            }))
+        }
         other => Err(format!(
-            "channel `{id}` has unknown type `{other}` (expected local-log|webhook|smtp)"
+            "channel `{id}` has unknown type `{other}` (expected local-log|webhook|smtp|herald)"
         )),
     }
 }
@@ -746,6 +879,81 @@ to = []
         )
         .unwrap_err();
         assert!(err.to_string().contains("at least one"), "got: {err}");
+    }
+
+    #[test]
+    fn herald_channel_parses_with_defaults() {
+        let config = load(
+            r#"
+version = 1
+
+[[resources]]
+id = "web"
+type = "http-endpoint"
+
+[notification.channels.herald]
+type = "herald"
+base_url = "http://127.0.0.1:8080/"
+app = "custos"
+token = "trigger-token"
+"#,
+        )
+        .unwrap();
+        match config.notification.channel("herald").unwrap() {
+            ChannelConfig::Herald(h) => {
+                assert_eq!(h.base_url, "http://127.0.0.1:8080");
+                assert_eq!(h.app, "custos");
+                assert_eq!(h.auth, HeraldAuth::ApiKey);
+                assert_eq!(h.category, "alerts");
+                assert_eq!(h.audiences, vec!["log"]);
+                assert_eq!(h.timeout_ms, 10_000);
+                assert_eq!(h.retries, 3);
+                assert!(h.token.is_some());
+            }
+            other => panic!("expected herald, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn herald_channel_rejects_bad_auth_and_empty_audiences() {
+        let err = load(
+            r#"
+version = 1
+
+[[resources]]
+id = "web"
+type = "http-endpoint"
+
+[notification.channels.h]
+type = "herald"
+base_url = "http://127.0.0.1:8080"
+app = "custos"
+auth = "magic"
+"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("api-key or bearer"), "got: {err}");
+
+        let err = load(
+            r#"
+version = 1
+
+[[resources]]
+id = "web"
+type = "http-endpoint"
+
+[notification.channels.h]
+type = "herald"
+base_url = "http://127.0.0.1:8080"
+app = "custos"
+audiences = []
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("at least one audience"),
+            "got: {err}"
+        );
     }
 
     #[test]

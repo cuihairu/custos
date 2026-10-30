@@ -194,7 +194,7 @@ mod tests {
     use crate::local_log::format_event;
     use custos_config::SsrfPolicy;
     use custos_model::{EventId, EventType, NotificationEvent, Severity};
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::net::{SocketAddr, TcpListener};
     use std::sync::{Arc, Mutex};
 
@@ -235,7 +235,7 @@ mod tests {
         let cap = captured.clone();
         std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let request = read_full_request(&mut stream);
+            let request = crate::test_http::read_full_request(&mut stream);
             cap.lock().unwrap().extend_from_slice(&request);
             let response =
                 format!("HTTP/1.1 {status} X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
@@ -254,7 +254,7 @@ mod tests {
         std::thread::spawn(move || {
             for status in statuses {
                 let (mut stream, _) = listener.accept().unwrap();
-                let request = read_full_request(&mut stream);
+                let request = crate::test_http::read_full_request(&mut stream);
                 cap.lock().unwrap().push(request);
                 let response = format!(
                     "HTTP/1.1 {status} X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -264,45 +264,6 @@ mod tests {
             }
         });
         (addr, captured)
-    }
-
-    /// Reads until the request body (per Content-Length) is fully received,
-    /// so the captured buffer is never truncated between the header and
-    /// body writes.
-    fn read_full_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_millis(2000)))
-            .ok();
-        let mut buf = Vec::new();
-        let mut tmp = [0u8; 4096];
-        loop {
-            if let Some(end) = find_header_end(&buf) {
-                let total = end + parse_content_length(&buf[..end]);
-                if buf.len() >= total {
-                    return buf;
-                }
-            }
-            match stream.read(&mut tmp) {
-                Ok(0) => return buf,
-                Ok(n) => buf.extend_from_slice(&tmp[..n]),
-                Err(_) => return buf,
-            }
-        }
-    }
-
-    fn find_header_end(buf: &[u8]) -> Option<usize> {
-        buf.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4)
-    }
-
-    fn parse_content_length(header: &[u8]) -> usize {
-        let text = String::from_utf8_lossy(header).to_lowercase();
-        text.lines()
-            .find_map(|line| {
-                line.trim_start()
-                    .strip_prefix("content-length:")
-                    .and_then(|v| v.trim().parse::<usize>().ok())
-            })
-            .unwrap_or(0)
     }
 
     #[test]

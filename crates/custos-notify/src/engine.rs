@@ -72,6 +72,10 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
                     .map(|c| Box::new(c) as Box<dyn Channel>),
                 ChannelConfig::Smtp(cfg) => SmtpChannel::new(id.clone(), cfg.clone())
                     .map(|c| Box::new(c) as Box<dyn Channel>),
+                ChannelConfig::Herald(cfg) => {
+                    crate::herald::HeraldChannel::new(id.clone(), cfg.clone())
+                        .map(|c| Box::new(c) as Box<dyn Channel>)
+                }
             };
             match built {
                 Ok(channel) => {

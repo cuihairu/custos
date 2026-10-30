@@ -15,8 +15,8 @@ use serde::Deserialize;
 
 mod notification;
 pub use notification::{
-    ChannelConfig, NotificationConfig, NotificationRule, SecretString, SmtpConfig, SsrfPolicy,
-    WebhookConfig,
+    ChannelConfig, HeraldAuth, HeraldConfig, NotificationConfig, NotificationRule, SecretString,
+    SmtpConfig, SsrfPolicy, WebhookConfig,
 };
 
 /// Supported configuration schema version.
