@@ -155,7 +155,7 @@
 - [x] 不完整消息/异常 JSON/未知方法 → 明确错误 `66b6255`
 - [x] 请求超时 + 取消 `66b6255`
 - [x] 插件崩溃隔离：核心进程不受影响，相关资源标记不可探测 `f2f6a63`
-- [ ] 插件无法恢复时资源降级标记 + 故障通知
+- [x] 插件无法恢复时资源降级标记 + 故障通知 `dc8a4e6`（观察串契约提升为共享常量 `custos_probe::PLUGIN_DEGRADED_OBSERVATION_PREFIX`，PluginProbe 与引擎同源；probe_one 在转入 Unreachable 且带该前缀时发 `plugin.unavailable`（critical，附降级原因），资源本身按 §3.2 标 Unreachable 不误触发恢复；同时修复 record_probe 语义：签名增 probe_status，持续 Unreachable 标不可探测而非误判 Unhealthy，且 Unreachable 结果不覆盖已确认的 Unhealthy/Recovering/Suppressed（探针超时不掩盖故障、不断恢复）——模型快照 5 测试 + 引擎 plugin.unavailable 测试覆盖）
 
 ### 通知（custos-notify）
 
