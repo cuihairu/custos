@@ -161,7 +161,7 @@
 
 - [x] NotificationEvent 模型 + 十一种事件类型全集 `955e8ca`（`custos-model/src/notification.rs`；EventId/EventType/Severity/SanitizedDetails/NotificationEvent 按 notification.md §8.4；11 种事件类型序列化为精确点分线名如 `resource.unhealthy`/`notification.delivery_failed`；Severity=info/warning/critical 三级；SanitizedDetails 扁平 BTreeMap 确定序；模型放 custos-model 使引擎（生产者）/custos-notify（消费者）/custos-store（队列持久化）共享同一形状；`notification.delivery_failed` 由引擎按防自激循环规则特殊处理）
 - [x] 通知规则与恢复规则解耦（独立配置节） `0b3baa1`（`custos-config/src/notification.rs`；顶层 `[notification]` 节独立于每资源 `recovery_policy`——恢复策略决定"怎么修"，通知规则决定"谁听到"；规则按 event/severity_min/resource 过滤并选渠道；渠道配置（local-log/webhook/smtp，带 type 判别）在加载时校验（§10.3 step 10）：未知字段/类型、悬空渠道/资源引用、非 http(s) url、空收件人均报错；SecretString 使 Debug/Display 抹除口令（§8.7）；ValidatedConfig 增 notification 字段；examples/notifications.toml 更新；custos-config 29/29 绿）
-- [ ] 本地日志渠道（基础审计输出）
+- [x] 本地日志渠道（基础审计输出） `fd157c2`（`custos-notify/src/local_log.rs`；每事件一条结构化 JSON 行经 tracing 按 severity→level 映射输出（info/warn/error），无远程依赖，永不失败；新增 Channel trait + 类型化 ChannelError（Transport/Http/Rejected/Config 区分可重试与终态），发送失败不阻塞恢复的契约在此固定；本地日志渠道在 tracing 测试订阅器下断言结构化输出；custos-notify 5/5 绿）
 - [ ] Webhook 渠道：超时/重试退避/事件 ID/认证头/可选 HMAC/TLS 校验
 - [ ] Webhook SSRF 防护：私网/回环/重定向目标策略
 - [ ] SMTP 渠道：连接与发送超时/TLS/凭据安全读取/发件收件配置/明确结果
