@@ -175,7 +175,7 @@
 ### 用户裁定落地：内置能力与 Python 扩展
 
 - [x] 内置能力口径固化（ADR 15 工具箱模型）：核心内部集成工具注册表（HTTP/RPC/SSH 客户端 + 进程/服务/磁盘/网络连通性探测 + 受控命令执行 + 重启控制），以 Capability+OperationParams 声明；插件=规则层，与内置能力同派发表，传输安全集中硬化一次 `b1cc338`（`custos-toolbox` crate：统一派发表 ToolRegistry——内置工具与插件声明的 operation id 同表注册、重复 ID 拒绝；dispatch 回答"谁服务此操作"：内置→进程内执行、插件→ToPlugin 交 runtime 转发；权限门在执行前统一强制（ADR-0012），required_permission 未授权即 Denied 且执行器不跑；首批内置工具 `exec.run`（受控命令执行，复用 run_controlled：超时/输出上限/进程树清理，argv 为数据非 shell 文本）与 `process.status`（只读，复用 ProcessProbe）；14/14 绿，mingw 交叉检查过；后续 HTTP/SSH/重启控制按同口径注册）
-- [ ] Python 入向：脚本探测/恢复动作加载器，按插件契约执行（超时/权限/预算同口径）
+- [x] Python 入向：脚本探测/恢复动作加载器，按插件契约执行（超时/权限/预算同口径） `80022df`（`plugins/python/custos_python_plugin.py` shim + `custos-plugin-host/src/python.rs` 加载器：脚本经 custos/v1 stdio JSON-RPC 与宿主对话，超时/重启策略/权限门/预算全在宿主机制内执行——与原生插件完全同口径；加载器接管 stdout，用户 print() 导入前重定向到 stderr，防止脏脚本污染协议（§4.4）；能力声明按脚本定义的函数自动派生（python.probe/python.recover，可 CAPABILITIES 覆盖）；解释器 `CUSTOS_PYTHON_INTERPRETER`、shim `CUSTOS_PYTHON_SHIM` 可覆盖；集成测试驱动真实 python3 子进程：握手/能力/健康与不健康探针/supervisor 恢复动作/坏脚本快速失败不挂起；示例 `plugins/python/examples/file_health_probe.py`）
 - [ ] Python 出向：PyO3 绑定 crate 骨架（custos-python 或 custos-py）
 - [ ] Python 出向：核心查询 API 暴露（资源/健康/历史）
 - [ ] Python 出向：探测触发与恢复触发 API 暴露
