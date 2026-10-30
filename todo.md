@@ -217,8 +217,8 @@
 - [x] mihomo 插件（一插件一资源闭环口径） `a4add7f`（`plugins/mihomo` bin：外部控制器 /version 探活 + 托管组当前节点入观察；恢复计划 1 切换节点（PUT /proxies/<组> 选下一成员，无重启）、计划 2 受控 systemctl restart；Capability 三条声明（probe/switch_node/restart 含 interrupts 标记）；通过真实宿主会话集成测试（握手/能力/控制器不可达 healthy=false/无组拒切））
 - [x] cloudflared 插件 `a4add7f`（`plugins/cloudflared` bin：metrics 端点解析 cloudflared_tunnel_ha_connections——进程活着但 0 边缘连接=真故障；恢复 restart 受控执行；Capability interrupts_remote_admin=true；宿主会话集成测试）
 - [ ] Windows Wi-Fi 完整恢复场景
-- [ ] OpenWrt 适配：procd / UCI / ubus / 网络检查
-- [ ] OpenClash 插件（节点诊断 + 有序切换）
+- [x] OpenWrt 适配：procd / UCI / ubus / 网络检查 `6af14ec`（`openwrt.rs`：/etc/openwrt_release 检测；procd 服务经 /etc/init.d + ubus service list 实例存在性判断运行态；uci get 未设即 NotFound；ubus call 返回解析 JSON；WAN status 解析器（up/地址/默认路由）fixture 测试；非 OpenWrt 主机全部明报 Unsupported 不猜测）
+- [x] OpenClash 插件（节点诊断 + 有序切换） `105f6e2`（`plugins/openclash` bin：探测 clash core 版本+托管组当前节点；有序恢复=组成员 delay 实测取最快（无 delay 数据才退到首候选，绝不盲目轮询），重启走 /etc/init.d/openclash（OpenWrt 无 systemd）；Capability 三条含 interrupts 标记；宿主会话集成测试）
 - [ ] 网络恢复后端到端验证
 - [x] 网络操作互斥 + 风险控制（禁默认清防火墙/重置全部路由） `7d9e8f9`（全局 NETWORK_OPS 互斥锁：接口重置与重启跨资源同时刻至多一个网络操作，并发者立即收到明确拒绝而非排队等惊喜；重置=显式单接口 down+up；无任何防火墙清空/全路由重置原语存在）
 - [ ] 验收场景 1：向日葵离线网络正常 → 只恢复向日葵相关
