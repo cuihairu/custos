@@ -207,6 +207,7 @@ version = "0.1.0"
 dependencies = [
  "custos-engine",
  "custos-model",
+ "libsqlite3-sys",
  "serde",
  "serde_json",
  "sqlx",

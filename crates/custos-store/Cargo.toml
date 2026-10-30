@@ -7,6 +7,9 @@ license.workspace = true
 [dependencies]
 custos-engine = { workspace = true }
 custos-model = { workspace = true }
+# Compile SQLite from source so builds are hermetic on every OS (CI builds
+# for Linux/Windows/macOS must not require a system libsqlite3 or vcpkg).
+libsqlite3-sys = { version = "0.30", features = ["bundled"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }

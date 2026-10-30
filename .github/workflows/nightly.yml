@@ -1,0 +1,167 @@
+# Nightly rolling build (user ruling 2026-10-11: 每日构建属正常交付面).
+#
+#   Linux   : deb + rpm + tar.gz binary  (x86_64, aarch64)
+#   Windows : msi + zip binary           (x86_64)
+#   macOS   : dmg + tar.gz binary        (aarch64)
+#
+# This is NOT a formal release: no version tag is created, nothing is
+# promoted to a versioned Release. Binaries publish to the rolling `nightly`
+# prerelease ONLY after fmt + clippy + the full workspace test suite pass.
+# Scheduled runs skip when main has no commits in the last 48h.
+name: nightly
+
+on:
+  schedule:
+    - cron: "57 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  # Gate: freshness (scheduled only) + fmt + clippy + full test suite.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      fresh: ${{ steps.fresh.outputs.fresh }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: fresh
+        name: skip when main is quiet for 48h (scheduled runs)
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            if [ -z "$(git log -1 --since='48 hours ago' --format=%H origin/main)" ]; then
+              echo "fresh=false" >> "$GITHUB_OUTPUT"
+              echo "no commits on main in 48h; skipping nightly"
+            else
+              echo "fresh=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace
+
+  build:
+    needs: check
+    if: needs.check.outputs.fresh == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            artifact: custos-linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: custos-linux-aarch64
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            artifact: custos-windows-x86_64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact: custos-macos-aarch64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build release binary
+        run: cargo build --release --bin custos
+
+      # Linux: deb + rpm + binary tarball.
+      - name: package deb
+        if: runner.os == 'Linux'
+        run: |
+          cargo install cargo-deb
+          cargo deb --no-strip -p custos-cli --target "${{ matrix.target }}"
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/debian"/*.deb dist/
+      - name: package rpm
+        if: runner.os == 'Linux'
+        run: |
+          cargo install cargo-generate-rpm
+          cargo generate-rpm -p custos-cli --target "${{ matrix.target }}"
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/generate-rpm"/*.rpm dist/
+      - name: package binary tarball
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          tar -C target/release -czf "dist/${{ matrix.artifact }}.tar.gz" custos
+
+      # Windows: zip binary + msi.
+      - name: package binary zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path target/release/custos.exe -DestinationPath "dist/${{ matrix.artifact }}.zip"
+      - name: package msi
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo install cargo-wix
+          Push-Location crates/custos-cli
+          cargo wix init
+          cargo wix --nocapture
+          Pop-Location
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "crates/custos-cli/target/wix"/*.msi dist/
+
+      # macOS: dmg (ad-hoc signed .app) + binary tarball.
+      - name: package dmg
+        if: runner.os == 'macOS'
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          mkdir -p "staging/Custos.app/Contents/MacOS" dist
+          cp target/release/custos "staging/Custos.app/Contents/MacOS/custos"
+          cat > "staging/Custos.app/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>Custos</string>
+            <key>CFBundleIdentifier</key><string>io.custos.cli</string>
+            <key>CFBundleExecutable</key><string>custos</string>
+            <key>CFBundleVersion</key><string>${VERSION}</string>
+          </dict></plist>
+          EOF
+          codesign --force --deep -s - "staging/Custos.app"
+          hdiutil create -volname Custos -srcfolder staging -ov -format UDZO "dist/${{ matrix.artifact }}.dmg"
+          tar -C target/release -czf "dist/${{ matrix.artifact }}.tar.gz" custos
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/
+          if-no-files-found: error
+
+  # Rolling `nightly` prerelease: replaces the previous nightly artifacts.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          prerelease: true
+          name: nightly
+          body: |
+            Rolling nightly build. Unverified: binaries are gated on
+            fmt + clippy + workspace tests but are NOT a formal release.
+            No version tag is created.
+          delete_assets: true
+          files: dist/*
