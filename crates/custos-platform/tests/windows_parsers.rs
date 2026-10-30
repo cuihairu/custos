@@ -5,8 +5,9 @@
 
 use custos_platform::windows::{
     ipconfig_flushdns_argv, netsh_interface_reset_argv, netsh_wlan_connect_argv,
-    parse_netsh_interfaces, parse_netsh_wlan_state, parse_sc_query, parse_tasklist_csv, sc_argv,
-    tasklist_argv, tasklist_has_pid, WindowsProcessController,
+    parse_default_gateway, parse_netsh_interfaces, parse_netsh_wlan_state, parse_sc_query,
+    parse_tasklist_csv, route_print_argv, sc_argv, tasklist_argv, tasklist_has_pid,
+    WindowsProcessController,
 };
 use custos_platform::{PlatformError, ProcessController};
 
@@ -143,4 +144,29 @@ fn windows_process_controller_refuses_on_linux_without_faking() {
         .expect_err("must refuse on non-Windows");
     assert!(matches!(err, PlatformError::Unsupported(_)), "{err}");
     assert!(!controller.is_alive(1), "never fakes liveness");
+}
+
+const ROUTE_PRINT: &str =
+    "===========================================================================
+Interface List
+ 10... aa bb cc dd ee ff ......Intel(R) Ethernet
+===========================================================================
+
+IPv4 Route Table
+===========================================================================
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0    192.168.1.1    192.168.1.42     25
+        127.0.0.0        255.0.0.0         On-link         127.0.0.1    331
+===========================================================================
+";
+
+#[test]
+fn route_print_default_gateway_extraction() {
+    assert_eq!(
+        parse_default_gateway(ROUTE_PRINT).as_deref(),
+        Some("192.168.1.1")
+    );
+    assert_eq!(parse_default_gateway("no routes here"), None);
+    assert_eq!(route_print_argv(), vec!["route", "print", "-4"]);
 }

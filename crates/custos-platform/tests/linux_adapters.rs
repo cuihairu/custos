@@ -90,3 +90,27 @@ fn connectivity_refusal_is_normalized_not_an_error() {
         "{answer:?}"
     );
 }
+
+#[test]
+fn dns_check_resolves_loopback() {
+    let ok = custos_platform::linux::dns_resolves("localhost", 80).unwrap();
+    assert!(ok, "localhost must resolve");
+    // Some sandbox resolvers answer anything; only the normalized bool
+    // contract matters here (never an error for a bad name).
+    let answer = custos_platform::linux::dns_resolves("definitely.not.a.host.invalid", 80);
+    assert!(matches!(answer, Ok(false) | Ok(true)), "{answer:?}");
+}
+
+#[test]
+fn default_gateway_of_this_host_parses_or_reports_none() {
+    let table = std::fs::read_to_string("/proc/net/route").unwrap_or_default();
+    let answer = custos_platform::linux::default_gateway_of_route_table(&table);
+    // Either a valid dotted quad or None (sandboxed hosts may have no
+    // default route) — never garbage.
+    if let Some((_, gateway)) = answer {
+        assert!(
+            gateway.split('.').count() == 4,
+            "gateway must be a dotted quad: {gateway}"
+        );
+    }
+}

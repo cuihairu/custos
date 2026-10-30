@@ -67,11 +67,33 @@ fn which(program: &str) -> Option<PathBuf> {
 }
 
 /// Builds the service controller for THIS host (todo.md 194 matrix):
-/// the detected init system, or an adapter that refuses everything.
+/// D-Bus systemd first (the matrix's primary), the `systemctl` runner as its
+/// fallback, then OpenRC, then SysV init; anything else refuses everything.
 pub fn service_controller() -> Box<dyn ServiceController> {
     match detect_init_system() {
+        #[cfg(target_os = "linux")]
+        InitSystem::Systemd { systemctl } => {
+            if crate::init_systems::systemd_dbus::detect().is_ok() {
+                Box::new(crate::init_systems::systemd_dbus::SystemdDbusController)
+            } else {
+                Box::new(SystemdController { systemctl })
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
         InitSystem::Systemd { systemctl } => Box::new(SystemdController { systemctl }),
+        #[cfg(target_os = "linux")]
         InitSystem::OpenRc { rc_service } => Box::new(OpenRcController { rc_service }),
+        #[cfg(not(target_os = "linux"))]
+        InitSystem::OpenRc { .. } => Box::new(NoInitController),
+        #[cfg(target_os = "linux")]
+        InitSystem::Unknown => {
+            if crate::init_systems::sysv::detect() {
+                Box::new(crate::init_systems::sysv::SysVController)
+            } else {
+                Box::new(NoInitController)
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
         InitSystem::Unknown => Box::new(NoInitController),
     }
 }
@@ -321,6 +343,16 @@ impl NetworkConnectivityProbe for SysnetInterfaceController {
             },
         }
     }
+}
+
+/// DNS resolution check (todo.md 202 DNS 检查): resolves `host:port` via
+/// the platform resolver; the answer is normalized, never raw tool output.
+pub fn dns_resolves(host: &str, port: u16) -> PlatformResult<bool> {
+    use std::net::ToSocketAddrs;
+    Ok((host, port)
+        .to_socket_addrs()
+        .map(|mut addrs| addrs.next().is_some())
+        .unwrap_or(false))
 }
 
 /// Credentials from environment variables (P2 baseline; P3 adds file/OS

@@ -14,6 +14,11 @@
 pub mod capability;
 pub mod controller;
 pub mod error;
+#[cfg(target_os = "linux")]
+pub mod init_systems;
+#[cfg(windows)]
+pub mod init_systems;
+#[cfg(not(target_os = "macos"))]
 pub mod linux;
 pub mod windows;
 

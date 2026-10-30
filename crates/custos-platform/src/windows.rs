@@ -157,7 +157,52 @@ pub fn parse_sc_query(output: &str) -> ServiceState {
     ServiceState::Unknown(output.trim().to_owned())
 }
 
-/// Windows SCM service control via `sc` (controlled execution).
+/// Windows SCM service control via the `windows-service` crate
+/// (todo.md 194 matrix: ServiceManager start/stop/status with a settle
+/// timeout and result verification).
+pub struct WindowsScmController;
+
+impl ServiceController for WindowsScmController {
+    fn status(&self, unit: &str) -> PlatformResult<ServiceState> {
+        #[cfg(windows)]
+        return crate::init_systems::scm::ScmController.status(unit);
+        #[cfg(not(windows))]
+        {
+            let _ = unit;
+            Err(PlatformError::Unsupported(
+                "the windows-service SCM path does not exist on this platform".into(),
+            ))
+        }
+    }
+    fn start(&self, _unit: &str) -> PlatformResult<()> {
+        #[cfg(windows)]
+        return crate::init_systems::scm::ScmController.start(_unit);
+        #[cfg(not(windows))]
+        refuse()
+    }
+    fn stop(&self, _unit: &str) -> PlatformResult<()> {
+        #[cfg(windows)]
+        return crate::init_systems::scm::ScmController.stop(_unit);
+        #[cfg(not(windows))]
+        refuse()
+    }
+    fn restart(&self, _unit: &str) -> PlatformResult<()> {
+        #[cfg(windows)]
+        return crate::init_systems::scm::ScmController.restart(_unit);
+        #[cfg(not(windows))]
+        refuse()
+    }
+}
+
+#[cfg(not(windows))]
+fn refuse() -> PlatformResult<()> {
+    Err(PlatformError::Unsupported(
+        "the windows-service SCM path does not exist on this platform".into(),
+    ))
+}
+
+/// Windows SCM service control via `sc` (controlled execution); kept as
+/// the fallback path when the SCM crate path is unavailable.
 pub struct ScServiceController;
 
 impl ServiceController for ScServiceController {
@@ -219,6 +264,38 @@ impl ServiceController for ScServiceController {
         self.stop(unit)?;
         self.start(unit)
     }
+}
+
+/// Builds the default gateway check argv (pure): `route print -4` lists
+/// `0.0.0.0  0.0.0.0  <gateway> ...` for the default route.
+pub fn route_print_argv() -> Vec<String> {
+    vec!["route".into(), "print".into(), "-4".into()]
+}
+
+/// Extracts the default gateway from `route print -4` output: the row whose
+/// network destination and mask are both `0.0.0.0`.
+pub fn parse_default_gateway(output: &str) -> Option<String> {
+    for line in output.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(destination) = fields.next() else {
+            continue;
+        };
+        if destination != "0.0.0.0" {
+            continue;
+        }
+        let Some(mask) = fields.next() else {
+            continue;
+        };
+        if mask != "0.0.0.0" {
+            continue;
+        }
+        if let Some(gateway) = fields.next() {
+            if gateway != "On-link" && !gateway.is_empty() {
+                return Some(gateway.to_owned());
+            }
+        }
+    }
+    None
 }
 
 /// Parses `netsh wlan show interfaces` output for the connected SSID and

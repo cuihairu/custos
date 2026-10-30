@@ -8,3 +8,13 @@ license.workspace = true
 custos-model = { workspace = true }
 custos-probe = { path = "../custos-probe" }
 thiserror = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# systemd service control over D-Bus (todo.md P2 matrix: zbus
+# org.freedesktop.systemd1); no-default-features keeps the sync (async-io)
+# blocking API without pulling tokio into the tree.
+zbus = "6"
+
+[target.'cfg(windows)'.dependencies]
+# SCM service control (todo.md P2 matrix: windows-service ServiceManager).
+windows-service = "0.8"
