@@ -56,6 +56,12 @@ string_id!(
     /// Explicit identifier of a recovery action invocation.
     ActionId
 );
+string_id!(
+    /// Unique, stable identifier of one notification event. Producers assign
+    /// it once and reuse it across retries so channels can deduplicate
+    /// (docs/guide/notification.md §8.6: stable event ID + best-effort dedup).
+    EventId
+);
 
 #[cfg(test)]
 mod tests {
