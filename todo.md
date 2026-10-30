@@ -248,21 +248,21 @@
 
 ## ADR 落档（docs/adr/，adr-principles §17 十四条）
 
-- [ ] ADR-0001 为什么选 Rust
-- [ ] ADR-0002 为什么第一版用外部进程插件
-- [ ] ADR-0003 为什么 JSON-RPC over stdio
-- [ ] ADR-0004 为什么 Resource + Dependency Graph
-- [ ] ADR-0005 为什么依赖图由 Core Engine 协调
-- [ ] ADR-0006 为什么动作结果必须独立验证
-- [ ] ADR-0007 为什么 SQLite
-- [ ] ADR-0008 为什么高风险动作前必须持久化
-- [ ] ADR-0009 为什么通知与恢复引擎解耦
-- [ ] ADR-0010 为什么 Dashboard 默认关闭
-- [ ] ADR-0011 为什么 P0 只有 Process/Exec Probe
-- [ ] ADR-0012 为什么禁止未授权高风险网络动作
-- [ ] ADR-0013 为什么未知结果不能直接重试
-- [ ] ADR-0014 为什么禁止普通依赖环
-- [ ] ADR 模板统一：背景/决策/替代方案/优缺点/后续影响
+- [x] ADR-0001 为什么选 Rust `537c199`
+- [x] ADR-0002 为什么第一版用外部进程插件 `537c199`
+- [x] ADR-0003 为什么 JSON-RPC over stdio `537c199`
+- [x] ADR-0004 为什么 Resource + Dependency Graph `537c199`
+- [x] ADR-0005 为什么依赖图由 Core Engine 协调 `537c199`
+- [x] ADR-0006 为什么动作结果必须独立验证 `537c199`
+- [x] ADR-0007 为什么 SQLite `537c199`
+- [x] ADR-0008 为什么高风险动作前必须持久化 `537c199`
+- [x] ADR-0009 为什么通知与恢复引擎解耦 `537c199`
+- [x] ADR-0010 为什么 Dashboard 默认关闭 `537c199`
+- [x] ADR-0011 为什么 P0 只有 Process/Exec Probe `537c199`
+- [x] ADR-0012 为什么禁止未授权高风险网络动作 `537c199`
+- [x] ADR-0013 为什么未知结果不能直接重试 `537c199`
+- [x] ADR-0014 为什么禁止普通依赖环 `537c199`
+- [x] ADR 模板统一：背景/决策/替代方案/优缺点/后续影响 `537c199`（15 条 ADR 全部按五段模板落档 docs/adr/，索引页 + vitepress 侧栏注册）
 
 ## 文档与工程修缮
 
