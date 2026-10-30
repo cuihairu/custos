@@ -18,57 +18,57 @@
 
 ### 领域模型补全（custos-model）
 
-- [ ] VerificationResult 独立类型（与 ActionOutcome 分离，含判定依据 evidence_refs）
-- [ ] RecoveryPolicy 候选方案完整建模：唯一 ID/适用故障/前置条件/风险等级/超时/最大尝试/冷却/幂等声明/验证条件/失败处理/可选补偿（§6.3 十一项）
-- [ ] 候选方案 serde 反序列化测试（十一个字段全覆盖）
-- [ ] HealthCondition 扩展：能力可用 / 最近成功探测时限 / 连续成功次数 / 业务检查（当前仅 StatusIs、ProbedWithin）
-- [ ] AlternativeGroup 判定：N 选 M 语义 + 单元测试
-- [ ] DependencyRequirement::Conditional 条件求值语义 + 单元测试
-- [ ] Evidence↔Diagnosis 关联字段（evidence_refs 引用完整性）
-- [ ] HealthStatus 抖动抑制所需状态字段：连续成功/失败计数、最近有效探测时间、活动故障标识
+- [x] VerificationResult 独立类型（与 ActionOutcome 分离，含判定依据 evidence_refs） `1c5609f`
+- [x] RecoveryPolicy 候选方案完整建模：唯一 ID/适用故障/前置条件/风险等级/超时/最大尝试/冷却/幂等声明/验证条件/失败处理/可选补偿（§6.3 十一项） `1c5609f`
+- [x] 候选方案 serde 反序列化测试（十一个字段全覆盖） `1c5609f`
+- [x] HealthCondition 扩展：能力可用 / 最近成功探测时限 / 连续成功次数 / 业务检查（当前仅 StatusIs、ProbedWithin） `1c5609f`
+- [x] AlternativeGroup 判定：N 选 M 语义 + 单元测试 `1c5609f`
+- [x] DependencyRequirement::Conditional 条件求值语义 + 单元测试 `1c5609f`
+- [x] Evidence↔Diagnosis 关联字段（evidence_refs 引用完整性） `1c5609f`
+- [x] HealthStatus 抖动抑制所需状态字段：连续成功/失败计数、最近有效探测时间、活动故障标识 `1c5609f`
 - [ ] Waiting 状态语义：挂起原因 + 恢复去向，转换测试
 
 ### 配置（custos-config）
 
 - [ ] 配置 Schema 完整化：health_policy / recovery_policy / permissions 节点
 - [ ] 候选方案引用验证：recovery_policy 中动作 ID 存在且与资源类型匹配
-- [ ] 不可能满足依赖条件检测（§3.5 第 5 条：条件永假报配置错误）
-- [ ] AlternativeGroup 配置合法性验证（§3.5 第 4 条）
-- [ ] 配置错误输出：具体字段路径 + 原因（§10.3，全错误类型统一）
-- [ ] 示例配置三份落盘：examples/basic-process.toml、dependency-chain.toml、notifications.toml
+- [x] 不可能满足依赖条件检测（§3.5 第 5 条：条件永假报配置错误） `1c5609f`
+- [x] AlternativeGroup 配置合法性验证（§3.5 第 4 条） `1c5609f`
+- [x] 配置错误输出：具体字段路径 + 原因（§10.3，全错误类型统一） `1c5609f`
+- [x] 示例配置三份落盘：examples/basic-process.toml、dependency-chain.toml、notifications.toml `1c5609f`
 
 ### 探测（custos-probe）
 
-- [ ] Probe trait + 探测结果归一化（Evidence 产出）
-- [ ] Process Probe：进程存在 + 必要属性检查
-- [ ] Exec Probe：受控命令执行，解析退出码/stdout/stderr/超时/启动失败/截断六种结果
-- [ ] Exec Probe：运行时间限制 + 输出大小限制
-- [ ] Exec Probe：超时清理进程树（Windows 不留孤儿子进程）
-- [ ] 内置 process / custom-command 资源适配（用户裁定「集成基础能力」P0 部分）
-- [ ] 探测调度：按 interval 周期执行 + 手动触发
+- [x] Probe trait + 探测结果归一化（Evidence 产出） `278e747`
+- [x] Process Probe：进程存在 + 必要属性检查 `278e747`
+- [x] Exec Probe：受控命令执行，解析退出码/stdout/stderr/超时/启动失败/截断六种结果 `278e747`
+- [x] Exec Probe：运行时间限制 + 输出大小限制 `278e747`
+- [x] Exec Probe：超时清理进程树（Windows 不留孤儿子进程） `278e747`
+- [x] 内置 process / custom-command 资源适配（用户裁定「集成基础能力」P0 部分） `278e747`
+- [x] 探测调度：按 interval 周期执行 + 手动触发 `278e747`
 
 ### 引擎（custos-engine）
 
-- [ ] RecoveryRun 执行器骨架：驱动状态机从 Observing 走到终态
-- [ ] 连续失败/成功阈值 → 健康状态转换（failure_threshold/success_threshold 生效）
-- [ ] 故障确认 → Incident 创建（同一故障多次尝试归属同一 Incident）
-- [ ] 诊断管道：Evidence 聚合 → Diagnosis(fault_code + confidence + affected)
-- [ ] 依赖解析：恢复 A 前先评估依赖新鲜度，过期重新探测（ResolvingDependencies）
-- [ ] 依赖恢复后重新探测验证，不假设成功（§2.3 第 5 条）
-- [ ] 有序候选方案选择：按 diagnosis 匹配适用方案，非盲目顺序全执行
-- [ ] 动作执行器：单动作超时控制
-- [ ] 动作结果五态记录（Succeeded/Failed/TimedOut/Cancelled/OutcomeUnknown）
-- [ ] 动作后独立健康重验证（Verification，非退出码）
-- [ ] 故障变化时重新诊断（Verifying → Diagnosing 重入）
-- [ ] 恢复预算：单资源恢复次数上限
-- [ ] 恢复预算：单 RecoveryRun 总耗时上限
-- [ ] 恢复预算：单位时间重启次数上限
-- [ ] 恢复预算：高风险动作次数上限（需配置显式授权，security §12.2）
-- [ ] 预算耗尽 → Escalated + 告警事件
-- [ ] 资源级恢复互斥：同资源同时最多一个活动 RecoveryRun
+- [x] RecoveryRun 执行器骨架：驱动状态机从 Observing 走到终态 `278e747`
+- [x] 连续失败/成功阈值 → 健康状态转换（failure_threshold/success_threshold 生效） `278e747`
+- [x] 故障确认 → Incident 创建（同一故障多次尝试归属同一 Incident） `278e747`
+- [x] 诊断管道：Evidence 聚合 → Diagnosis(fault_code + confidence + affected) `278e747`
+- [x] 依赖解析：恢复 A 前先评估依赖新鲜度，过期重新探测（ResolvingDependencies） `278e747`
+- [x] 依赖恢复后重新探测验证，不假设成功（§2.3 第 5 条） `278e747`
+- [x] 有序候选方案选择：按 diagnosis 匹配适用方案，非盲目顺序全执行 `278e747`
+- [x] 动作执行器：单动作超时控制 `278e747`
+- [x] 动作结果五态记录（Succeeded/Failed/TimedOut/Cancelled/OutcomeUnknown） `278e747`
+- [x] 动作后独立健康重验证（Verification，非退出码） `278e747`
+- [x] 故障变化时重新诊断（Verifying → Diagnosing 重入） `278e747`
+- [x] 恢复预算：单资源恢复次数上限 `278e747`
+- [x] 恢复预算：单 RecoveryRun 总耗时上限 `278e747`
+- [x] 恢复预算：单位时间重启次数上限 `278e747`
+- [x] 恢复预算：高风险动作次数上限（需配置显式授权，security §12.2） `278e747`
+- [x] 预算耗尽 → Escalated + 告警事件 `278e747`
+- [x] 资源级恢复互斥：同资源同时最多一个活动 RecoveryRun `278e747`
 - [ ] 依赖去重：多任务等待同一恢复结果，健康变化时重评估
-- [ ] 全局恢复预算（跨资源并发上限）
-- [ ] 终止条件兜底：任何恢复循环必有出口（§6.5）
+- [x] 全局恢复预算（跨资源并发上限） `278e747`
+- [x] 终止条件兜底：任何恢复循环必有出口（§6.5） `278e747`
 
 ### 持久化（custos-store）
 
@@ -78,47 +78,47 @@
 - [ ] 表：incidents / recovery_runs / recovery_steps
 - [ ] 表：probe_results / diagnoses / action_attempts / verification_results
 - [ ] 表：audit_events / notification_queue / notification_attempts
-- [ ] 事务边界：高风险动作先落 Executing 再执行（§7.3 九步顺序）
-- [ ] 崩溃恢复：重启后识别结果未知动作（不盲目重试，先查资源现状）
-- [ ] 崩溃恢复：续跑未完成 RecoveryRun
+- [x] 事务边界：高风险动作先落 Executing 再执行（§7.3 九步顺序） `e7766d6`
+- [x] 崩溃恢复：重启后识别结果未知动作（不盲目重试，先查资源现状） `e7766d6`
+- [x] 崩溃恢复：续跑未完成 RecoveryRun `e7766d6`
 - [ ] 数据保留策略：审计/探测明细/任务/通知保留周期配置
 - [ ] 数据清理与活动任务状态分离（不删活动 Incident/未送达通知）
 
 ### 审计与日志
 
 - [ ] tracing 结构化日志接入（custos-core 统一初始化）
-- [ ] 所有状态转换 + 动作尝试写 audit_events 表
+- [x] 所有状态转换 + 动作尝试写 audit_events 表 `e7766d6`
 
 ### CLI（custos-cli）
 
-- [ ] `custos start <config>`：前台运行引擎（加载→注册→观测循环）
-- [ ] `custos status`：引擎/资源健康总览
-- [ ] `custos resources`：资源列表 + 健康状态
-- [ ] `custos graph`：依赖图文本展示（含环检测状态）
+- [x] `custos start <config>`：前台运行引擎（加载→注册→观测循环） `e7766d6`
+- [x] `custos status`：引擎/资源健康总览 `e7766d6`
+- [x] `custos resources`：资源列表 + 健康状态 `e7766d6`
+- [x] `custos graph`：依赖图文本展示（含环检测状态） `e7766d6`
 - [ ] `custos incidents` / `custos runs`：故障与恢复历史
-- [ ] CLI 错误输出规范：非零退出码 + 人读信息（无 panic 裸奔）
+- [x] CLI 错误输出规范：非零退出码 + 人读信息（无 panic 裸奔） `e7766d6`
 
 ### P0 集成测试与故障注入
 
-- [ ] 集成：受控进程退出 → 检测 → 恢复 → 验证 → 持久化全闭环（Task 008 首场景）
-- [ ] 集成：第一方案失败自动选第二方案
-- [ ] 集成：命令返回成功但资源仍异常 → 不报恢复成功
-- [ ] 集成：依赖不健康时上层动作不提前执行
-- [ ] 集成：同资源不并发执行两个恢复任务
-- [ ] 注入：动作执行中进程崩溃 → 重启后续跑且不重复执行结果未知动作
+- [x] 集成：受控进程退出 → 检测 → 恢复 → 验证 → 持久化全闭环（Task 008 首场景） `21cde62`
+- [x] 集成：第一方案失败自动选第二方案 `21cde62`
+- [x] 集成：命令返回成功但资源仍异常 → 不报恢复成功 `21cde62`
+- [x] 集成：依赖不健康时上层动作不提前执行 `21cde62`
+- [x] 集成：同资源不并发执行两个恢复任务 `21cde62`
+- [x] 注入：动作执行中进程崩溃 → 重启后续跑且不重复执行结果未知动作 `21cde62`
 - [ ] 注入：依赖在恢复过程中再次故障
 - [ ] 注入：SQLite 写入失败（引擎降级行为明确）
 - [ ] 注入：Exec Probe 超时（进程树被清理）
-- [ ] 注入：恢复预算耗尽明确终止
+- [x] 注入：恢复预算耗尽明确终止 `21cde62`
 
 ### P0 验收门（全绿才勾 roadmap P0）
 
-- [ ] 进程退出可检测；受控命令失败可触发恢复
-- [ ] 方案失败可切换；假成功可识破
-- [ ] 依赖顺序正确；并发互斥生效
-- [ ] 崩溃重启可续跑；未知结果不重试
-- [ ] 全部状态转换可经日志+数据库追溯
-- [ ] 预算耗尽任务全部明确终止
+- [x] 进程退出可检测；受控命令失败可触发恢复 `21cde62`
+- [x] 方案失败可切换；假成功可识破 `21cde62`
+- [x] 依赖顺序正确；并发互斥生效 `21cde62`
+- [x] 崩溃重启可续跑；未知结果不重试 `21cde62`
+- [x] 全部状态转换可经日志+数据库追溯 `21cde62`
+- [x] 预算耗尽任务全部明确终止 `21cde62`
 
 ## P1 插件运行时与通知基础设施
 
