@@ -1,9 +1,11 @@
 //! Probe scheduling and result normalization
 //! (docs/guide/workspace.md: `custos-probe`).
 //!
-//! P0 scope (docs/guide/probe-diagnosis.md §5.4): Process Probe and Exec
-//! Probe only. The Exec Probe limits runtime and output size and cleans up
-//! the process tree on timeout.
+//! Builtin probes (docs/guide/probe-survey.md §26, §26.11 order): process,
+//! exec, HTTP(S) endpoint, TCP port, DNS resolution, TLS certificate
+//! expiry, disk space, memory, CPU load/usage, log keyword, systemd unit,
+//! Docker container, and the ICMP ping probe. Every probe runs natively
+//! (std + rustls + libc / windows-sys), never a shell.
 
 pub mod config;
 pub mod cpu;
