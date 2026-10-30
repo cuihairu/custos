@@ -19,6 +19,7 @@ export default defineConfig({
               { text: 'Resource 与 Dependency 模型', link: '/guide/resources' },
               { text: '插件架构', link: '/guide/plugins' },
               { text: '探测、诊断与故障判定', link: '/guide/probe-diagnosis' },
+              { text: '探测类型调研与差距分析', link: '/guide/probe-survey' },
               { text: 'Recovery Engine', link: '/guide/recovery-engine' },
               { text: '持久化与崩溃一致性', link: '/guide/persistence' },
               { text: 'Notification Engine', link: '/guide/notification' },
