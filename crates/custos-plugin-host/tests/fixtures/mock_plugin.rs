@@ -121,6 +121,7 @@ fn main() {
                 reply(&out, id, capabilities());
             }
             "custos/v1/probe" => {
+                let resource_id = params["resource_id"].clone();
                 if params["die"].as_bool().unwrap_or(false) {
                     eprintln!("mock plugin dying on purpose");
                     std::process::exit(3);
@@ -134,7 +135,21 @@ fn main() {
                         reply(
                             &out,
                             id,
-                            json!({"healthy": true, "resource_id": params["resource_id"].clone()}),
+                            json!({"healthy": true, "resource_id": resource_id}),
+                        );
+                    });
+                    continue;
+                }
+                // Resource-id switches for the PluginProbe integration
+                // tests: "hang" never answers, "sick" answers unhealthy.
+                if resource_id == "hang" {
+                    let out = out.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(5));
+                        reply(
+                            &out,
+                            id,
+                            json!({"healthy": true, "resource_id": resource_id}),
                         );
                     });
                     continue;
@@ -149,10 +164,11 @@ fn main() {
                     }
                     let _ = guard.flush();
                 }
+                let healthy = resource_id != "sick";
                 reply(
                     &out,
                     id,
-                    json!({"healthy": true, "resource_id": params["resource_id"].clone()}),
+                    json!({"healthy": healthy, "resource_id": resource_id}),
                 );
             }
             "custos/v1/shutdown" => {

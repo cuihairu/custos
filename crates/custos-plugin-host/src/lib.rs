@@ -8,9 +8,11 @@
 //! size cap and error mapping are applied at the protocol boundary.
 
 mod compat;
+mod plugin_probe;
 mod session;
 mod supervisor;
 
 pub use compat::{validate_capabilities, CapabilityKindRequirement};
+pub use plugin_probe::PluginProbe;
 pub use session::{CallHandle, HostError, InitializeResult, PluginConfig, PluginSession};
 pub use supervisor::{PluginStatus, PluginSupervisor, RestartPolicy};

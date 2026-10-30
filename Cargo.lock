@@ -194,7 +194,12 @@ dependencies = [
 name = "custos-plugin-host"
 version = "0.1.0"
 dependencies = [
+ "custos-model",
  "custos-plugin-api",
+ "custos-probe",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

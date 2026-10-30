@@ -133,12 +133,18 @@ fn plugin_crash_is_isolated_and_reported() {
         HostError::Rpc { code, .. } => assert_eq!(code, RpcError::PLUGIN_UNAVAILABLE),
         other => panic!("expected Unavailable/PLUGIN_UNAVAILABLE, got {other:?}"),
     }
-    assert!(!session.is_running());
-    assert!(
-        session.death_reason().is_some_and(|r| r.contains("exited")),
-        "death reason: {:?}",
-        session.death_reason()
-    );
+    // The in-flight failure is delivered before the reader thread marks the
+    // session dead; poll for the death record.
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        if let Some(reason) = session.death_reason() {
+            assert!(reason.contains("exited"), "death reason: {reason}");
+            assert!(!session.is_running());
+            break;
+        }
+        assert!(Instant::now() < deadline, "session never recorded a death");
+        std::thread::sleep(Duration::from_millis(5));
+    }
 
     // Further calls fail fast; the host process itself is unaffected.
     let err = session

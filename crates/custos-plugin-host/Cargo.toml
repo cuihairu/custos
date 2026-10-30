@@ -5,7 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+custos-model = { workspace = true }
 custos-plugin-api = { path = "../custos-plugin-api" }
+custos-probe = { path = "../custos-probe" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
