@@ -20,8 +20,9 @@ use crate::queue::NotificationQueue;
 use crate::smtp::SmtpChannel;
 use crate::webhook::WebhookChannel;
 use custos_config::{ChannelConfig, NotificationConfig};
-use custos_model::NotificationEvent;
+use custos_model::{EventType, NotificationEvent};
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 /// Base retry backoff; the queue engine doubles it per attempt, capped.
 const BASE_RETRY_MS: u64 = 30_000;
@@ -36,6 +37,8 @@ pub struct DispatchReport {
     pub failed: u32,
     /// Events written straight to the local structured log.
     pub local_logged: u32,
+    /// Enqueues suppressed by the same-fault dedup window (§8.5).
+    pub suppressed: u32,
 }
 
 /// Result of one delivery pass.
@@ -48,12 +51,25 @@ pub struct DeliverReport {
     pub failed: u32,
 }
 
+/// Same-fault dedup state (docs/guide/notification.md §8.5 聚合并抑制重复通知):
+/// a fault key is suppressed until its window expires; repeats during the
+/// window are counted (and that count is logged), and a recovery clears the
+/// resource's keys so the next fault notifies promptly.
+#[derive(Default)]
+struct DedupState {
+    /// Fault key → suppression expires at (unix ms).
+    suppressed_until: HashMap<String, u64>,
+    /// Fault key → repeats suppressed since the last notification.
+    repeats: HashMap<String, u32>,
+}
+
 /// The notification engine: rule matching, channel construction and the
 /// enqueue/deliver split.
 pub struct NotificationEngine<Q: NotificationQueue> {
     config: NotificationConfig,
     channels: HashMap<String, Box<dyn Channel>>,
     queue: Q,
+    dedup: Mutex<DedupState>,
 }
 
 impl<Q: NotificationQueue> NotificationEngine<Q> {
@@ -90,6 +106,7 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
             config,
             channels,
             queue,
+            dedup: Mutex::new(DedupState::default()),
         }
     }
 
@@ -103,7 +120,8 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
 
     /// Matches the event against the rules and enqueues it to the selected
     /// channels. The local structured log is written first (base audit,
-    /// always on). Never blocks recovery.
+    /// always on). Repeats of the same fault within a rule's dedup window
+    /// are suppressed and counted (§8.5). Never blocks recovery.
     pub fn dispatch(&self, event: &NotificationEvent, now_unix_ms: u64) -> DispatchReport {
         let mut report = DispatchReport::default();
 
@@ -118,9 +136,44 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
             }
         }
 
+        // A verified recovery clears the resource's fault keys so the next
+        // fault notifies promptly instead of waiting out the window.
+        if event.event_type == EventType::RecoverySucceeded {
+            let mut dedup = self.dedup.lock().unwrap_or_else(|e| e.into_inner());
+            clear_resource_keys(&mut dedup, event);
+        }
+
         for rule in &self.config.rules {
             if !rule_matches(rule, event) {
                 continue;
+            }
+            // Same-fault dedup: suppress repeats within the window.
+            if rule.dedup_window_ms > 0 {
+                let key = fault_key(event);
+                let mut dedup = self.dedup.lock().unwrap_or_else(|e| e.into_inner());
+                let until = dedup.suppressed_until.get(&key).copied();
+                if let Some(until) = until {
+                    if now_unix_ms < until {
+                        let repeats = dedup.repeats.entry(key.clone()).or_insert(0);
+                        *repeats += 1;
+                        report.suppressed += rule.channels.len() as u32;
+                        tracing::debug!(
+                            key = %key,
+                            repeats = *repeats,
+                            rule = %rule.id,
+                            "notification suppressed (same fault within dedup window)"
+                        );
+                        continue;
+                    }
+                }
+                dedup
+                    .suppressed_until
+                    .insert(key.clone(), now_unix_ms + rule.dedup_window_ms);
+                if let Some(repeats) = dedup.repeats.remove(&key) {
+                    if repeats > 0 {
+                        tracing::info!(key = %key, repeats, "fault re-notified after suppressed repeats");
+                    }
+                }
             }
             for channel_id in &rule.channels {
                 // Local-log channels were handled above.
@@ -219,6 +272,30 @@ fn rule_matches(rule: &custos_config::NotificationRule, event: &NotificationEven
         }
     }
     true
+}
+
+/// Stable same-fault key: `{event_type}:{resource}` (or `-` when the event
+/// has no resource). One key per fault class per resource.
+fn fault_key(event: &NotificationEvent) -> String {
+    let resource = event
+        .resource_id
+        .as_ref()
+        .map(|r| r.as_str())
+        .unwrap_or("-");
+    format!("{}:{}", event.event_type.as_str(), resource)
+}
+
+/// Clears every dedup key belonging to the recovered resource, so the next
+/// fault on it notifies immediately instead of waiting out the window.
+fn clear_resource_keys(dedup: &mut DedupState, event: &NotificationEvent) {
+    let Some(resource) = event.resource_id.as_ref() else {
+        return;
+    };
+    let prefix = format!(":{}", resource.as_str());
+    dedup
+        .suppressed_until
+        .retain(|key, _| !key.ends_with(&prefix));
+    dedup.repeats.retain(|key, _| !key.ends_with(&prefix));
 }
 
 /// Exponential backoff for the next queue-level attempt, capped. `attempts`
@@ -352,7 +429,21 @@ mod tests {
             resource: resource.map(ResourceId::new),
             channels: channels.into_iter().map(str::to_owned).collect(),
             log: false,
+            dedup_window_ms: 0,
         }
+    }
+
+    fn dedup_rule(
+        id: &str,
+        event: Option<EventType>,
+        severity_min: Severity,
+        resource: Option<&str>,
+        channels: Vec<&str>,
+        dedup_window_ms: u64,
+    ) -> NotificationRule {
+        let mut rule = rule(id, event, severity_min, resource, channels);
+        rule.dedup_window_ms = dedup_window_ms;
+        rule
     }
 
     fn webhook_channel_config() -> ChannelConfig {
@@ -524,5 +615,140 @@ mod tests {
         // 30_000 << 7 = 3_840_000 exceeds the 1 h cap.
         assert_eq!(retry_at(1_000, 7), 1_000 + 3_600_000);
         assert_eq!(retry_at(1_000, 20), 1_000 + 3_600_000);
+    }
+
+    #[test]
+    fn dedup_suppresses_repeats_within_window_then_renotifies() {
+        let queue = MemQueue::default();
+        let config = NotificationConfig {
+            rules: vec![dedup_rule(
+                "r1",
+                Some(EventType::ResourceUnhealthy),
+                Severity::Info,
+                Some("web"),
+                vec!["wh"],
+                10_000,
+            )],
+            channels: [("wh".into(), webhook_channel_config())].into(),
+        };
+        let engine = NotificationEngine::new(config, queue);
+
+        // First occurrence notifies.
+        let report = engine.dispatch(
+            &event(EventType::ResourceUnhealthy, Severity::Critical),
+            1_000,
+        );
+        assert_eq!(report.enqueued, 1);
+        assert_eq!(report.suppressed, 0);
+
+        // Repeat within the window is suppressed and counted.
+        let report = engine.dispatch(
+            &event(EventType::ResourceUnhealthy, Severity::Critical),
+            2_000,
+        );
+        assert_eq!(report.enqueued, 0);
+        assert_eq!(report.suppressed, 1);
+
+        // After the window expires the fault notifies again.
+        let report = engine.dispatch(
+            &event(EventType::ResourceUnhealthy, Severity::Critical),
+            12_000,
+        );
+        assert_eq!(report.enqueued, 1);
+        assert_eq!(report.suppressed, 0);
+    }
+
+    #[test]
+    fn dedup_keys_differ_per_resource_and_zero_window_disables() {
+        let queue = MemQueue::default();
+        let config = NotificationConfig {
+            rules: vec![
+                dedup_rule(
+                    "r1",
+                    Some(EventType::ResourceUnhealthy),
+                    Severity::Info,
+                    Some("web"),
+                    vec!["wh"],
+                    10_000,
+                ),
+                dedup_rule(
+                    "r2",
+                    Some(EventType::ResourceUnhealthy),
+                    Severity::Info,
+                    Some("db"),
+                    vec!["wh"],
+                    0,
+                ),
+            ],
+            channels: [("wh".into(), webhook_channel_config())].into(),
+        };
+        let engine = NotificationEngine::new(config, queue);
+
+        // Same event type, different resources: independent keys.
+        let web = event(EventType::ResourceUnhealthy, Severity::Critical);
+        let db = event(EventType::ResourceUnhealthy, Severity::Critical)
+            .with_resource_id(ResourceId::new("db"));
+        engine.dispatch(&web, 1_000);
+        let report = engine.dispatch(&db, 1_000);
+        assert_eq!(report.enqueued, 1, "db rule has dedup disabled");
+
+        // Repeat for db (dedup disabled) still notifies; web is suppressed.
+        let report = engine.dispatch(&db, 2_000);
+        assert_eq!(report.enqueued, 1);
+        let report = engine.dispatch(&web, 2_000);
+        assert_eq!(report.enqueued, 0);
+        assert_eq!(report.suppressed, 1);
+    }
+
+    #[test]
+    fn recovery_clears_dedup_keys_for_the_resource() {
+        let queue = MemQueue::default();
+        let config = NotificationConfig {
+            rules: vec![
+                dedup_rule(
+                    "r1",
+                    Some(EventType::ResourceUnhealthy),
+                    Severity::Info,
+                    Some("web"),
+                    vec!["wh"],
+                    10_000,
+                ),
+                dedup_rule(
+                    "r2",
+                    Some(EventType::RecoverySucceeded),
+                    Severity::Info,
+                    Some("web"),
+                    vec!["wh"],
+                    10_000,
+                ),
+            ],
+            channels: [("wh".into(), webhook_channel_config())].into(),
+        };
+        let engine = NotificationEngine::new(config, queue);
+
+        // Fault fires, then repeats are suppressed.
+        engine.dispatch(
+            &event(EventType::ResourceUnhealthy, Severity::Critical),
+            1_000,
+        );
+        assert_eq!(
+            engine
+                .dispatch(
+                    &event(EventType::ResourceUnhealthy, Severity::Critical),
+                    2_000
+                )
+                .suppressed,
+            1
+        );
+        // Verified recovery clears the resource's keys.
+        let recovered = event(EventType::RecoverySucceeded, Severity::Info);
+        engine.dispatch(&recovered, 3_000);
+        // The next fault on the same resource notifies immediately.
+        let report = engine.dispatch(
+            &event(EventType::ResourceUnhealthy, Severity::Critical),
+            4_000,
+        );
+        assert_eq!(report.enqueued, 1);
+        assert_eq!(report.suppressed, 0);
     }
 }

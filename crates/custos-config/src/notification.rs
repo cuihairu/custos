@@ -43,6 +43,10 @@ pub struct NotificationRule {
     pub channels: Vec<String>,
     /// Also write a line to the local structured audit log.
     pub log: bool,
+    /// Suppress repeats of the same (event type, resource) fault within
+    /// this window (§8.5 聚合并抑制重复通知). `0` disables dedup for this
+    /// rule. Default 30 minutes.
+    pub dedup_window_ms: u64,
 }
 
 /// A configured notification channel. Channels are typed; the transport for
@@ -270,6 +274,14 @@ pub(crate) struct RawNotificationRule {
     channels: Vec<String>,
     #[serde(default)]
     log: bool,
+    /// Suppress repeats of the same fault within this window; 0 disables.
+    #[serde(default = "default_dedup_window_ms")]
+    dedup_window_ms: u64,
+}
+
+/// Default same-fault suppression window (§8.5).
+fn default_dedup_window_ms() -> u64 {
+    30 * 60 * 1000
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -465,6 +477,7 @@ pub(crate) fn build(
             resource,
             channels: raw_rule.channels.clone(),
             log: raw_rule.log,
+            dedup_window_ms: raw_rule.dedup_window_ms,
         });
     }
 
