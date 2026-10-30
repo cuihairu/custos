@@ -214,8 +214,8 @@
 - [x] 网络接口探测 / 网关路由探测 / DNS 探测 `74c9b7b`（`network-interface` 资源类型：接口 operstate up→Healthy / down 或不存在→Unhealthy / 查询失败→Unreachable；`default-gateway`：默认路由必须存在 + 可选 TCP 连通性；Linux /sys+/proc/net/route 纯解析 fixture 测试，Windows netsh/route 受控执行；DNS 探测原有 `dns` 类型已覆盖）
 - [x] HTTP Probe（存量：`http.rs` HttpProbe 早于本清单落地，15/15 绿——本次核实后勾选）
 - [x] 代理连接与认证诊断（区分认证失败/连接失败/目标异常；407 ≠ 宕机） `bf50881`（`proxy` 资源类型：经代理发绝对形式 GET，按代理自身应答分类——2xx/3xx Healthy、407/401 **Degraded**（代理活着但认证失败，重启它是错误处方）、5xx Unhealthy（目标未送达）、拒绝/超时/DNS Unreachable；Basic Proxy-Authorization 可配；纯 std TCP+HTTP/1.1 零新依赖；假代理实测 200/407/502/拒绝四路）
-- [ ] mihomo 插件（一插件一资源闭环口径）
-- [ ] cloudflared 插件
+- [x] mihomo 插件（一插件一资源闭环口径） `a4add7f`（`plugins/mihomo` bin：外部控制器 /version 探活 + 托管组当前节点入观察；恢复计划 1 切换节点（PUT /proxies/<组> 选下一成员，无重启）、计划 2 受控 systemctl restart；Capability 三条声明（probe/switch_node/restart 含 interrupts 标记）；通过真实宿主会话集成测试（握手/能力/控制器不可达 healthy=false/无组拒切））
+- [x] cloudflared 插件 `a4add7f`（`plugins/cloudflared` bin：metrics 端点解析 cloudflared_tunnel_ha_connections——进程活着但 0 边缘连接=真故障；恢复 restart 受控执行；Capability interrupts_remote_admin=true；宿主会话集成测试）
 - [ ] Windows Wi-Fi 完整恢复场景
 - [ ] OpenWrt 适配：procd / UCI / ubus / 网络检查
 - [ ] OpenClash 插件（节点诊断 + 有序切换）
