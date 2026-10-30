@@ -31,7 +31,7 @@ pub(crate) fn client_config(verify_tls: bool) -> Arc<ClientConfig> {
                 .with_no_client_auth(),
         )
     } else {
-        let provider = rustls::crypto::aws_lc_rs::default_provider();
+        let provider = rustls::crypto::ring::default_provider();
         Arc::new(
             ClientConfig::builder_with_provider(Arc::new(provider.clone()))
                 .with_safe_default_protocol_versions()
