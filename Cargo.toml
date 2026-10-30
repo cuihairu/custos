@@ -12,6 +12,7 @@ members = [
     "crates/custos-config",
     "crates/custos-store",
     "crates/custos-notify",
+    "crates/custos-python",
     "crates/custos-cli",
 ]
 

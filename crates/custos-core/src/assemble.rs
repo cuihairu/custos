@@ -4,10 +4,10 @@
 
 use custos_config::ValidatedConfig;
 use custos_engine::{BuiltinExecExecutor, Engine};
+use custos_model::ids::ResourceId;
 use custos_notify::NotificationEngine;
 use custos_probe::Probe;
 use custos_store::Store;
-use custos_model::ids::ResourceId;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -20,10 +20,7 @@ pub struct Assembled {
 
 /// Wires the notification sink into the engine: dispatch enqueues to the
 /// queue, never blocking recovery (§8.1).
-fn attach_notifications(
-    engine: &mut Engine,
-    notification: Arc<NotificationEngine<Arc<Store>>>,
-) {
+fn attach_notifications(engine: &mut Engine, notification: Arc<NotificationEngine<Arc<Store>>>) {
     let sink = notification.clone();
     engine.set_event_emitter(Arc::new(move |event| {
         let report = sink.dispatch(event, event.occurred_at_unix_ms);

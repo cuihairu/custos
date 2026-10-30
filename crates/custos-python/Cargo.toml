@@ -1,0 +1,26 @@
+[package]
+name = "custos-python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# `rlib` keeps `cargo test` linkable; `cdylib` is the importable module.
+# Build the wheel with `--features extension-module` (see README).
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+custos-config = { path = "../custos-config" }
+custos-core = { path = "../custos-core" }
+custos-notify = { path = "../custos-notify" }
+custos-model = { workspace = true }
+custos-store = { path = "../custos-store" }
+pyo3 = { version = "0.30", features = ["abi3-py39"] }
+serde_json = { workspace = true }
+
+[features]
+extension-module = ["pyo3/extension-module"]
+
+[dev-dependencies]
+tempfile = "3"
+pyo3 = { version = "0.30", features = ["auto-initialize"] }
