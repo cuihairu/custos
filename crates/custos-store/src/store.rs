@@ -554,6 +554,67 @@ impl Store {
     }
 }
 
+/// Bridges the store to the notify engine's persistence port. The notify
+/// engine depends only on the `NotificationQueue` trait, so `custos-store`
+/// (which the engine already depends on) can implement it without a cycle.
+impl custos_notify::NotificationQueue for Store {
+    fn enqueue(
+        &self,
+        channel: &str,
+        event: &NotificationEvent,
+        now_unix_ms: u64,
+    ) -> Result<u64, custos_notify::QueueError> {
+        self.enqueue_notification(channel, event, now_unix_ms)
+            .map_err(|e| custos_notify::QueueError::new(e.to_string()))
+    }
+
+    fn claim_due(
+        &self,
+        now_unix_ms: u64,
+        limit: u32,
+    ) -> Result<Vec<custos_notify::QueuedNotification>, custos_notify::QueueError> {
+        self.claim_due_notifications(now_unix_ms, limit)
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|r| custos_notify::QueuedNotification {
+                        id: r.id,
+                        channel: r.channel,
+                        event: r.event,
+                        state: r.state,
+                        attempts: r.attempts,
+                        last_error: r.last_error,
+                    })
+                    .collect()
+            })
+            .map_err(|e| custos_notify::QueueError::new(e.to_string()))
+    }
+
+    fn mark_delivered(&self, id: u64, at_unix_ms: u64) -> Result<(), custos_notify::QueueError> {
+        self.mark_notification_delivered(id, at_unix_ms)
+            .map_err(|e| custos_notify::QueueError::new(e.to_string()))
+    }
+
+    fn mark_retry(
+        &self,
+        id: u64,
+        next_attempt_at_unix_ms: u64,
+        error: &str,
+    ) -> Result<(), custos_notify::QueueError> {
+        self.mark_notification_retry(id, next_attempt_at_unix_ms, error)
+            .map_err(|e| custos_notify::QueueError::new(e.to_string()))
+    }
+
+    fn mark_dead(
+        &self,
+        id: u64,
+        error: &str,
+        now_unix_ms: u64,
+    ) -> Result<(), custos_notify::QueueError> {
+        self.mark_notification_dead(id, error, now_unix_ms)
+            .map_err(|e| custos_notify::QueueError::new(e.to_string()))
+    }
+}
+
 /// A `sending` entry older than this is assumed to be a crashed mid-delivery
 /// attempt and is reclaimed (docs/guide/notification.md §8.6 / persistence
 /// §7 crash recovery).

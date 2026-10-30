@@ -11,13 +11,17 @@
 //! persisted queue that keeps working while the network is down.
 
 pub mod channel;
+pub mod engine;
 pub mod local_log;
+pub mod queue;
 pub mod smtp;
 pub mod webhook;
 pub mod webhook_ssrf;
 
 pub use channel::{Channel, ChannelError, ChannelErrorKind};
+pub use engine::{DeliverReport, DispatchReport, NotificationEngine};
 pub use local_log::{format_event, severity_level, LocalLogChannel};
+pub use queue::{NotificationQueue, QueueError, QueuedNotification};
 pub use smtp::SmtpChannel;
 pub use webhook::{sign_body, WebhookChannel, EVENT_ID_HEADER, SIGNATURE_HEADER};
 pub use webhook_ssrf::{check_ip, validate_target, SsrfBlock};
