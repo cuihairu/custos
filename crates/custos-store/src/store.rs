@@ -2,10 +2,12 @@
 //! synchronous; each call blocks on a current-thread tokio runtime owned by
 //! the store.
 
+use crate::config::{PurgeReport, RetentionConfig, StoreConfig, SynchronousPolicy};
+use crate::migrations::migrate;
 use custos_engine::{EngineEvent, RunStore};
 use custos_model::ids::RecoveryRunId;
 use custos_model::{ActionAttempt, RecoveryRun, VerificationResult};
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{query, query_as, Row, SqlitePool};
 use std::future::Future;
 use std::path::Path;
@@ -19,55 +21,11 @@ pub enum StoreError {
     Corrupt(String, #[source] serde_json::Error),
 }
 
-const SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS recovery_runs (
-    id                 TEXT PRIMARY KEY,
-    resource_id        TEXT NOT NULL,
-    incident_id        TEXT,
-    status             TEXT NOT NULL,
-    trigger            TEXT NOT NULL,
-    started_at_unix_ms INTEGER NOT NULL,
-    updated_at_unix_ms INTEGER NOT NULL,
-    payload            TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_recovery_runs_status ON recovery_runs(status);
-
-CREATE TABLE IF NOT EXISTS action_attempts (
-    run_id              TEXT NOT NULL REFERENCES recovery_runs(id),
-    action_id           TEXT NOT NULL,
-    plan_id             TEXT NOT NULL,
-    attempt_no          INTEGER NOT NULL,
-    outcome             TEXT,
-    started_at_unix_ms  INTEGER NOT NULL,
-    finished_at_unix_ms INTEGER,
-    PRIMARY KEY (run_id, action_id)
-);
-
-CREATE TABLE IF NOT EXISTS verification_results (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    resource_id        TEXT NOT NULL,
-    passed             INTEGER NOT NULL,
-    summary            TEXT NOT NULL,
-    evidence_refs      TEXT NOT NULL,
-    checked_at_unix_ms INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS audit_events (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    at_unix_ms  INTEGER NOT NULL,
-    event_type  TEXT NOT NULL,
-    severity    TEXT NOT NULL,
-    resource_id TEXT NOT NULL,
-    run_id      TEXT,
-    payload     TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_audit_events_at ON audit_events(at_unix_ms);
-";
-
 /// Row shape of one persisted attempt.
 type AttemptRow = (String, String, i64, Option<String>, i64, Option<i64>);
 
-/// Terminal statuses excluded from `unfinished_runs` (§6.1).
+/// Terminal statuses excluded from `unfinished_runs` (§6.1) and eligible for
+/// retention purging (§7.4).
 const TERMINAL: &str =
     "('recovered','escalated','suppressed','cancelled','interrupted','outcome_unknown')";
 
@@ -75,15 +33,29 @@ pub struct Store {
     pool: SqlitePool,
     /// Serializes `block_on` calls; a current-thread runtime is not reentrant.
     rt_lock: Mutex<tokio::runtime::Runtime>,
+    retention: RetentionConfig,
 }
 
 impl Store {
-    /// Opens (creating if needed) the database at `path` with WAL enabled
-    /// and the P0 schema applied idempotently.
+    /// Opens (creating if needed) with the default config: WAL, `synchronous
+    /// = FULL`, nothing ever purged.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
+        Self::open_with(path, &StoreConfig::default())
+    }
+
+    /// Opens (creating if needed) the database at `path` with WAL enabled,
+    /// the configured `synchronous` policy (§7.1), and all pending schema
+    /// migrations applied (§7.2).
+    pub fn open_with(path: impl AsRef<Path>, config: &StoreConfig) -> Result<Self, StoreError> {
+        let synchronous = match config.synchronous {
+            SynchronousPolicy::Off => SqliteSynchronous::Off,
+            SynchronousPolicy::Normal => SqliteSynchronous::Normal,
+            SynchronousPolicy::Full => SqliteSynchronous::Full,
+        };
         let options = SqliteConnectOptions::new()
             .filename(path.as_ref())
             .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(synchronous)
             .create_if_missing(true);
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -97,9 +69,22 @@ impl Store {
         let store = Self {
             pool,
             rt_lock: Mutex::new(rt),
+            retention: config.retention,
         };
-        store.block(|pool| async move { query(SCHEMA).execute(&pool).await })?;
+        store.block(|pool| async move { migrate(pool).await.map(|_| ()) })?;
         Ok(store)
+    }
+
+    /// Schema versions currently applied, for `custos status` and tests.
+    pub fn applied_migrations(&self) -> Result<Vec<(i64, String, i64)>, StoreError> {
+        Ok(self.block(|pool| async move {
+            query_as::<_, (i64, String, i64)>(
+                "SELECT version, name, applied_at_unix_ms \
+                     FROM schema_migrations ORDER BY version",
+            )
+            .fetch_all(&pool)
+            .await
+        })?)
     }
 
     /// Runs `f` on the store's runtime. Futures need not be `Send`:
@@ -169,6 +154,60 @@ impl Store {
         .map_err(Into::into)
     }
 
+    /// Recent recovery runs, newest first (for `custos runs`).
+    pub fn list_runs(&self, limit: u32) -> Result<Vec<RunRow>, StoreError> {
+        self.block(|pool| async move {
+            let rows: Vec<(String, String, String, String, i64, i64)> = query_as(
+                "SELECT id, resource_id, status, trigger, started_at_unix_ms, updated_at_unix_ms \
+                 FROM recovery_runs ORDER BY updated_at_unix_ms DESC, id DESC LIMIT ?",
+            )
+            .bind(limit)
+            .fetch_all(&pool)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(
+                    |(id, resource_id, status, trigger, started, updated)| RunRow {
+                        id,
+                        resource_id,
+                        status,
+                        trigger,
+                        started_at_unix_ms: started as u64,
+                        updated_at_unix_ms: updated as u64,
+                    },
+                )
+                .collect())
+        })
+        .map_err(Into::into)
+    }
+
+    /// Recent incidents, newest first (for `custos incidents`).
+    pub fn list_incidents(&self, limit: u32) -> Result<Vec<IncidentRow>, StoreError> {
+        self.block(|pool| async move {
+            let rows: Vec<(String, String, String, String, i64, Option<i64>)> = query_as(
+                "SELECT id, resource_id, fault_code, summary, opened_at_unix_ms, closed_at_unix_ms \
+                 FROM incidents ORDER BY opened_at_unix_ms DESC, id DESC LIMIT ?",
+            )
+            .bind(limit)
+            .fetch_all(&pool)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(
+                    |(id, resource_id, fault_code, summary, opened, closed)| IncidentRow {
+                        id,
+                        resource_id,
+                        fault_code,
+                        summary,
+                        opened_at_unix_ms: opened as u64,
+                        closed_at_unix_ms: closed.map(|t| t as u64),
+                    },
+                )
+                .collect())
+        })
+        .map_err(Into::into)
+    }
+
     /// One run by id, with attempts reattached.
     pub fn run(&self, id: &RecoveryRunId) -> Result<Option<RecoveryRun>, StoreError> {
         let id = id.as_str().to_owned();
@@ -220,6 +259,87 @@ impl Store {
             )
             .collect())
     }
+
+    /// Applies the retention policy (§7.4) as of `now_unix_ms`. Active state
+    /// is never touched: open incidents, non-terminal runs and undelivered
+    /// notifications are excluded by the WHERE clauses, whatever their age.
+    pub fn purge_retention(&self, now_unix_ms: u64) -> Result<PurgeReport, StoreError> {
+        let retention = self.retention;
+        self.block(|pool| async move {
+            let mut report = PurgeReport::default();
+
+            if let Some(cutoff) = retention.audit_cutoff(now_unix_ms) {
+                report.audit_events = query("DELETE FROM audit_events WHERE at_unix_ms < ?")
+                    .bind(cutoff)
+                    .execute(&pool)
+                    .await?
+                    .rows_affected();
+            }
+
+            if let Some(cutoff) = retention.probe_cutoff(now_unix_ms) {
+                report.probe_results = query("DELETE FROM probe_results WHERE collected_at_unix_ms < ?")
+                    .bind(cutoff)
+                    .execute(&pool)
+                    .await?
+                    .rows_affected();
+            }
+
+            if let Some(run_cutoff) = retention.run_cutoff(now_unix_ms) {
+                // Attempts first: they reference the runs being removed.
+                report.attempts = query(&format!(
+                    "DELETE FROM action_attempts WHERE run_id IN (\
+                     SELECT id FROM recovery_runs \
+                     WHERE updated_at_unix_ms < ? AND status IN {TERMINAL})"
+                ))
+                .bind(run_cutoff)
+                .execute(&pool)
+                .await?
+                .rows_affected();
+                report.verifications =
+                    query("DELETE FROM verification_results WHERE checked_at_unix_ms < ?")
+                        .bind(run_cutoff)
+                        .execute(&pool)
+                        .await?
+                        .rows_affected();
+                report.runs = query(&format!(
+                    "DELETE FROM recovery_runs WHERE updated_at_unix_ms < ? AND status IN {TERMINAL}"
+                ))
+                .bind(run_cutoff)
+                .execute(&pool)
+                .await?
+                .rows_affected();
+                // Closed incidents only; open ones stay until resolved.
+                report.incidents =
+                    query("DELETE FROM incidents WHERE closed_at_unix_ms IS NOT NULL AND closed_at_unix_ms < ?")
+                        .bind(run_cutoff)
+                        .execute(&pool)
+                        .await?
+                        .rows_affected();
+            }
+
+            if let Some(cutoff) = retention.notification_cutoff(now_unix_ms) {
+                report.notification_attempts =
+                    query("DELETE FROM notification_attempts WHERE at_unix_ms < ?")
+                        .bind(cutoff)
+                        .execute(&pool)
+                        .await?
+                        .rows_affected();
+                // Delivered only; undelivered notifications must survive
+                // offline periods of any length (§7.4).
+                report.delivered_notifications = query(
+                    "DELETE FROM notification_queue \
+                     WHERE delivered_at_unix_ms IS NOT NULL AND delivered_at_unix_ms < ?",
+                )
+                .bind(cutoff)
+                .execute(&pool)
+                .await?
+                .rows_affected();
+            }
+
+            Ok(report)
+        })
+        .map_err(Into::into)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,6 +358,28 @@ pub struct AuditRow {
     pub severity: String,
     pub resource_id: String,
     pub run_id: Option<String>,
+}
+
+/// One recovery run row, for `custos runs`.
+#[derive(Debug, Clone)]
+pub struct RunRow {
+    pub id: String,
+    pub resource_id: String,
+    pub status: String,
+    pub trigger: String,
+    pub started_at_unix_ms: u64,
+    pub updated_at_unix_ms: u64,
+}
+
+/// One incident row, for `custos incidents`.
+#[derive(Debug, Clone)]
+pub struct IncidentRow {
+    pub id: String,
+    pub resource_id: String,
+    pub fault_code: String,
+    pub summary: String,
+    pub opened_at_unix_ms: u64,
+    pub closed_at_unix_ms: Option<u64>,
 }
 
 impl RunStore for Store {
@@ -431,6 +573,8 @@ fn run_id_of(event: &EngineEvent) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::RetentionConfig;
+    use crate::migrations::MIGRATIONS;
     use custos_model::ids::{ActionId, ResourceId};
     use custos_model::{ActionOutcome, RecoveryRunStatus};
     use std::sync::Arc;
@@ -455,6 +599,25 @@ mod tests {
             started_at_unix_ms: 1_000,
             finished_at_unix_ms: outcome.map(|_| 1_100),
         }
+    }
+
+    /// Executes raw SQL; only for seeding tables the engine does not write
+    /// yet (incidents, notifications, probe results).
+    fn exec(store: &Store, sql: &str) {
+        store
+            .block(|pool| async move { query(sql).execute(&pool).await.map(|_| ()) })
+            .expect("test sql");
+    }
+
+    fn count(store: &Store, table: &str) -> i64 {
+        store
+            .block(|pool| async move {
+                query(&format!("SELECT COUNT(*) AS n FROM {table}"))
+                    .fetch_one(&pool)
+                    .await
+                    .map(|row| row.get::<i64, _>("n"))
+            })
+            .expect("count")
     }
 
     #[test]
@@ -536,5 +699,214 @@ mod tests {
         let unfinished = store.unfinished_runs();
         assert_eq!(unfinished.len(), 1);
         assert_eq!(unfinished[0].action_attempts[0].outcome, None);
+    }
+
+    #[test]
+    fn migrations_apply_once_and_are_recorded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("custos.db");
+        {
+            let store = Store::open(&path).expect("open");
+            let applied = store.applied_migrations().expect("applied");
+            assert_eq!(applied.len(), MIGRATIONS.len());
+            assert_eq!(applied[0].1, "recovery-state-and-audit");
+            assert_eq!(applied[1].1, "full-core-schema");
+        }
+        // Reopen: nothing re-applies (the recorded versions match), and the
+        // count stays the same.
+        let store = Store::open(&path).expect("reopen");
+        assert_eq!(store.applied_migrations().unwrap().len(), MIGRATIONS.len());
+        // V2 tables exist and are queryable.
+        assert_eq!(count(&store, "probe_results"), 0);
+        assert_eq!(count(&store, "notification_queue"), 0);
+        assert_eq!(count(&store, "incidents"), 0);
+    }
+
+    #[test]
+    fn legacy_pre_framework_database_upgrades_in_place() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("legacy.db");
+        // A custos built before the migration framework: V1 tables, no
+        // schema_migrations, and a run that must survive the upgrade.
+        {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("rt");
+            let options = SqliteConnectOptions::new()
+                .filename(&path)
+                .journal_mode(SqliteJournalMode::Wal)
+                .create_if_missing(true);
+            rt.block_on(async {
+                let pool = SqlitePoolOptions::new()
+                    .max_connections(1)
+                    .connect_with(options)
+                    .await
+                    .expect("pool");
+                query(MIGRATIONS[0].sql).execute(&pool).await.expect("v1");
+                let payload =
+                    serde_json::to_string(&run("legacy-run", RecoveryRunStatus::Recovered))
+                        .expect("payload");
+                query(
+                    "INSERT INTO recovery_runs \
+                     (id, resource_id, status, trigger, started_at_unix_ms, updated_at_unix_ms, payload) \
+                     VALUES ('legacy-run', 'svc', 'recovered', 'old', 1, 1, ?)",
+                )
+                .bind(payload)
+                .execute(&pool)
+                .await
+                .expect("seed");
+            });
+        }
+        let store = Store::open(&path).expect("upgrade");
+        // V1 was a no-op re-run, V2 applied, data intact.
+        assert_eq!(store.applied_migrations().unwrap().len(), MIGRATIONS.len());
+        assert!(store
+            .run(&RecoveryRunId::new("legacy-run"))
+            .expect("run")
+            .is_some());
+    }
+
+    #[test]
+    fn open_with_configures_synchronous_policy() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = StoreConfig {
+            synchronous: SynchronousPolicy::Normal,
+            retention: RetentionConfig::default(),
+        };
+        let store = Store::open_with(dir.path().join("custos.db"), &config).expect("open");
+        // PRAGMA synchronous reports an integer level (0=OFF,1=NORMAL,2=FULL).
+        let mode: i64 = store
+            .block(|pool| async move {
+                query("PRAGMA synchronous")
+                    .fetch_one(&pool)
+                    .await
+                    .map(|row| row.get::<i64, _>(0))
+            })
+            .expect("pragma");
+        assert_eq!(mode, 1, "NORMAL is synchronous=1");
+        let journal: String = store
+            .block(|pool| async move {
+                query("PRAGMA journal_mode")
+                    .fetch_one(&pool)
+                    .await
+                    .map(|row| row.get::<String, _>(0))
+            })
+            .expect("journal");
+        assert_eq!(journal.to_lowercase(), "wal");
+    }
+
+    #[test]
+    fn purge_removes_only_expired_inactive_rows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let now = 1_000_000_u64;
+        let config = StoreConfig {
+            synchronous: SynchronousPolicy::Full,
+            retention: RetentionConfig {
+                audit_retention_ms: Some(10_000),
+                probe_detail_retention_ms: Some(10_000),
+                run_retention_ms: Some(10_000),
+                notification_retention_ms: Some(10_000),
+            },
+        };
+        let store = Store::open_with(dir.path().join("custos.db"), &config).expect("open");
+        let old = (now - 20_000) as i64; // expired
+        let recent = (now - 1_000) as i64; // inside retention
+
+        // Audit: one old, one recent.
+        for (at, id) in [(old, 1), (recent, 2)] {
+            exec(&store, &format!(
+                "INSERT INTO audit_events (id, at_unix_ms, event_type, severity, resource_id, payload) \
+                 VALUES ({id}, {at}, 'recovery.started', 'Info', 'svc', '{{}}')"
+            ));
+        }
+        // Probe results: one old, one recent.
+        for (at, id) in [(old, 1), (recent, 2)] {
+            exec(&store, &format!(
+                "INSERT INTO probe_results (id, resource_id, probe_name, succeeded, observation, collected_at_unix_ms) \
+                 VALUES ({id}, 'svc', 'cmd', 1, 'ok', {at})"
+            ));
+        }
+        // Runs: an old terminal run (purgeable) and an old ACTIVE run (must
+        // survive despite being expired).
+        let mut expired = run("run-old", RecoveryRunStatus::Recovered);
+        expired.updated_at_unix_ms = old as u64;
+        store.save_run(&expired);
+        store.save_attempt(
+            &expired.id,
+            &attempt("a-old", Some(ActionOutcome::Succeeded)),
+        );
+        let mut active = run("run-active", RecoveryRunStatus::Executing);
+        active.updated_at_unix_ms = old as u64;
+        store.save_run(&active);
+        store.save_attempt(&active.id, &attempt("a-live", None));
+        // Incidents: closed+old (purgeable), open+old (must survive).
+        exec(&store, &format!(
+            "INSERT INTO incidents (id, resource_id, fault_code, summary, opened_at_unix_ms, closed_at_unix_ms) \
+             VALUES ('inc-closed', 'svc', 'process_exited', 'closed', {old}, {old})"
+        ));
+        exec(
+            &store,
+            &format!(
+                "INSERT INTO incidents (id, resource_id, fault_code, summary, opened_at_unix_ms) \
+             VALUES ('inc-open', 'svc', 'process_exited', 'still open', {old})"
+            ),
+        );
+        // Notifications: delivered+old (purgeable), undelivered+old (must
+        // survive), with an attempt history row.
+        exec(&store, &format!(
+            "INSERT INTO notification_queue (id, resource_id, channel, payload, created_at_unix_ms, delivered_at_unix_ms) \
+             VALUES (1, 'svc', 'desktop', '{{}}', {old}, {old})"
+        ));
+        exec(&store, &format!(
+            "INSERT INTO notification_queue (id, resource_id, channel, payload, created_at_unix_ms) \
+             VALUES (2, 'svc', 'desktop', '{{}}', {old})"
+        ));
+        exec(
+            &store,
+            &format!(
+                "INSERT INTO notification_attempts (notification_id, outcome, detail, at_unix_ms) \
+             VALUES (1, 'delivered', 'ok', {old})"
+            ),
+        );
+
+        let report = store.purge_retention(now).expect("purge");
+        assert_eq!(report.audit_events, 1);
+        assert_eq!(report.probe_results, 1);
+        assert_eq!(report.runs, 1);
+        assert_eq!(report.attempts, 1);
+        assert_eq!(report.incidents, 1);
+        assert_eq!(report.delivered_notifications, 1);
+        assert_eq!(report.notification_attempts, 1);
+
+        // Survivors: active run + attempt, open incident, undelivered
+        // notification, recent audit/probe rows.
+        assert_eq!(count(&store, "recovery_runs"), 1);
+        assert_eq!(count(&store, "action_attempts"), 1);
+        assert_eq!(count(&store, "incidents"), 1);
+        assert_eq!(count(&store, "notification_queue"), 1);
+        assert_eq!(count(&store, "audit_events"), 1);
+        assert_eq!(count(&store, "probe_results"), 1);
+        let survivors = store.list_runs(10).expect("runs");
+        assert_eq!(survivors[0].id, "run-active");
+    }
+
+    #[test]
+    fn list_runs_orders_newest_first() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path().join("custos.db")).expect("open");
+        let mut first = run("run-first", RecoveryRunStatus::Recovered);
+        first.updated_at_unix_ms = 100;
+        let mut second = run("run-second", RecoveryRunStatus::Escalated);
+        second.updated_at_unix_ms = 200;
+        store.save_run(&first);
+        store.save_run(&second);
+        let rows = store.list_runs(10).expect("runs");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, "run-second");
+        assert_eq!(rows[1].id, "run-first");
+        let limited = store.list_runs(1).expect("limited");
+        assert_eq!(limited.len(), 1);
+        assert_eq!(limited[0].id, "run-second");
     }
 }
