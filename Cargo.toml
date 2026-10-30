@@ -15,6 +15,7 @@ members = [
     "crates/custos-python",
     "crates/custos-cli",
     "plugins/mihomo",
+    "plugins/openclash",
     "plugins/cloudflared",
 ]
 

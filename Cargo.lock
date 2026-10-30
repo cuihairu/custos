@@ -441,6 +441,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "custos-openclash-plugin"
+version = "0.1.0"
+dependencies = [
+ "custos-plugin-api",
+ "custos-plugin-host",
+ "custos-probe",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "custos-platform"
 version = "0.1.0"
 dependencies = [

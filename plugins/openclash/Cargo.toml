@@ -1,0 +1,20 @@
+[package]
+name = "custos-openclash-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# OpenClash on OpenWrt: the clash core speaks the same external-controller
+# API as mihomo; recovery uses the OpenWrt init script (todo.md 221).
+[[bin]]
+name = "openclash-plugin"
+path = "src/main.rs"
+
+[dependencies]
+custos-plugin-api = { path = "../../crates/custos-plugin-api" }
+custos-probe = { path = "../../crates/custos-probe" }
+serde_json = { workspace = true }
+ureq = "3"
+
+[dev-dependencies]
+custos-plugin-host = { path = "../../crates/custos-plugin-host" }
