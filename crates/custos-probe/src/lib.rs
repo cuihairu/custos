@@ -33,6 +33,12 @@ pub mod windows_service;
 use custos_model::ids::ResourceId;
 use custos_model::{Evidence, HealthStatus, Resource};
 
+/// Observation prefix a plugin-backed probe uses when the plugin supervisor
+/// is unrecoverable (`PluginStatus::Degraded`, docs/guide/plugins.md §4.5).
+/// The engine checks it to raise the `plugin.unavailable` notification event
+/// (docs/guide/notification.md §8.4) instead of re-probing forever.
+pub const PLUGIN_DEGRADED_OBSERVATION_PREFIX: &str = "plugin degraded (unprobeable)";
+
 /// One probe verdict, already normalized to a health status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeReport {

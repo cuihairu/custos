@@ -377,7 +377,13 @@ impl Engine {
         };
         let before = self.managed[id].snapshot.status;
         let snapshot = &mut self.managed.get_mut(id).unwrap().snapshot;
-        snapshot.record_probe(report.succeeded, thresholds.0, thresholds.1, now_unix_ms);
+        snapshot.record_probe(
+            report.succeeded,
+            report.status,
+            thresholds.0,
+            thresholds.1,
+            now_unix_ms,
+        );
         let after = self.managed[id].snapshot.status;
         // Health transitions become notification events (§8.4): a first
         // unhealthy/degraded state is the operator's signal. Unreachable and
@@ -402,6 +408,28 @@ impl Engine {
                     None,
                     None,
                 ),
+                // A plugin-backed probe that goes unreachable because the
+                // plugin supervisor is unrecoverable raises the plugin
+                // fault (§4.5 step 9, §8.4) — the resource itself stays
+                // Unreachable, not Unhealthy, so recovery is not attempted
+                // on a probe that cannot produce evidence.
+                HealthStatus::Unreachable
+                    if report
+                        .observation
+                        .starts_with(custos_probe::PLUGIN_DEGRADED_OBSERVATION_PREFIX) =>
+                {
+                    self.emit_notification(
+                        custos_model::EventType::PluginUnavailable,
+                        custos_model::Severity::Critical,
+                        format!(
+                            "probe `{}` reports: {}",
+                            report.probe_name, report.observation
+                        ),
+                        id,
+                        None,
+                        None,
+                    );
+                }
                 _ => {}
             }
         }
@@ -1730,6 +1758,64 @@ mod tests {
             assert!(!event.event_id.as_str().is_empty());
             assert_eq!(event.resource_id.as_ref().map(|r| r.as_str()), Some("svc"));
         }
+    }
+
+    /// A probe that always reports Unreachable with the plugin-degraded
+    /// observation (the PluginProbe contract, §4.5 step 9).
+    struct DegradedPluginProbe;
+
+    impl Probe for DegradedPluginProbe {
+        fn name(&self) -> &'static str {
+            "plugin"
+        }
+        fn probe(&self, resource: &Resource) -> ProbeReport {
+            ProbeReport {
+                resource_id: resource.id.clone(),
+                probe_name: self.name().to_owned(),
+                succeeded: false,
+                status: HealthStatus::Unreachable,
+                observation: format!(
+                    "{}: crashed 3 times within 30s",
+                    custos_probe::PLUGIN_DEGRADED_OBSERVATION_PREFIX
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn unrecoverable_plugin_raises_plugin_unavailable() {
+        let mut r = resource("pluginized", vec![], vec![]);
+        r.resource_type = "plugin-backed".into();
+        let (engine, _store, _exec) = test_engine(
+            vec![r],
+            vec![(ResourceId::new("pluginized"), vec![])],
+            vec![],
+            vec![],
+        );
+        let mut engine = engine;
+        let (events, emitter) = collector();
+        engine.set_event_emitter(emitter);
+        engine
+            .probes
+            .insert(ResourceId::new("pluginized"), Box::new(DegradedPluginProbe));
+
+        engine.tick();
+
+        let received = events.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let plugin_faults: Vec<_> = received
+            .iter()
+            .filter(|e| e.event_type.as_str() == "plugin.unavailable")
+            .collect();
+        assert_eq!(plugin_faults.len(), 1, "one fault on the transition, got {received:?}");
+        assert_eq!(plugin_faults[0].severity, Severity::Critical);
+        assert!(plugin_faults[0].summary.contains("plugin degraded (unprobeable)"));
+        // The resource itself is marked Unreachable, never Unhealthy/Unusable.
+        assert_eq!(
+            engine
+                .snapshot(&ResourceId::new("pluginized"))
+                .map(|s| s.status),
+            Some(HealthStatus::Unreachable)
+        );
     }
 
     #[test]

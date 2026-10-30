@@ -52,7 +52,10 @@ impl PluginProbe {
     /// observation, naming degradation explicitly.
     fn unreachable_report(&self, resource: &Resource, error: &crate::HostError) -> ProbeReport {
         let reason = match &self.supervisor.status() {
-            PluginStatus::Degraded { reason } => format!("plugin degraded (unprobeable): {reason}"),
+            PluginStatus::Degraded { reason } => format!(
+                "{}: {reason}",
+                custos_probe::PLUGIN_DEGRADED_OBSERVATION_PREFIX
+            ),
             _ => error.to_string(),
         };
         ProbeReport {
