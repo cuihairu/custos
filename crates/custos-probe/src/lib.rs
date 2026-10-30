@@ -17,6 +17,7 @@ pub mod mem;
 pub mod process;
 pub mod scheduler;
 pub mod sys;
+pub mod systemd;
 pub mod tcp;
 pub mod tls;
 pub mod tls_cert;

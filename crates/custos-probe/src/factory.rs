@@ -11,7 +11,7 @@ use crate::mem::MemProbe;
 use crate::process::ProcessProbe;
 use crate::tcp::TcpProbe;
 use crate::tls_cert::TlsCertProbe;
-use crate::{cpu, disk, dns, http, log, mem, tls_cert, Probe};
+use crate::{cpu, disk, dns, http, log, mem, systemd, tls_cert, Probe};
 use custos_model::Resource;
 use std::time::Duration;
 
@@ -81,27 +81,57 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
         "log" => log::from_config(config)
             .map(|probe: crate::log::LogProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
-        "custom-command" | "proxy" | "tunnel" | "service" => {
-            // Any type may fall back to an exec check command in P0.
-            let command = config["command"]
-                .as_array()
-                .map(|argv| {
-                    argv.iter()
-                        .filter_map(|v| v.as_str().map(str::to_owned))
-                        .collect::<Vec<String>>()
-                })
-                .filter(|argv| !argv.is_empty())
-                .ok_or_else(|| err("`probe.command` is required for exec-probed resources"))?;
-            let timeout_ms = config["timeout_ms"].as_u64().unwrap_or(3_000);
-            Ok(Box::new(ExecProbe::from_argv(
-                command,
-                Duration::from_millis(timeout_ms),
-            )))
+        // `service` with a `unit` uses the native systemd probe on Linux
+        // (survey §26.11 #7); with a `command` it falls back to exec.
+        "service" => {
+            if config["unit"].is_string() {
+                #[cfg(target_os = "linux")]
+                {
+                    systemd::from_config(config)
+                        .map(|probe: crate::systemd::SystemdProbe| {
+                            Box::new(probe) as Box<dyn Probe>
+                        })
+                        .map_err(|reason| err(reason.as_str()))
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    Err(err("the systemd probe is Linux-only"))
+                }
+            } else {
+                exec_probe(config, resource)
+            }
         }
+        "custom-command" | "proxy" | "tunnel" => exec_probe(config, resource),
         other => Err(err(&format!(
             "no builtin probe for type `{other}` in P0 (docs/guide/probe-diagnosis.md §5.4)"
         ))),
     }
+}
+
+/// Builds the fallback exec probe for command-probed resource types.
+fn exec_probe(
+    config: &serde_json::Value,
+    resource: &Resource,
+) -> Result<Box<dyn Probe>, ProbeBuildError> {
+    let err = |reason: &str| ProbeBuildError {
+        id: resource.id.to_string(),
+        kind: resource.resource_type.clone(),
+        reason: reason.to_owned(),
+    };
+    let command = config["command"]
+        .as_array()
+        .map(|argv| {
+            argv.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect::<Vec<String>>()
+        })
+        .filter(|argv| !argv.is_empty())
+        .ok_or_else(|| err("`probe.command` is required for exec-probed resources"))?;
+    let timeout_ms = config["timeout_ms"].as_u64().unwrap_or(3_000);
+    Ok(Box::new(ExecProbe::from_argv(
+        command,
+        Duration::from_millis(timeout_ms),
+    )))
 }
 
 #[cfg(test)]
@@ -242,5 +272,22 @@ mod tests {
     fn log_probe_requires_path_and_pattern() {
         let resource = Resource::new("svc-log", "log");
         assert!(build_probe(&resource).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn service_with_unit_builds_systemd_probe() {
+        let mut resource = Resource::new("nginx", "service");
+        resource.config = json!({"unit": "nginx.service"});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "systemd");
+    }
+
+    #[test]
+    fn service_with_command_falls_back_to_exec() {
+        let mut resource = Resource::new("svc", "service");
+        resource.config = json!({"command": ["systemctl", "is-active", "nginx"]});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "exec");
     }
 }
