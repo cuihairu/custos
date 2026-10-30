@@ -274,3 +274,13 @@
 - [ ] rust-toolchain.toml 补充（stable 通道声明）
 - [ ] CI：cargo fmt/clippy/test 工作流
 - [ ] CI：docs:build 工作流（PR 校验）
+
+## 审核发现
+
+- [ ] 审核发现：`RawProbe`（deny_unknown_fields）仅接受 command/pid_file/interval_ms/timeout_ms/max_output_bytes 五个字段，而 `custos-probe` 新探针（http-endpoint/network-connectivity/dns）需要 host/port/url/name/server 等字段，导致这些类型配置无法通过 `custos validate` 解析（实测 network-connectivity 报 unknown field `host`）。(crates/custos-config/src/lib.rs:41)
+- [ ] 审核发现：`build_probe` 对 `custom-command`/`proxy`/`tunnel`/`service` 读取 `config["command"]`，但配置层已把 `RawProbe` 的 `command` 序列化进 `Resource.config`，字段路径一致；但 `max_output_bytes` 在 `ExecProbe::from_argv` 中被硬编码为 64KiB，配置中的 `max_output_bytes` 被丢弃（配置可设但运行时固定）。(crates/custos-probe/src/factory.rs:84)
+- [ ] 审核发现：`AlternativeGroup`（N-of-M 语义）在 config 中完成校验并存入 `ValidatedConfig.alternative_groups`，但引擎的 `dependencies_satisfied` 只遍历 `Dependency` 边，从未消费 `AlternativeGroup`/`satisfied_by`，N-of-M 备份组在恢复依赖解析中实际不生效。(crates/custos-engine/src/engine.rs:774)
+- [ ] 审核发现：`ResourceHealthSnapshot::record_probe` 仅接收 `succeeded: bool`，未区分 `Unreachable`（探针无法取得结果）与 `Unhealthy`（资源确实故障）；Unreachable 会按失败计数累积并可能翻转为 `Unhealthy`，与「Unreachable ≠ Unhealthy」的设计约定冲突，诊断可能误判。(crates/custos-model/src/snapshot.rs:38)
+- [ ] 审核发现：README 声称「Python 脚本扩展（双向）：PyO3 绑定 + Python 脚本执行」，但提交范围内无任何 `pyo3` 依赖或 Python 代码，该能力尚未实现，文档超前于代码。(README.md:32)
+- [ ] 审核发现：集成测试 `respawn_worker_end_to_end` 在完整工作区套件并行运行时偶发失败（断言 run.status == Recovered 得 Escalated），单测单独跑恒定通过，疑似测试对进程/定时竞态敏感（flaky）。(crates/custos-engine/tests/vertical.rs:166)
+- [ ] 审核发现：工作区当前处于未完成的 rebase 状态，`crates/custos-probe/src/factory.rs` 存在未解析的 `<<<<<<< HEAD / ======= / >>>>>>> f127163` 冲突标记，工作树无法 `cargo build`（提交的 HEAD 版本无此问题，冲突仅在工作树）。。(crates/custos-probe/src/factory.rs:66)

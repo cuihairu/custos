@@ -101,3 +101,55 @@ pub(crate) fn connect_tls(
         .map_err(|err| format!("tls handshake failed: {err}"))?;
     Ok(stream)
 }
+
+/// Test helpers shared by the tcp and tls-cert probe tests: a one-shot TLS
+/// server backed by a generated certificate.
+#[cfg(test)]
+pub(crate) mod test_util {
+    use rcgen::{CertificateParams, KeyPair, SanType};
+    use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+    use rustls::{ServerConfig, ServerConnection};
+    use std::net::TcpListener;
+    use std::sync::Arc;
+    use std::thread::{self, JoinHandle};
+    use time::OffsetDateTime;
+
+    /// Spawns a TLS server on 127.0.0.1:0 that serves one connection with a
+    /// certificate valid for `not_after` (default: the current date + 30
+    /// days). Returns the bound address and the join handle.
+    pub(crate) fn spawn_tls_server() -> (std::net::SocketAddr, JoinHandle<()>) {
+        spawn_tls_server_with_expiry(OffsetDateTime::now_utc() + time::Duration::days(30))
+    }
+
+    pub(crate) fn spawn_tls_server_with_expiry(
+        not_after: OffsetDateTime,
+    ) -> (std::net::SocketAddr, JoinHandle<()>) {
+        let key_pair = KeyPair::generate().unwrap();
+        let mut params = CertificateParams::default();
+        params.not_before = not_after - time::Duration::days(365);
+        params.not_after = not_after;
+        params.subject_alt_names = vec![SanType::DnsName(
+            "localhost".try_into().expect("valid DNS name"),
+        )];
+        let cert = params.self_signed(&key_pair).unwrap();
+        let cert_der = cert.der().clone();
+        let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der()));
+        let config = Arc::new(
+            ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(vec![cert_der], key_der)
+                .unwrap(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                let conn = ServerConnection::new(config).unwrap();
+                let mut tls_stream = rustls::StreamOwned::new(conn, stream);
+                // Drive the server side of the handshake to completion.
+                let _ = tls_stream.conn.complete_io(&mut tls_stream.sock);
+            }
+        });
+        (addr, handle)
+    }
+}

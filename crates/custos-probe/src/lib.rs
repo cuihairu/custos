@@ -14,6 +14,7 @@ pub mod process;
 pub mod scheduler;
 pub mod tcp;
 pub mod tls;
+pub mod tls_cert;
 
 use custos_model::ids::ResourceId;
 use custos_model::{Evidence, HealthStatus, Resource};

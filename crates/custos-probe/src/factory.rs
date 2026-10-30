@@ -7,7 +7,8 @@ use crate::exec::ExecProbe;
 use crate::http::HttpProbe;
 use crate::process::ProcessProbe;
 use crate::tcp::TcpProbe;
-use crate::{dns, http, Probe};
+use crate::tls_cert::TlsCertProbe;
+use crate::{dns, http, tls_cert, Probe};
 use custos_model::Resource;
 use std::time::Duration;
 
@@ -49,14 +50,21 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
                 .and_then(|port| u16::try_from(port).ok())
                 .ok_or_else(|| err("`probe.port` must be an integer in 0..=65535"))?;
             let timeout_ms = config["timeout_ms"].as_u64().unwrap_or(3_000);
+            let tls = config["tls"].as_bool().unwrap_or(false);
+            let server_name = config["server_name"].as_str().unwrap_or(host);
             Ok(Box::new(TcpProbe {
                 host: host.into(),
                 port,
                 timeout: Duration::from_millis(timeout_ms),
+                tls,
+                server_name: server_name.into(),
             }))
         }
         "dns" => dns::from_config(config)
             .map(|probe: DnsProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
+        "tls-certificate" => tls_cert::from_config(config)
+            .map(|probe: TlsCertProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
         "custom-command" | "proxy" | "tunnel" | "service" => {
             // Any type may fall back to an exec check command in P0.
@@ -151,5 +159,29 @@ mod tests {
     fn dns_probe_requires_name() {
         let resource = Resource::new("dns-api", "dns");
         assert!(build_probe(&resource).is_err());
+    }
+
+    #[test]
+    fn builds_tls_cert_probe_from_host() {
+        let mut resource = Resource::new("cert", "tls-certificate");
+        resource.config = json!({"host": "example.com", "warn_days": 45, "crit_days": 14});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "tls-cert");
+    }
+
+    #[test]
+    fn tls_cert_probe_requires_host() {
+        let resource = Resource::new("cert", "tls-certificate");
+        assert!(build_probe(&resource).is_err());
+    }
+
+    #[test]
+    fn network_connectivity_reads_tls_option() {
+        let mut resource = Resource::new("db", "network-connectivity");
+        resource.config = json!({
+            "host": "127.0.0.1", "port": 443, "tls": true, "server_name": "example.com"
+        });
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "tcp");
     }
 }

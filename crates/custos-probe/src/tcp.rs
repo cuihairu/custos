@@ -4,8 +4,11 @@
 //! recording the connection latency. Status conventions: connected →
 //! Healthy, refused → Unhealthy (the service is down), timeout or DNS
 //! failure → Unreachable (the probe could not obtain a result).
+//! `tls = true` additionally completes a TLS handshake (accept-any
+//! verifier — certificate trust is the tls-cert probe's job, not a
+//! connectivity probe's) so "port open but TLS broken" is caught.
 
-use crate::{Probe, ProbeReport};
+use crate::{tls, Probe, ProbeReport};
 use custos_model::{HealthStatus, Resource};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
@@ -16,6 +19,10 @@ pub struct TcpProbe {
     pub host: String,
     pub port: u16,
     pub timeout: Duration,
+    /// Complete a TLS handshake after connecting (default off).
+    pub tls: bool,
+    /// SNI name for the optional TLS handshake; defaults to `host`.
+    pub server_name: String,
 }
 
 impl Probe for TcpProbe {
@@ -32,6 +39,7 @@ impl Probe for TcpProbe {
             status,
             observation,
         };
+        let remaining = || self.timeout.saturating_sub(start.elapsed());
 
         let addresses: Vec<SocketAddr> = match (self.host.as_str(), self.port).to_socket_addrs() {
             Ok(addresses) => addresses.collect(),
@@ -53,25 +61,27 @@ impl Probe for TcpProbe {
 
         let mut last_error = None;
         for address in addresses {
-            let remaining = self.timeout.saturating_sub(start.elapsed());
-            if remaining.is_zero() {
+            let left = remaining();
+            if left.is_zero() {
                 return report(
                     false,
                     HealthStatus::Unreachable,
                     format!("connect timeout after {}ms", self.timeout.as_millis()),
                 );
             }
-            match TcpStream::connect_timeout(&address, remaining) {
-                Ok(_) => {
-                    return report(
-                        true,
-                        HealthStatus::Healthy,
-                        format!(
-                            "connected to {} in {}ms",
-                            address,
-                            start.elapsed().as_millis()
+            match TcpStream::connect_timeout(&address, left) {
+                Ok(stream) => {
+                    return match self.finish(stream, remaining()) {
+                        Ok(observation) => report(
+                            true,
+                            HealthStatus::Healthy,
+                            format!(
+                                "connected to {address} in {}ms; {observation}",
+                                start.elapsed().as_millis()
+                            ),
                         ),
-                    );
+                        Err(observation) => report(false, HealthStatus::Unhealthy, observation),
+                    };
                 }
                 Err(err) => {
                     if err.kind() == std::io::ErrorKind::TimedOut
@@ -100,6 +110,28 @@ impl Probe for TcpProbe {
     }
 }
 
+impl TcpProbe {
+    /// After a successful connect: plain TCP is done, `tls = true` still
+    /// completes the handshake under the remaining deadline.
+    fn finish(&self, stream: TcpStream, remaining: Duration) -> Result<String, String> {
+        if !self.tls {
+            return Ok("tcp connect ok".to_owned());
+        }
+        let left = remaining.max(Duration::from_millis(1));
+        stream
+            .set_read_timeout(Some(left))
+            .and_then(|_| stream.set_write_timeout(Some(left)))
+            .map_err(|err| format!("set timeout failed: {err}"))?;
+        let server_name = if self.server_name.is_empty() {
+            self.host.as_str()
+        } else {
+            self.server_name.as_str()
+        };
+        drop(tls::connect_tls(stream, server_name, false)?);
+        Ok("tls handshake ok".to_owned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,16 +142,21 @@ mod tests {
         Resource::new("svc", "network-connectivity")
     }
 
+    fn probe(host: &str, port: u16) -> TcpProbe {
+        TcpProbe {
+            host: host.into(),
+            port,
+            timeout: Duration::from_secs(2),
+            tls: false,
+            server_name: host.into(),
+        }
+    }
+
     #[test]
     fn open_port_reports_healthy_with_latency() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        let probe = TcpProbe {
-            host: "127.0.0.1".into(),
-            port: addr.port(),
-            timeout: Duration::from_secs(2),
-        };
-        let report = probe.probe(&resource());
+        let report = probe("127.0.0.1", addr.port()).probe(&resource());
         assert!(report.succeeded);
         assert_eq!(report.status, HealthStatus::Healthy);
         assert!(
@@ -137,12 +174,7 @@ mod tests {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             listener.local_addr().unwrap().port()
         };
-        let probe = TcpProbe {
-            host: "127.0.0.1".into(),
-            port,
-            timeout: Duration::from_secs(2),
-        };
-        let report = probe.probe(&resource());
+        let report = probe("127.0.0.1", port).probe(&resource());
         assert!(!report.succeeded);
         assert_eq!(report.status, HealthStatus::Unhealthy);
         assert!(
@@ -154,15 +186,7 @@ mod tests {
 
     #[test]
     fn unreachable_hostname_reports_unreachable() {
-        let probe = TcpProbe {
-            // A space is never a valid hostname; getaddrinfo fails without
-            // consulting the wildcard resolver that captures `.invalid` in
-            // some environments.
-            host: "does not exist".into(),
-            port: 80,
-            timeout: Duration::from_secs(2),
-        };
-        let report = probe.probe(&resource());
+        let report = probe("does not exist", 80).probe(&resource());
         assert!(!report.succeeded);
         assert_eq!(report.status, HealthStatus::Unreachable);
     }
@@ -177,16 +201,57 @@ mod tests {
         let handle = thread::spawn(move || {
             let _ = listener.accept();
         });
-        let probe = TcpProbe {
-            host: addr.ip().to_string(),
-            port: addr.port(),
-            timeout: Duration::from_millis(500),
-        };
-        let report = probe.probe(&resource());
+        let report = probe(&addr.ip().to_string(), addr.port()).probe(&resource());
         assert_eq!(
             report.status,
             HealthStatus::Healthy,
             "connect alone is enough"
+        );
+        handle.join().ok();
+    }
+
+    #[test]
+    fn tls_handshake_ok_reports_healthy() {
+        let (addr, handle) = tls::test_util::spawn_tls_server();
+        let mut p = probe("127.0.0.1", addr.port());
+        p.tls = true;
+        p.server_name = "localhost".into();
+        let report = p.probe(&resource());
+        assert_eq!(
+            report.status,
+            HealthStatus::Healthy,
+            "{}",
+            report.observation
+        );
+        assert!(
+            report.observation.contains("tls handshake ok"),
+            "{}",
+            report.observation
+        );
+        handle.join().ok();
+    }
+
+    #[test]
+    fn tls_handshake_on_plain_tcp_is_unhealthy() {
+        // TLS expected but the endpoint is not a TLS server.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            let _ = listener.accept();
+        });
+        let mut p = probe("127.0.0.1", addr.port());
+        p.tls = true;
+        let report = p.probe(&resource());
+        assert_eq!(
+            report.status,
+            HealthStatus::Unhealthy,
+            "{}",
+            report.observation
+        );
+        assert!(
+            report.observation.contains("handshake"),
+            "{}",
+            report.observation
         );
         handle.join().ok();
     }
