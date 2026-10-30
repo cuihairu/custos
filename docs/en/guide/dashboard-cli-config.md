@@ -6,14 +6,86 @@ title: Dashboard, CLI and Configuration
 
 ## 9.1 Dashboard disabled by default
 
-Default configuration:
+The Dashboard is an optional component and is disabled by default; when not enabled there are zero listening ports and zero HTTP code paths.
+
+Target configuration shape (not implemented before P4):
 
 ```toml
 [dashboard]
 enabled = false
-listen = \
+listen = "127.0.0.1:8080"
+```
 
-rules:
+Enabling prerequisites and acceptance constraints:
+
+1. When disabled, no port may be listened on.
+2. Dashboard unavailability must not affect the core engine.
+3. The Dashboard must not bypass the Core Engine to execute recovery directly.
+4. High-risk operations must still go through the unified authorization and audit.
+5. Transport security (auth, bind address, CSRF) is hardened centrally with the toolbox (ADR-0015).
+
+## 9.2 CLI commands
+
+The CLI is the P0/P1 operating surface (implemented):
+
+```text
+custos validate <CONFIG>           Parse and validate the configuration (rejects duplicate IDs, dangling references, cycles)
+custos start <CONFIG> [OPTIONS]    Run the engine loop (--db PATH, --interval MS, --once)
+custos status [--db PATH]          Store counters and recent audit events
+custos runs [--db PATH]            Recent recovery runs (newest first)
+custos incidents [--db PATH]       Incident history
+custos notify status [--db PATH]   Notification queue counters (five states) and recent entries
+custos notify retry <ID> [--db]    Manually requeue a dead-lettered notification
+custos resources <CONFIG>          List configured resources
+custos graph <CONFIG>              Dependency graph in topological order
+```
+
+`start` performs crash recovery first (unfinished runs are marked outcome-unknown and never blindly retried), then enters the probe/recover tick loop; the notification engine is wired into the same process (event enqueue + background delivery, offline drain).
+
+---
+
+# 10. Configuration Specification
+
+## 10.1 Basic principles
+
+Configuration must be:
+
+- Validatable.
+- Versionable.
+- Able to report clear error paths.
+- Unwilling to silently interpret unknown fields as valid configuration.
+- Supportive of secure credential references.
+- Supportive of explicit dependencies between resources.
+- Supportive of per-resource recovery policies.
+- Supportive of global budgets and notification rules.
+
+The first version uses TOML (one primary format, `version = 1`).
+
+## 10.2 Example: a Cloudflare Tunnel depending on a proxy
+
+The following is the target configuration shape, shown to illustrate architecture semantics; it does not mean the first version already has the corresponding plugins.
+
+```yaml
+version: 1
+
+resources:
+  - id: proxy.egress
+    type: proxy
+    plugin: mihomo
+    config:
+      endpoint: http://127.0.0.1:7890
+
+  - id: tunnel.egress
+    type: tunnel
+    plugin: cloudflared
+    config:
+      entry: https://api.example.com
+    dependencies:
+      - resource: proxy.egress
+        requirement: required
+
+notification:
+  rules:
     - event: recovery.exhausted
       severity: critical
       channels:
@@ -44,87 +116,3 @@ Note that:
 12. Create or update the runtime resource registry.
 
 When configuration validation fails, the specific field and reason must be reported.
-
----
-
-# 10. Configuration Specification
-
-## 10.1 Basic principles
-
-Configuration must be:
-
-- Validatable.
-- Versionable.
-- Able to report clear error paths.
-- Unwilling to silently interpret unknown fields as valid configuration.
-- Supportive of secure credential references.
-- Supportive of explicit dependencies between resources.
-- Supportive of per-resource recovery policies.
-- Supportive of global budgets and notification rules.
-
-TOML or YAML is suggested for the first version, but the first version picks exactly one primary configuration format. Avoid maintaining two formats at once.
-
-## 10.2 Example: a Cloudflare Tunnel depending on a proxy
-
-The following is the target configuration shape, shown to illustrate architecture semantics; it does not mean the first version already has the corresponding plugins.
-
-```yaml
-version: 1
-
-resources:
-  - id: proxy.egress
-    type: proxy
-    plugin: mihomo
-    config:
-      endpoint: \
-
->You are responsible for implementing Custos, a Rust-based cross-platform local self-healing engine.
-
-Please first read the architecture design documents in the project root in full, and inspect the actual state of the repository.
-
-Phase one implements P0 only: the core domain model, the Resource/Dependency Graph, configuration validation, Process Probe, Exec Probe, the RecoveryRun state machine, ordered recovery candidate plans, post-action health verification, recovery budgets, per-resource mutexes, SQLite persistence, basic CLI commands and integration tests.
-
-Strictly follow these requirements:
-
-1. Do not implement every planned feature in one go.
-2. Do not implement HTTP Probe, Dashboard, OpenClash or complex network recovery in P0.
-3. Analyze the existing code before proposing an implementation plan; do not assume the repository is empty.
-4. Dependency recovery is coordinated by the Core Engine; plugins must not bypass the core engine and run recovery flows directly.
-5. When a dependency is unsatisfied, upstream recovery actions that depend on it must not execute.
-6. A recovery action succeeding does not mean the resource is healthy; independent verification is mandatory.
-7. After an action fails, diagnose again and re-evaluate dependencies and candidate plans.
-8. Every recovery task must have explicit timeout, budget and termination conditions.
-9. Persist state before executing critical actions; after a process crash, do not unconditionally repeat actions with unknown outcomes.
-10. One resource must not run multiple recovery tasks concurrently.
-11. All state transitions and action attempts must be auditable.
-12. Fake tests, hardcoded success results or unimplemented capability claims must never be used to pass acceptance.
-
-Execute in the following steps:
-
-A. Output the current repository structure, existing modules, dependency relationships and the implementations to be preserved.
-
-B. Break P0 into independently acceptable small tasks, listing each task's files, interfaces, tests and dependencies.
-
-C. First implement the minimal complete vertical loop: controlled process probe failure → fault verdict → create RecoveryRun → execute recovery action → independent health verification → persist the final result.
-
-D. On that foundation, add the dependency graph, dependency recovery, multiple candidate plans, recovery budgets and crash recovery.
-
-E. Complete SQLite persistence and the CLI.
-
-F. Add tests for plugin timeouts, unknown action outcomes, dependency cycles, concurrent recovery, database failures and post-action verification failures.
-
-G. Run formatting, static checks, unit tests and integration tests, and report the actual results.
-
-After every task, you must provide the list of modified files, design notes, test commands, actual test results and unresolved issues. When the architecture documents conflict with the actual code, state the conflict and its impact first; never silently overwrite.
-
-Do not move on to P1 or P2 early. Only after every P0 acceptance criterion is met should you submit the next phase's implementation plan.
-
-**One important suggestion:** put these two documents into the repository as `docs/architecture.md` and `docs/implementation/p0.md`. When different Code Agents later implement the core engine, the plugin runtime and the notification module separately, all of them should work from the same domain model and state machine, to avoid designing mutually incompatible interfaces.
-
----
-
-If you want, I can:
-
-- Describe the Recovery Engine state machine and recovery flow in more detail
-- Elaborate on RecoveryRun management and auditing implementation details
-- Expand on plugin permissions and security policy design in the plugin architecture

@@ -23,6 +23,18 @@ The following decisions need to be archived as ADRs:
 
 An ADR must record the background, the decision, the alternatives, the pros and cons, and the follow-up impact.
 
+15. Why the core maintains an internal integration toolbox (HTTP/RPC/SSH/probing primitives) and plugins are only the rule layer.
+
+**Background**: as probing and recovery actions come to cover HTTP, RPC, SSH, service control and other transports/protocols, if every plugin implements its own transport, the security hardening (TLS verification, SSRF protection, SSH host-key verification, timeout/retry/cancellation, credential-safe reads) is diluted across N implementations and cannot be uniformly enforced.
+
+**Decision**: the core converges a set of "internal integration tools" as capability executors (HTTP client, RPC client, SSH client, process/service/disk/network-connectivity probes, controlled command execution, reboot control), declared via Capability + OperationParams. Plugins and built-in capabilities share one dispatch table: built-in capabilities execute in-process in the core, plugin-declared capabilities execute in the plugin subprocess. Plugins no longer implement transports themselves; they provide capability declarations and rule logic (targets, parameters, decisions, verification).
+
+**Alternatives**: keep plugins self-contained, each implementing its own transport. Drawbacks: duplicated transports, hardening easily bypassed, larger plugin footprint and attack surface.
+
+**Pros and cons**: hardening happens once, in one place; unified semantics (timeout/cancel/budget/audit); thinner plugins. The cost is that the core's tool surface must be maintained, and plugin freedom shrinks (no arbitrary custom protocols).
+
+**Follow-up impact**: P2 platform adapters (systemd/launchd/SCM, network interface/route/DNS) register as tool executors in the same registry; the Webhook notification channel reuses the toolbox HTTP client (with SSRF protection); the Python outbound bindings expose tool calls, not arbitrary execution.
+
 ---
 
 # 18. Final Implementation Principles
@@ -38,45 +50,3 @@ Phase one must first get the core recovery loop, dependency semantics, persisten
 Do not implement every plugin at once, and do not build a complex Dashboard or plugin marketplace ahead of time.
 
 Prove the architecture with the minimal but complete recovery loop first, then expand based on the failures that real deployments cannot yet handle.
-
-
-
-## First execution instruction for the Code Agent
-
-The documents make the overall goal clear, but when implementation actually starts, I suggest handing the following passage alone to the main agent first, letting it inspect the repository and execute P0, instead of implementing every phase immediately.
-
-
-
-rules:
-    - event: recovery.exhausted
-      severity: critical
-      channels:
-        - primary-webhook
-```
-
-Note that:
-
-1. Proxy health checks should distinguish proxy authentication failures, connection failures and target service failures wherever possible.
-2. If the proxy is not a required dependency of the Tunnel, it must not be declared Required.
-3. HTTP probing and the specific plugins above are capabilities for later phases.
-4. The first version's configuration validator may define the complete configuration model up front, but unimplemented resource types must produce a clear capability-missing error instead of pretending to run.
-5. Recovery actions must match the plugin's declared capabilities.
-
-## 10.3 Configuration loading process
-
-1. Parse the configuration.
-2. Validate the version.
-3. Validate the structure.
-4. Validate resource IDs.
-5. Validate dependency references.
-6. Validate the dependency graph.
-7. Validate recovery action references.
-8. Validate plugin capabilities.
-9. Validate permission and risk policies.
-10. Validate notification channel configuration.
-11. Validate database migration compatibility.
-12. Create or update the runtime resource registry.
-
-When configuration validation fails, the specific field and reason must be reported.
-
----

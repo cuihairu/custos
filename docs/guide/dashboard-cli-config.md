@@ -6,14 +6,87 @@ title: Dashboard、CLI 与配置
 
 ## 9.1 Dashboard 默认关闭
 
-默认配置：
+Dashboard 是可选组件，默认关闭；未启用时零监听端口、零 HTTP 代码路径。
+
+目标配置形态（P4 之前不会实现）：
 
 ```toml
 [dashboard]
 enabled = false
-listen = \
+listen = "127.0.0.1:8080"
+```
 
-rules:
+启用前提与验收约束：
+
+1. 关闭时不得监听任何端口。
+2. Dashboard 不可用不得影响核心引擎运行。
+3. Dashboard 不得绕过 Core Engine 直接执行恢复。
+4. 高风险操作仍必须走统一的授权与审计。
+5. 传输安全（认证、绑定地址、CSRF）随工具箱集中硬化（ADR-0015）。
+
+## 9.2 CLI 命令
+
+CLI 是 P0/P1 的操作面（已实现）：
+
+```text
+custos validate <CONFIG>           解析并校验配置（拒绝重复 ID、悬空引用、依赖环）
+custos start <CONFIG> [OPTIONS]    运行引擎循环（--db PATH、--interval MS、--once）
+custos status [--db PATH]          存储计数与最近审计事件
+custos runs [--db PATH]            最近恢复任务（新→旧）
+custos incidents [--db PATH]       事件（incident）历史
+custos notify status [--db PATH]   通知队列五状态计数与最近条目
+custos notify retry <ID> [--db]    手动重排一条死信通知
+custos resources <CONFIG>          列出配置的资源
+custos graph <CONFIG>              依赖图（拓扑序）
+```
+
+`start` 启动时先做崩溃恢复（未终态运行标记 outcome-unknown，绝不盲目重试），
+再进入探测/恢复 tick 循环；通知引擎随进程接线（事件入队 + 后台投递，断网补发）。
+
+---
+
+# 10. 配置规范
+
+## 10.1 基本原则
+
+配置必须：
+
+- 可验证。
+- 可版本化。
+- 能提供明确错误路径。
+- 不允许未知字段被静默解释成有效配置。
+- 支持安全的凭据引用。
+- 支持资源之间的显式依赖。
+- 支持资源级恢复策略。
+- 支持全局预算和通知规则。
+
+首版采用 TOML（单一主格式，`version = 1`）。
+
+## 10.2 示例：Cloudflare Tunnel 依赖代理
+
+以下为目标配置形态，展示架构语义；不代表第一版已有对应插件实现。
+
+```yaml
+version: 1
+
+resources:
+  - id: proxy.egress
+    type: proxy
+    plugin: mihomo
+    config:
+      endpoint: http://127.0.0.1:7890
+
+  - id: tunnel.egress
+    type: tunnel
+    plugin: cloudflared
+    config:
+      entry: https://api.example.com
+    dependencies:
+      - resource: proxy.egress
+        requirement: required
+
+notification:
+  rules:
     - event: recovery.exhausted
       severity: critical
       channels:
@@ -44,87 +117,3 @@ rules:
 12. 创建或更新运行时资源注册表。
 
 配置验证失败时必须指出具体字段和原因。
-
----
-
-# 10. 配置规范
-
-## 10.1 基本原则
-
-配置必须：
-
-- 可验证。
-- 可版本化。
-- 能提供明确错误路径。
-- 不允许未知字段被静默解释成有效配置。
-- 支持安全的凭据引用。
-- 支持资源之间的显式依赖。
-- 支持资源级恢复策略。
-- 支持全局预算和通知规则。
-
-建议首版采用 TOML，或者 YAML，但第一版只选一种主配置格式。避免同时维护两种格式。
-
-## 10.2 示例：Cloudflare Tunnel 依赖代理
-
-以下为目标配置形态，展示架构语义；不代表第一版已有对应插件实现。
-
-```yaml
-version: 1
-
-resources:
-  - id: proxy.egress
-    type: proxy
-    plugin: mihomo
-    config:
-      endpoint: \
-
->你负责实现 Custos，一个基于 Rust 的跨平台本地自愈引擎。
-
-请先完整阅读项目根目录下的架构设计文档，并检查当前仓库的实际状态。
-
-第一阶段只实施 P0：核心领域模型、Resource/Dependency Graph、配置验证、Process Probe、Exec Probe、RecoveryRun 状态机、有序恢复候选方案、动作后健康验证、恢复预算、资源级互斥、SQLite 持久化、CLI 基础命令和集成测试。
-
-严格遵守以下要求：
-
-1. 不要一次性实现全部规划功能。
-2. 不要在 P0 实现 HTTP Probe、Dashboard、OpenClash 或复杂网络恢复。
-3. 先分析现有代码，再提出实施计划；不得假设仓库为空。
-4. 依赖恢复由 Core Engine 统一协调，插件不能绕过核心引擎直接执行恢复流程。
-5. 依赖不满足时，不得执行依赖它的上层恢复动作。
-6. 恢复动作成功不代表资源健康，必须执行独立验证。
-7. 动作失败后必须重新诊断，并重新评估依赖和候选方案。
-8. 所有恢复任务都必须具有明确的超时、预算和终止条件。
-9. 关键动作执行前必须持久化状态；进程崩溃后不能无条件重复结果未知的动作。
-10. 同一资源不能并发执行多个恢复任务。
-11. 所有状态转换和动作尝试必须可审计。
-12. 不允许用虚假的测试、硬编码成功结果或未实现的能力声明来满足验收。
-
-请按照以下步骤执行：
-
-A. 输出当前仓库结构、现有模块、依赖关系和需要保留的实现。
-
-B. 将 P0 拆成可以独立验收的小任务，列出每个任务的文件、接口、测试和依赖。
-
-C. 先实现最小完整垂直闭环：受控进程探测失败 → 故障判定 → 创建 RecoveryRun → 执行恢复动作 → 独立健康验证 → 持久化最终结果。
-
-D. 在此基础上增加依赖图、依赖恢复、多个候选方案、恢复预算和崩溃恢复。
-
-E. 完成 SQLite 持久化和 CLI。
-
-F. 为插件超时、动作执行结果未知、依赖循环、并发恢复、数据库失败和动作后验证失败增加测试。
-
-G. 运行格式化、静态检查、单元测试和集成测试，报告实际结果。
-
-每个任务完成后都必须提供修改文件清单、设计说明、测试命令、实际测试结果和未解决问题。遇到架构文档与实际代码冲突时，先说明冲突和影响，不得静默覆盖。
-
-不要提前进入 P1 或 P2。只有 P0 的验收条件全部满足后，才提交下一阶段实施计划。
-
-**一个重要建议：** 将这两份文档放入仓库的 `docs/architecture.md` 和 `docs/implementation/p0.md`。后续让不同 Code Agent 分别实现核心引擎、插件运行时和通知模块时，所有 Agent 都应以同一份领域模型和状态机为准，避免各自设计出互不兼容的接口。
-
----
-
-If you want, I can:
-
-- 继续详细描述 Recovery Engine 状态机及恢复流程
-- 详述 RecoveryRun 的管理与审计实现细节
-- 展开解释插件架构中插件权限及安全策略设计
