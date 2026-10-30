@@ -26,12 +26,12 @@
 - [x] DependencyRequirement::Conditional 条件求值语义 + 单元测试 `1c5609f`
 - [x] Evidence↔Diagnosis 关联字段（evidence_refs 引用完整性） `1c5609f`
 - [x] HealthStatus 抖动抑制所需状态字段：连续成功/失败计数、最近有效探测时间、活动故障标识 `1c5609f`
-- [ ] Waiting 状态语义：挂起原因 + 恢复去向，转换测试
+- [x] Waiting 状态语义：挂起原因 + 恢复去向，转换测试 `2c809f6`
 
 ### 配置（custos-config）
 
-- [ ] 配置 Schema 完整化：health_policy / recovery_policy / permissions 节点
-- [ ] 候选方案引用验证：recovery_policy 中动作 ID 存在且与资源类型匹配
+- [x] 配置 Schema 完整化：health_policy / recovery_policy / permissions 节点 `20984cd`
+- [x] 候选方案引用验证：recovery_policy 中动作 ID 存在且与资源类型匹配 `20984cd`
 - [x] 不可能满足依赖条件检测（§3.5 第 5 条：条件永假报配置错误） `1c5609f`
 - [x] AlternativeGroup 配置合法性验证（§3.5 第 4 条） `1c5609f`
 - [x] 配置错误输出：具体字段路径 + 原因（§10.3，全错误类型统一） `1c5609f`
@@ -66,27 +66,27 @@
 - [x] 恢复预算：高风险动作次数上限（需配置显式授权，security §12.2） `278e747`
 - [x] 预算耗尽 → Escalated + 告警事件 `278e747`
 - [x] 资源级恢复互斥：同资源同时最多一个活动 RecoveryRun `278e747`
-- [ ] 依赖去重：多任务等待同一恢复结果，健康变化时重评估
+- [x] 依赖去重：多任务等待同一恢复结果，健康变化时重评估 `67c1e3a`
 - [x] 全局恢复预算（跨资源并发上限） `278e747`
 - [x] 终止条件兜底：任何恢复循环必有出口（§6.5） `278e747`
 
 ### 持久化（custos-store）
 
-- [ ] SQLite 接入：WAL + synchronous 策略可配
-- [ ] 数据库迁移框架（configuration_versions 表记录版本/变更）
-- [ ] 表：resources / resource_dependencies / resource_health
-- [ ] 表：incidents / recovery_runs / recovery_steps
-- [ ] 表：probe_results / diagnoses / action_attempts / verification_results
-- [ ] 表：audit_events / notification_queue / notification_attempts
+- [x] SQLite 接入：WAL + synchronous 策略可配 `a08a2ac`
+- [x] 数据库迁移框架（configuration_versions 表记录版本/变更） `a08a2ac`
+- [x] 表：resources / resource_dependencies / resource_health `a08a2ac`
+- [x] 表：incidents / recovery_runs / recovery_steps `a08a2ac`
+- [x] 表：probe_results / diagnoses / action_attempts / verification_results `a08a2ac`
+- [x] 表：audit_events / notification_queue / notification_attempts `a08a2ac`
 - [x] 事务边界：高风险动作先落 Executing 再执行（§7.3 九步顺序） `e7766d6`
 - [x] 崩溃恢复：重启后识别结果未知动作（不盲目重试，先查资源现状） `e7766d6`
 - [x] 崩溃恢复：续跑未完成 RecoveryRun `e7766d6`
-- [ ] 数据保留策略：审计/探测明细/任务/通知保留周期配置
-- [ ] 数据清理与活动任务状态分离（不删活动 Incident/未送达通知）
+- [x] 数据保留策略：审计/探测明细/任务/通知保留周期配置 `a08a2ac`
+- [x] 数据清理与活动任务状态分离（不删活动 Incident/未送达通知） `a08a2ac`
 
 ### 审计与日志
 
-- [ ] tracing 结构化日志接入（custos-core 统一初始化）
+- [x] tracing 结构化日志接入（custos-core 统一初始化） `27bbe95`
 - [x] 所有状态转换 + 动作尝试写 audit_events 表 `e7766d6`
 
 ### CLI（custos-cli）
@@ -95,7 +95,7 @@
 - [x] `custos status`：引擎/资源健康总览 `e7766d6`
 - [x] `custos resources`：资源列表 + 健康状态 `e7766d6`
 - [x] `custos graph`：依赖图文本展示（含环检测状态） `e7766d6`
-- [ ] `custos incidents` / `custos runs`：故障与恢复历史
+- [x] `custos incidents` / `custos runs`：故障与恢复历史 `67c1e3a`
 - [x] CLI 错误输出规范：非零退出码 + 人读信息（无 panic 裸奔） `e7766d6`
 
 ### P0 集成测试与故障注入
@@ -106,9 +106,9 @@
 - [x] 集成：依赖不健康时上层动作不提前执行 `21cde62`
 - [x] 集成：同资源不并发执行两个恢复任务 `21cde62`
 - [x] 注入：动作执行中进程崩溃 → 重启后续跑且不重复执行结果未知动作 `21cde62`
-- [ ] 注入：依赖在恢复过程中再次故障
-- [ ] 注入：SQLite 写入失败（引擎降级行为明确）
-- [ ] 注入：Exec Probe 超时（进程树被清理）
+- [x] 注入：依赖在恢复过程中再次故障 `fd2d154`
+- [x] 注入：SQLite 写入失败（引擎降级行为明确） `fd2d154`
+- [x] 注入：Exec Probe 超时（进程树被清理） `fd2d154`
 - [x] 注入：恢复预算耗尽明确终止 `21cde62`
 
 ### P0 验收门（全绿才勾 roadmap P0）
