@@ -21,6 +21,7 @@ pub mod http;
 pub mod icmp;
 pub mod log;
 pub mod mem;
+pub mod netif;
 pub mod process;
 pub mod scheduler;
 pub mod sys;

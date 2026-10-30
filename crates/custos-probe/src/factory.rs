@@ -12,7 +12,7 @@ use crate::mem::MemProbe;
 use crate::process::ProcessProbe;
 use crate::tcp::TcpProbe;
 use crate::tls_cert::TlsCertProbe;
-use crate::{cpu, database, disk, dns, docker, http, icmp, log, mem, tls_cert, Probe};
+use crate::{cpu, database, disk, dns, docker, http, icmp, log, mem, netif, tls_cert, Probe};
 use custos_model::Resource;
 use std::time::Duration;
 
@@ -87,6 +87,12 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
             .map_err(|reason| err(reason.as_str())),
         "icmp" => icmp::from_config(config)
             .map(|probe: crate::icmp::PingProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
+        "network-interface" => netif::from_config(config)
+            .map(|probe: crate::netif::NetifProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
+        "default-gateway" => netif::gateway_from_config(config)
+            .map(|probe: crate::netif::GatewayProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
         "database" => database::from_config(config)
             .map(|probe: DatabaseProbe| Box::new(probe) as Box<dyn Probe>)
@@ -338,6 +344,24 @@ mod tests {
     fn icmp_probe_requires_host() {
         let resource = Resource::new("gw", "icmp");
         assert!(build_probe(&resource).is_err());
+    }
+
+    #[test]
+    fn builds_network_interface_probe() {
+        let mut resource = Resource::new("eth", "network-interface");
+        resource.config = json!({"interface": "eth0"});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "network-interface");
+        let resource = Resource::new("eth", "network-interface");
+        assert!(build_probe(&resource).is_err());
+    }
+
+    #[test]
+    fn builds_default_gateway_probe() {
+        let mut resource = Resource::new("gw", "default-gateway");
+        resource.config = json!({"connect_port": 80});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "default-gateway");
     }
 
     #[test]
