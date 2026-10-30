@@ -9,6 +9,7 @@ pub mod config;
 pub mod cpu;
 pub mod disk;
 pub mod dns;
+pub mod docker;
 pub mod exec;
 pub mod factory;
 pub mod http;

@@ -11,7 +11,7 @@ use crate::mem::MemProbe;
 use crate::process::ProcessProbe;
 use crate::tcp::TcpProbe;
 use crate::tls_cert::TlsCertProbe;
-use crate::{cpu, disk, dns, http, log, mem, systemd, tls_cert, Probe};
+use crate::{cpu, disk, dns, docker, http, log, mem, systemd, tls_cert, Probe};
 use custos_model::Resource;
 use std::time::Duration;
 
@@ -80,6 +80,9 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
             .map_err(|reason| err(reason.as_str())),
         "log" => log::from_config(config)
             .map(|probe: crate::log::LogProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
+        "docker-container" => docker::from_config(config)
+            .map(|probe: crate::docker::DockerProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
         // `service` with a `unit` uses the native systemd probe on Linux
         // (survey §26.11 #7); with a `command` it falls back to exec.
@@ -289,5 +292,19 @@ mod tests {
         resource.config = json!({"command": ["systemctl", "is-active", "nginx"]});
         let probe = build_probe(&resource).unwrap();
         assert_eq!(probe.name(), "exec");
+    }
+
+    #[test]
+    fn builds_docker_probe() {
+        let mut resource = Resource::new("web", "docker-container");
+        resource.config = json!({"container": "web", "max_restarts": 3});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "docker");
+    }
+
+    #[test]
+    fn docker_probe_requires_container() {
+        let resource = Resource::new("web", "docker-container");
+        assert!(build_probe(&resource).is_err());
     }
 }
