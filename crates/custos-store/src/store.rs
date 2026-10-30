@@ -6,7 +6,9 @@ use crate::config::{PurgeReport, RetentionConfig, StoreConfig, SynchronousPolicy
 use crate::migrations::migrate;
 use custos_engine::{EngineEvent, RunStore};
 use custos_model::ids::RecoveryRunId;
-use custos_model::{ActionAttempt, RecoveryRun, VerificationResult};
+use custos_model::{
+    ActionAttempt, NotificationEvent, NotificationState, RecoveryRun, VerificationResult,
+};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{query, query_as, Row, SqlitePool};
 use std::future::Future;
@@ -340,6 +342,309 @@ impl Store {
         })
         .map_err(Into::into)
     }
+
+    /// Enqueues one event for one channel. The event JSON is stored as the
+    /// payload; the event id is kept as a column so dedup (docs/guide/
+    /// notification.md §8.6) can query it without parsing.
+    pub fn enqueue_notification(
+        &self,
+        channel: &str,
+        event: &NotificationEvent,
+        now_unix_ms: u64,
+    ) -> Result<u64, StoreError> {
+        let payload = serde_json::to_string(event)
+            .map_err(|e| StoreError::Corrupt("notification_queue payload".into(), e))?;
+        self.block(move |pool| async move {
+            let result = query(
+                "INSERT INTO notification_queue \
+                 (resource_id, channel, payload, event_id, state, attempts, \
+                  next_attempt_at_unix_ms, last_error, created_at_unix_ms, \
+                  delivered_at_unix_ms, updated_at_unix_ms) \
+                 VALUES (?, ?, ?, ?, 'pending', 0, NULL, NULL, ?, NULL, ?)",
+            )
+            .bind(event.resource_id.as_ref().map(|r| r.as_str()))
+            .bind(channel)
+            .bind(payload)
+            .bind(event.event_id.as_str())
+            .bind(now_unix_ms as i64)
+            .bind(now_unix_ms as i64)
+            .execute(&pool)
+            .await?;
+            Ok(result.last_insert_rowid() as u64)
+        })
+        .map_err(Into::into)
+    }
+
+    /// Claims due queue entries for delivery: `pending`/`retry_scheduled`
+    /// entries whose `next_attempt_at` is due, plus `sending` entries that
+    /// went stale (crash mid-delivery). Claimed entries move to `sending`.
+    pub fn claim_due_notifications(
+        &self,
+        now_unix_ms: u64,
+        limit: u32,
+    ) -> Result<Vec<NotificationQueueRow>, StoreError> {
+        self.block(move |pool| async move {
+            let mut tx = pool.begin().await?;
+            let stale_before = (now_unix_ms as i64) - STALE_SENDING_MS;
+            let ids: Vec<i64> = query(
+                "SELECT id FROM notification_queue \
+                 WHERE (state IN ('pending', 'retry_scheduled') \
+                        AND (next_attempt_at_unix_ms IS NULL OR next_attempt_at_unix_ms <= ?)) \
+                    OR (state = 'sending' AND updated_at_unix_ms < ?) \
+                 ORDER BY id LIMIT ?",
+            )
+            .bind(now_unix_ms as i64)
+            .bind(stale_before)
+            .bind(limit)
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .map(|row| row.get::<i64, _>(0))
+            .collect();
+            for id in &ids {
+                query(
+                    "UPDATE notification_queue SET state = 'sending', \
+                     updated_at_unix_ms = ? WHERE id = ?",
+                )
+                .bind(now_unix_ms as i64)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            let mut rows = Vec::new();
+            for id in ids {
+                if let Some(row) = fetch_notification_row(&pool, id).await? {
+                    rows.push(row);
+                }
+            }
+            Ok(rows)
+        })
+        .map_err(Into::into)
+    }
+
+    /// Marks an entry delivered.
+    pub fn mark_notification_delivered(&self, id: u64, at_unix_ms: u64) -> Result<(), StoreError> {
+        self.block(move |pool| async move {
+            query(
+                "UPDATE notification_queue SET state = 'delivered', \
+                 delivered_at_unix_ms = ?, updated_at_unix_ms = ? WHERE id = ?",
+            )
+            .bind(at_unix_ms as i64)
+            .bind(at_unix_ms as i64)
+            .bind(id as i64)
+            .execute(&pool)
+            .await?;
+            Ok(())
+        })
+        .map_err(Into::into)
+    }
+
+    /// Increments the attempt count and schedules a retry.
+    pub fn mark_notification_retry(
+        &self,
+        id: u64,
+        next_attempt_at_unix_ms: u64,
+        error: &str,
+    ) -> Result<(), StoreError> {
+        self.block(move |pool| async move {
+            query(
+                "UPDATE notification_queue SET state = 'retry_scheduled', \
+                 attempts = attempts + 1, next_attempt_at_unix_ms = ?, \
+                 last_error = ?, updated_at_unix_ms = ? WHERE id = ?",
+            )
+            .bind(next_attempt_at_unix_ms as i64)
+            .bind(error)
+            .bind(next_attempt_at_unix_ms as i64)
+            .bind(id as i64)
+            .execute(&pool)
+            .await?;
+            Ok(())
+        })
+        .map_err(Into::into)
+    }
+
+    /// Marks an entry dead-lettered (retries exhausted). A manual retry can
+    /// resurrect it via [`Store::retry_notification`].
+    pub fn mark_notification_dead(
+        &self,
+        id: u64,
+        error: &str,
+        now_unix_ms: u64,
+    ) -> Result<(), StoreError> {
+        self.block(move |pool| async move {
+            query(
+                "UPDATE notification_queue SET state = 'dead_letter', \
+                 attempts = attempts + 1, last_error = ?, updated_at_unix_ms = ? \
+                 WHERE id = ?",
+            )
+            .bind(error)
+            .bind(now_unix_ms as i64)
+            .bind(id as i64)
+            .execute(&pool)
+            .await?;
+            Ok(())
+        })
+        .map_err(Into::into)
+    }
+
+    /// Re-schedules a dead-lettered entry as pending for an immediate
+    /// attempt (the CLI manual-retry path, docs/guide/notification.md §8.6).
+    pub fn retry_notification(&self, id: u64, now_unix_ms: u64) -> Result<(), StoreError> {
+        self.block(move |pool| async move {
+            query(
+                "UPDATE notification_queue SET state = 'pending', \
+                 next_attempt_at_unix_ms = NULL, last_error = NULL, \
+                 updated_at_unix_ms = ? WHERE id = ?",
+            )
+            .bind(now_unix_ms as i64)
+            .bind(id as i64)
+            .execute(&pool)
+            .await?;
+            Ok(())
+        })
+        .map_err(Into::into)
+    }
+
+    /// Recent queue entries, newest first, for the CLI status view.
+    pub fn list_notifications(&self, limit: u32) -> Result<Vec<NotificationQueueRow>, StoreError> {
+        self.block(move |pool| async move {
+            let ids: Vec<i64> = query("SELECT id FROM notification_queue ORDER BY id DESC LIMIT ?")
+                .bind(limit)
+                .fetch_all(&pool)
+                .await?
+                .into_iter()
+                .map(|row| row.get::<i64, _>(0))
+                .collect();
+            let mut rows = Vec::new();
+            for id in ids {
+                if let Some(row) = fetch_notification_row(&pool, id).await? {
+                    rows.push(row);
+                }
+            }
+            Ok(rows)
+        })
+        .map_err(Into::into)
+    }
+
+    /// Per-state counts for `custos notify status`.
+    pub fn notification_counts(&self) -> Result<NotificationCounts, StoreError> {
+        self.block(|pool| async move {
+            let mut counts = NotificationCounts::default();
+            let rows: Vec<(String, i64)> =
+                query("SELECT state, COUNT(*) AS n FROM notification_queue GROUP BY state")
+                    .fetch_all(&pool)
+                    .await?
+                    .into_iter()
+                    .map(|row| (row.get::<String, _>(0), row.get::<i64, _>(1)))
+                    .collect();
+            for (state, n) in rows {
+                match NotificationState::from_wire(&state) {
+                    Some(NotificationState::Pending) => counts.pending = n as u64,
+                    Some(NotificationState::Sending) => counts.sending = n as u64,
+                    Some(NotificationState::Delivered) => counts.delivered = n as u64,
+                    Some(NotificationState::RetryScheduled) => counts.retry_scheduled = n as u64,
+                    Some(NotificationState::DeadLetter) => counts.dead_letter = n as u64,
+                    None => {}
+                }
+            }
+            Ok(counts)
+        })
+        .map_err(Into::into)
+    }
+}
+
+/// A `sending` entry older than this is assumed to be a crashed mid-delivery
+/// attempt and is reclaimed (docs/guide/notification.md §8.6 / persistence
+/// §7 crash recovery).
+const STALE_SENDING_MS: i64 = 60_000;
+
+/// One notification-queue row, ready for the channel engine.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NotificationQueueRow {
+    pub id: u64,
+    pub channel: String,
+    pub event: NotificationEvent,
+    pub state: NotificationState,
+    pub attempts: u32,
+    pub next_attempt_at_unix_ms: Option<u64>,
+    pub last_error: Option<String>,
+    pub created_at_unix_ms: u64,
+    pub delivered_at_unix_ms: Option<u64>,
+}
+
+/// Per-state queue counts (docs/guide/notification.md §8.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NotificationCounts {
+    pub pending: u64,
+    pub sending: u64,
+    pub delivered: u64,
+    pub retry_scheduled: u64,
+    pub dead_letter: u64,
+}
+
+impl NotificationCounts {
+    pub fn total(&self) -> u64 {
+        self.pending + self.sending + self.delivered + self.retry_scheduled + self.dead_letter
+    }
+}
+
+/// Raw column tuple of one `notification_queue` row, as read by sqlx.
+type NotificationRawRow = (
+    String,
+    String,
+    Option<String>,
+    String,
+    i64,
+    Option<i64>,
+    Option<String>,
+    i64,
+    Option<i64>,
+);
+
+async fn fetch_notification_row(
+    pool: &SqlitePool,
+    id: i64,
+) -> Result<Option<NotificationQueueRow>, sqlx::Error> {
+    let row: Option<NotificationRawRow> = query_as(
+        "SELECT channel, payload, event_id, state, attempts, \
+             next_attempt_at_unix_ms, last_error, created_at_unix_ms, \
+             delivered_at_unix_ms FROM notification_queue WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((
+        channel,
+        payload,
+        _event_id,
+        state,
+        attempts,
+        next_at,
+        last_error,
+        created_at,
+        delivered_at,
+    )) = row
+    else {
+        return Ok(None);
+    };
+    let event = serde_json::from_str(&payload).map_err(|e| {
+        sqlx::Error::Decode(Box::new(StoreError::Corrupt(
+            format!("notification_queue row {id} payload"),
+            e,
+        )))
+    })?;
+    Ok(Some(NotificationQueueRow {
+        id: id as u64,
+        channel,
+        event,
+        state: NotificationState::from_wire(&state).unwrap_or(NotificationState::Pending),
+        attempts: attempts as u32,
+        next_attempt_at_unix_ms: next_at.map(|v| v as u64),
+        last_error,
+        created_at_unix_ms: created_at as u64,
+        delivered_at_unix_ms: delivered_at.map(|v| v as u64),
+    }))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1031,5 +1336,111 @@ mod tests {
         let limited = store.list_runs(1).expect("limited");
         assert_eq!(limited.len(), 1);
         assert_eq!(limited[0].id, "run-second");
+    }
+
+    fn notification_event(event_id: &str) -> custos_model::NotificationEvent {
+        custos_model::NotificationEvent::new(
+            custos_model::ids::EventId::new(event_id),
+            custos_model::EventType::ResourceUnhealthy,
+            custos_model::Severity::Critical,
+            "db down",
+            1_700_000_000_000,
+        )
+        .with_resource_id(ResourceId::new("db"))
+    }
+
+    #[test]
+    fn notification_queue_lifecycle() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path().join("q.db")).expect("open");
+
+        let id = store
+            .enqueue_notification("ops-webhook", &notification_event("evt-1"), 1_000)
+            .expect("enqueue");
+        assert!(id > 0);
+
+        // Nothing due before the next attempt time... it's pending, so due now.
+        let due = store.claim_due_notifications(1_000, 10).expect("claim");
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].id, id);
+        assert_eq!(due[0].channel, "ops-webhook");
+        assert_eq!(due[0].state, custos_model::NotificationState::Sending);
+        assert_eq!(due[0].event.event_id.as_str(), "evt-1");
+        assert_eq!(
+            due[0].event.resource_id.as_ref().map(|r| r.as_str()),
+            Some("db")
+        );
+
+        // A second claim at the same time must not re-claim the sending row.
+        assert!(store.claim_due_notifications(1_000, 10).unwrap().is_empty());
+
+        // Deliver it.
+        store
+            .mark_notification_delivered(id, 1_200)
+            .expect("delivered");
+        let rows = store.list_notifications(10).expect("list");
+        assert_eq!(rows[0].state, custos_model::NotificationState::Delivered);
+        assert_eq!(rows[0].delivered_at_unix_ms, Some(1_200));
+    }
+
+    #[test]
+    fn notification_queue_retry_and_dead_letter() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path().join("q.db")).expect("open");
+        let event = notification_event("evt-2");
+
+        let id = store
+            .enqueue_notification("mail", &event, 1_000)
+            .expect("enqueue");
+        store.claim_due_notifications(1_000, 10).unwrap();
+        store
+            .mark_notification_retry(id, 5_000, "smtp: transient")
+            .expect("retry");
+        let rows = store.list_notifications(10).unwrap();
+        assert_eq!(
+            rows[0].state,
+            custos_model::NotificationState::RetryScheduled
+        );
+        assert_eq!(rows[0].attempts, 1);
+        assert_eq!(rows[0].next_attempt_at_unix_ms, Some(5_000));
+        assert_eq!(rows[0].last_error.as_deref(), Some("smtp: transient"));
+
+        // Not due until 5000.
+        assert!(store.claim_due_notifications(4_999, 10).unwrap().is_empty());
+        assert_eq!(store.claim_due_notifications(5_000, 10).unwrap().len(), 1);
+
+        // Exhaust: mark dead.
+        store
+            .mark_notification_dead(id, "smtp: permanent", 5_100)
+            .unwrap();
+        let rows = store.list_notifications(10).unwrap();
+        assert_eq!(rows[0].state, custos_model::NotificationState::DeadLetter);
+        assert!(rows[0].last_error.as_deref().unwrap().contains("permanent"));
+
+        // Manual retry resurrects it as pending.
+        store.retry_notification(id, 5_200).unwrap();
+        let rows = store.list_notifications(10).unwrap();
+        assert_eq!(rows[0].state, custos_model::NotificationState::Pending);
+        assert_eq!(rows[0].next_attempt_at_unix_ms, None);
+    }
+
+    #[test]
+    fn notification_counts_aggregate_per_state() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path().join("q.db")).expect("open");
+        let a = store
+            .enqueue_notification("c1", &notification_event("evt-a"), 1_000)
+            .unwrap();
+        let b = store
+            .enqueue_notification("c2", &notification_event("evt-b"), 1_000)
+            .unwrap();
+        store.claim_due_notifications(1_000, 10).unwrap();
+        store.mark_notification_delivered(a, 1_100).unwrap();
+        store.mark_notification_retry(b, 9_000, "timeout").unwrap();
+
+        let counts = store.notification_counts().unwrap();
+        assert_eq!(counts.delivered, 1);
+        assert_eq!(counts.retry_scheduled, 1);
+        assert_eq!(counts.total(), 2);
     }
 }

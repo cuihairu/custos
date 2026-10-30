@@ -15,7 +15,28 @@ pub struct Migration {
 }
 
 /// Ordered list of all known schema versions.
-pub const MIGRATIONS: &[Migration] = &[V1, V2];
+pub const MIGRATIONS: &[Migration] = &[V1, V2, V3];
+
+/// V3 — stateful notification queue (docs/guide/notification.md §8.6).
+/// Upgrades the V2 `notification_queue` (a bare insert log) to the
+/// Pending/Sending/Delivered/RetryScheduled/DeadLetter lifecycle with
+/// retry scheduling and per-attempt error tracking. `IF NOT EXISTS` guards
+/// are not used here on the ALTERs: V3 only runs on a database that has
+/// already applied V2, so the columns are known to be absent.
+const V3: Migration = Migration {
+    version: 3,
+    name: "stateful-notification-queue",
+    sql: "
+ALTER TABLE notification_queue ADD COLUMN event_id TEXT;
+ALTER TABLE notification_queue ADD COLUMN state TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE notification_queue ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE notification_queue ADD COLUMN next_attempt_at_unix_ms INTEGER;
+ALTER TABLE notification_queue ADD COLUMN last_error TEXT;
+ALTER TABLE notification_queue ADD COLUMN updated_at_unix_ms INTEGER;
+CREATE INDEX IF NOT EXISTS idx_notification_queue_due
+    ON notification_queue(state, next_attempt_at_unix_ms);
+",
+};
 
 /// V1 — the original P0 schema: recovery state and audit (§7.2 subset).
 const V1: Migration = Migration {

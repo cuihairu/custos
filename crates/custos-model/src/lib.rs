@@ -26,7 +26,9 @@ pub use graph::{DependencyGraph, GraphError};
 pub use health::HealthStatus;
 pub use ids::{ActionId, EventId, IncidentId, RecoveryRunId, ResourceId};
 pub use incident::Incident;
-pub use notification::{EventType, NotificationEvent, SanitizedDetails, Severity};
+pub use notification::{
+    EventType, NotificationEvent, NotificationState, SanitizedDetails, Severity,
+};
 pub use recovery::{
     ActionAttempt, ActionOutcome, ActionSpec, FailureHandling, RecoveryPlan, RecoveryRun,
     RecoveryRunStatus, RiskLevel, TransitionError, VerificationResult,

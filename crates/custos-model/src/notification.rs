@@ -197,6 +197,48 @@ impl NotificationEvent {
     }
 }
 
+/// Delivery state of one notification-queue entry (docs/guide/notification.md
+/// §8.6). `Delivered` only means the channel returned its defined success
+/// result — not that a human saw it. The engine transitions entries through
+/// these states as it attempts delivery and paces retries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationState {
+    /// Enqueued, not yet attempted.
+    Pending,
+    /// A delivery attempt is in flight.
+    Sending,
+    /// The channel accepted the event.
+    Delivered,
+    /// Delivery failed transiently; the entry is scheduled for a retry.
+    RetryScheduled,
+    /// Delivery exhausted retries; the entry will not be re-attempted.
+    DeadLetter,
+}
+
+impl NotificationState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NotificationState::Pending => "pending",
+            NotificationState::Sending => "sending",
+            NotificationState::Delivered => "delivered",
+            NotificationState::RetryScheduled => "retry_scheduled",
+            NotificationState::DeadLetter => "dead_letter",
+        }
+    }
+
+    pub fn from_wire(value: &str) -> Option<Self> {
+        match value {
+            "pending" => Some(NotificationState::Pending),
+            "sending" => Some(NotificationState::Sending),
+            "delivered" => Some(NotificationState::Delivered),
+            "retry_scheduled" => Some(NotificationState::RetryScheduled),
+            "dead_letter" => Some(NotificationState::DeadLetter),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,6 +288,27 @@ mod tests {
     fn severity_orders_by_urgency() {
         assert!(Severity::Info < Severity::Warning);
         assert!(Severity::Warning < Severity::Critical);
+    }
+
+    #[test]
+    fn notification_states_roundtrip() {
+        let cases = [
+            (NotificationState::Pending, "pending"),
+            (NotificationState::Sending, "sending"),
+            (NotificationState::Delivered, "delivered"),
+            (NotificationState::RetryScheduled, "retry_scheduled"),
+            (NotificationState::DeadLetter, "dead_letter"),
+        ];
+        assert_eq!(cases.len(), 5, "exactly five queue states");
+        for (state, wire) in cases {
+            assert_eq!(state.as_str(), wire);
+            assert_eq!(NotificationState::from_wire(wire), Some(state));
+            assert_eq!(
+                serde_json::to_string(&state).unwrap(),
+                format!("\"{wire}\"")
+            );
+        }
+        assert_eq!(NotificationState::from_wire("nope"), None);
     }
 
     #[test]
