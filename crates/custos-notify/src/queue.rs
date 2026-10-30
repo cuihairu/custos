@@ -64,3 +64,39 @@ impl QueueError {
         Self(message.into())
     }
 }
+
+impl<T: NotificationQueue + ?Sized> NotificationQueue for std::sync::Arc<T> {
+    fn enqueue(
+        &self,
+        channel: &str,
+        event: &custos_model::NotificationEvent,
+        now_unix_ms: u64,
+    ) -> Result<u64, QueueError> {
+        (**self).enqueue(channel, event, now_unix_ms)
+    }
+
+    fn claim_due(
+        &self,
+        now_unix_ms: u64,
+        limit: u32,
+    ) -> Result<Vec<QueuedNotification>, QueueError> {
+        (**self).claim_due(now_unix_ms, limit)
+    }
+
+    fn mark_delivered(&self, id: u64, at_unix_ms: u64) -> Result<(), QueueError> {
+        (**self).mark_delivered(id, at_unix_ms)
+    }
+
+    fn mark_retry(
+        &self,
+        id: u64,
+        next_attempt_at_unix_ms: u64,
+        error: &str,
+    ) -> Result<(), QueueError> {
+        (**self).mark_retry(id, next_attempt_at_unix_ms, error)
+    }
+
+    fn mark_dead(&self, id: u64, error: &str, now_unix_ms: u64) -> Result<(), QueueError> {
+        (**self).mark_dead(id, error, now_unix_ms)
+    }
+}

@@ -204,6 +204,27 @@ fn start(path: &str, args: &[String]) -> ExitCode {
         clock.clone(),
     );
 
+    // Wire the notification engine (docs/guide/notification.md §8.1): the
+    // core produces structured events; the notify engine matches rules and
+    // enqueues. Delivery failures never block the tick (§8.1).
+    let notification = Arc::new(custos_notify::NotificationEngine::new(
+        config.notification.clone(),
+        store.clone(),
+    ));
+    let sink = notification.clone();
+    engine.set_event_emitter(Arc::new(move |event| {
+        let report = sink.dispatch(event, event.occurred_at_unix_ms);
+        if report.enqueued > 0 || report.suppressed > 0 {
+            tracing::info!(
+                target: "custos::cli",
+                event = event.event_type.as_str(),
+                enqueued = report.enqueued,
+                suppressed = report.suppressed,
+                "notification dispatched"
+            );
+        }
+    }));
+
     // Crash recovery first (§6.6): mid-execution attempts become
     // OutcomeUnknown; they are never blindly re-executed.
     let resumed = engine.resume_unfinished();
@@ -212,11 +233,35 @@ fn start(path: &str, args: &[String]) -> ExitCode {
     }
 
     println!(
-        "custos: watching {} resource(s), tick interval {} ms, db {}",
+        "custos: watching {} resource(s), tick interval {} ms, db {}, {} notification rule(s)",
         config.resources.len(),
         options.interval_ms,
-        options.db_path
+        options.db_path,
+        config.notification.rules.len()
     );
+    // Notification delivery worker (docs/guide/notification.md §8.6): claims
+    // due queue entries in the background so a network outage delays sends
+    // but never blocks recovery. Detached; the process owns the queue.
+    if !options.once {
+        let worker = notification.clone();
+        std::thread::spawn(move || loop {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let report = worker.deliver_due(now, 32);
+            if report.delivered + report.retried + report.dead > 0 {
+                tracing::info!(
+                    target: "custos::cli",
+                    delivered = report.delivered,
+                    retried = report.retried,
+                    dead = report.dead,
+                    "notification delivery pass"
+                );
+            }
+            std::thread::sleep(Duration::from_millis(2_000));
+        });
+    }
     loop {
         for run in &engine.tick() {
             tracing::info!(
@@ -228,6 +273,13 @@ fn start(path: &str, args: &[String]) -> ExitCode {
             );
         }
         if options.once {
+            // One delivery pass also runs in once mode so offline entries
+            // drain when the operator inspects a single tick.
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            notification.deliver_due(now, 32);
             break;
         }
         std::thread::sleep(Duration::from_millis(options.interval_ms));

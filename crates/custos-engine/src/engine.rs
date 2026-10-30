@@ -39,6 +39,12 @@ struct ManagedResource {
     interval_ms: u64,
 }
 
+/// The notification sink: receives structured `NotificationEvent`s produced
+/// by health transitions and the recovery state machine. Implementations
+/// (the notification engine) must enqueue without blocking — the engine
+/// calls it inline on its tick path (§8.1).
+pub type EventEmitter = std::sync::Arc<dyn Fn(&custos_model::NotificationEvent) + Send + Sync>;
+
 pub struct Engine {
     managed: HashMap<ResourceId, ManagedResource>,
     /// Topological order (dependencies first).
@@ -50,6 +56,9 @@ pub struct Engine {
     clock: Arc<dyn Clock>,
     budget: RecoveryBudget,
     budget_state: BudgetState,
+    /// Optional notification sink (§8.1). `None` until the runtime wires
+    /// the notification engine in.
+    events: Option<EventEmitter>,
     /// Active-mode keys that switch Conditional dependencies on/off.
     pub active_modes: HashSet<String>,
     active_runs: HashSet<ResourceId>,
@@ -117,6 +126,7 @@ impl Engine {
             clock,
             budget: RecoveryBudget::default(),
             budget_state: BudgetState::default(),
+            events: None,
             active_modes: HashSet::new(),
             active_runs: HashSet::new(),
             waiters: HashMap::new(),
@@ -128,6 +138,47 @@ impl Engine {
 
     pub fn set_budget(&mut self, budget: RecoveryBudget) {
         self.budget = budget;
+    }
+
+    /// Attaches the notification sink (docs/guide/notification.md §8.1: the
+    /// core engine produces structured events, never calls channel APIs).
+    /// The callback is expected to enqueue, never block; without one the
+    /// engine simply records its audit trail as before.
+    pub fn set_event_emitter(&mut self, emitter: EventEmitter) {
+        self.events = Some(emitter);
+    }
+
+    /// Builds and forwards one structured notification event to the sink,
+    /// if any. Fire-and-forget by contract.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_notification(
+        &mut self,
+        event_type: custos_model::EventType,
+        severity: custos_model::Severity,
+        summary: String,
+        resource: &ResourceId,
+        run: Option<&RecoveryRunId>,
+        incident: Option<&custos_model::IncidentId>,
+    ) {
+        let Some(emitter) = self.events.clone() else {
+            return;
+        };
+        let now = self.clock.now_unix_ms();
+        let mut event = custos_model::NotificationEvent::new(
+            custos_model::EventId::new(self.next_id("evt")),
+            event_type,
+            severity,
+            summary,
+            now,
+        )
+        .with_resource_id(resource.clone());
+        if let Some(run) = run {
+            event = event.with_recovery_run_id(run.clone());
+        }
+        if let Some(incident) = incident {
+            event = event.with_incident_id(incident.clone());
+        }
+        emitter(&event);
     }
 
     pub fn snapshot(&self, id: &ResourceId) -> Option<&ResourceHealthSnapshot> {
@@ -324,8 +375,36 @@ impl Engine {
                 ),
             )
         };
+        let before = self.managed[id].snapshot.status;
         let snapshot = &mut self.managed.get_mut(id).unwrap().snapshot;
         snapshot.record_probe(report.succeeded, thresholds.0, thresholds.1, now_unix_ms);
+        let after = self.managed[id].snapshot.status;
+        // Health transitions become notification events (§8.4): a first
+        // unhealthy/degraded state is the operator's signal. Unreachable and
+        // Recovering have no notification event type by design, and the
+        // incident opens later (with the recovery run), so none is attached
+        // here.
+        if before != after {
+            match after {
+                HealthStatus::Unhealthy => self.emit_notification(
+                    custos_model::EventType::ResourceUnhealthy,
+                    custos_model::Severity::Critical,
+                    Self::transition_summary("resource is unhealthy", &report.observation),
+                    id,
+                    None,
+                    None,
+                ),
+                HealthStatus::Degraded => self.emit_notification(
+                    custos_model::EventType::ResourceDegraded,
+                    custos_model::Severity::Warning,
+                    Self::transition_summary("resource is degraded", &report.observation),
+                    id,
+                    None,
+                    None,
+                ),
+                _ => {}
+            }
+        }
         tracing::debug!(
             target: "custos::engine",
             resource = id.as_str(),
@@ -367,6 +446,16 @@ impl Engine {
         format!("{prefix}-{}", self.seq)
     }
 
+    /// Builds a one-line summary for a health-transition notification: the
+    /// probe observation when present, else the bare transition label.
+    fn transition_summary(label: &str, observation: &str) -> String {
+        if observation.trim().is_empty() {
+            label.to_owned()
+        } else {
+            format!("{label}: {observation}")
+        }
+    }
+
     /// The full recovery cycle for one resource: open the run, diagnose,
     /// then hand over to [`Engine::drive`].
     fn recover(&mut self, id: &ResourceId) -> RecoveryRun {
@@ -382,6 +471,20 @@ impl Engine {
             resource_id: id.clone(),
             at_unix_ms: now,
         });
+        self.emit_notification(
+            custos_model::EventType::RecoveryStarted,
+            custos_model::Severity::Info,
+            format!(
+                "recovery started: {}",
+                run.diagnosis
+                    .as_ref()
+                    .map(|d| d.summary.as_str())
+                    .unwrap_or("failure threshold reached")
+            ),
+            id,
+            Some(&run.id),
+            run.incident_id.as_ref(),
+        );
 
         // Diagnose from the freshest evidence.
         run.transition_to(RecoveryRunStatus::Diagnosing).ok();
@@ -597,6 +700,14 @@ impl Engine {
             attempt_no,
             at_unix_ms: now,
         });
+        self.emit_notification(
+            custos_model::EventType::RecoveryActionStarted,
+            custos_model::Severity::Info,
+            format!("plan `{}` attempt {attempt_no} started", plan.plan_id),
+            id,
+            Some(&run.id),
+            run.incident_id.as_ref(),
+        );
 
         let outcome = self
             .executor
@@ -617,6 +728,19 @@ impl Engine {
             outcome,
             at_unix_ms: now,
         });
+        // A failed action is a notification event; a successful one is not
+        // (§8.4 has no recovery.action_succeeded — the verified recovery
+        // itself is the success signal).
+        if outcome == ActionOutcome::Failed {
+            self.emit_notification(
+                custos_model::EventType::RecoveryActionFailed,
+                custos_model::Severity::Warning,
+                format!("plan `{}` attempt {attempt_no} failed", plan.plan_id),
+                id,
+                Some(&run.id),
+                run.incident_id.as_ref(),
+            );
+        }
         tracing::info!(
             target: "custos::engine",
             run = run.id.as_str(),
@@ -631,6 +755,31 @@ impl Engine {
 
     fn finish_run(&mut self, run: &mut RecoveryRun, event: EngineEvent) {
         self.store.save_run(run);
+        // Terminal outcomes become notification events (§8.4).
+        let notification = match &event {
+            EngineEvent::RecoverySucceeded { .. } => Some((
+                custos_model::EventType::RecoverySucceeded,
+                custos_model::Severity::Info,
+                "recovery verified, resource healthy".to_owned(),
+            )),
+            EngineEvent::RecoveryExhausted { .. } => Some((
+                custos_model::EventType::RecoveryExhausted,
+                custos_model::Severity::Critical,
+                "all recovery plans exhausted, escalation required".to_owned(),
+            )),
+            _ => None,
+        };
+        if let Some((event_type, severity, summary)) = notification {
+            let id = run.resource_id.clone();
+            self.emit_notification(
+                event_type,
+                severity,
+                summary,
+                &id,
+                Some(&run.id),
+                run.incident_id.as_ref(),
+            );
+        }
         self.store.emit(event);
     }
 
@@ -923,6 +1072,14 @@ impl Engine {
                     resource_id: resource_id.clone(),
                     at_unix_ms: now,
                 });
+                self.emit_notification(
+                    custos_model::EventType::RecoveryOutcomeUnknown,
+                    custos_model::Severity::Warning,
+                    "resumed unfinished run: action outcome may be unknown".to_owned(),
+                    &resource_id,
+                    Some(&run.id),
+                    run.incident_id.as_ref(),
+                );
                 tracing::warn!(
                     target: "custos::engine",
                     run = run.id.as_str(),
@@ -942,7 +1099,7 @@ mod tests {
     use crate::executor::ScriptedExecutor;
     use custos_model::{
         ActionSpec, Dependency, DependencyGraph, FailureHandling, HealthCondition, HealthPolicy,
-        RiskLevel,
+        NotificationEvent, RiskLevel, Severity,
     };
 
     /// Test probe with a scripted sequence of outcomes; exhausted = failing.
@@ -1526,5 +1683,85 @@ mod tests {
             Some(ActionOutcome::OutcomeUnknown)
         );
         assert!(store.event_types().contains(&"recovery.outcome_unknown"));
+    }
+
+    /// A collector wired as the notification sink, for assertions.
+    type EventCollector = std::sync::Arc<std::sync::Mutex<Vec<NotificationEvent>>>;
+
+    fn collector() -> (EventCollector, EventEmitter) {
+        let events: EventCollector = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let emitter: EventEmitter = std::sync::Arc::new(move |event: &NotificationEvent| {
+            sink.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(event.clone());
+        });
+        (events, emitter)
+    }
+
+    #[test]
+    fn event_emitter_receives_fault_and_recovery_events() {
+        // failure_threshold=1: one failed probe flips to Unhealthy, the plan
+        // runs and verifies, so the whole fault lifecycle fires.
+        let (engine, _store, _exec) = test_engine(
+            vec![resource(
+                "svc",
+                vec![plan("restart", 1, RiskLevel::Low)],
+                vec![],
+            )],
+            vec![(ResourceId::new("svc"), vec![])],
+            vec![vec![false, true]],
+            vec![ActionOutcome::Succeeded],
+        );
+        let mut engine = engine;
+        let (events, emitter) = collector();
+        engine.set_event_emitter(emitter);
+
+        engine.tick();
+
+        let received = events.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let kinds: Vec<&str> = received.iter().map(|e| e.event_type.as_str()).collect();
+        assert!(kinds.contains(&"resource.unhealthy"), "{kinds:?}");
+        assert!(kinds.contains(&"recovery.started"), "{kinds:?}");
+        assert!(kinds.contains(&"recovery.action_started"), "{kinds:?}");
+        assert!(kinds.contains(&"recovery.succeeded"), "{kinds:?}");
+        // Every event is well-formed: id assigned, resource attached.
+        for event in &received {
+            assert!(!event.event_id.as_str().is_empty());
+            assert_eq!(event.resource_id.as_ref().map(|r| r.as_str()), Some("svc"));
+        }
+    }
+
+    #[test]
+    fn event_emitter_receives_exhausted_and_degraded_events() {
+        // Both plans fail: the run escalates and notifies exhaustion.
+        let (engine, _store, _exec) = test_engine(
+            vec![resource(
+                "svc",
+                vec![plan("a", 1, RiskLevel::Low), plan("b", 1, RiskLevel::Low)],
+                vec![],
+            )],
+            vec![(ResourceId::new("svc"), vec![])],
+            vec![vec![false, false, false, false]],
+            vec![ActionOutcome::Failed, ActionOutcome::Failed],
+        );
+        let mut engine = engine;
+        let (events, emitter) = collector();
+        engine.set_event_emitter(emitter);
+
+        engine.tick();
+
+        let received = events.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let kinds: Vec<&str> = received.iter().map(|e| e.event_type.as_str()).collect();
+        assert!(kinds.contains(&"recovery.exhausted"), "{kinds:?}");
+        assert!(kinds.contains(&"recovery.action_failed"), "{kinds:?}");
+        // Severity defaults: exhaustion is critical, action failure warning.
+        for event in &received {
+            match event.event_type.as_str() {
+                "recovery.exhausted" => assert_eq!(event.severity, Severity::Critical),
+                "recovery.action_failed" => assert_eq!(event.severity, Severity::Warning),
+                _ => {}
+            }
+        }
     }
 }
