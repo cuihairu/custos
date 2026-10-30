@@ -37,7 +37,10 @@ dependencies = [
 name = "custos-engine"
 version = "0.1.0"
 dependencies = [
+ "custos-config",
  "custos-model",
+ "custos-probe",
+ "thiserror",
 ]
 
 [[package]]
@@ -79,6 +82,8 @@ name = "custos-probe"
 version = "0.1.0"
 dependencies = [
  "custos-model",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
