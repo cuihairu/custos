@@ -47,6 +47,22 @@
 - [x] 内置 process / custom-command 资源适配（用户裁定「集成基础能力」P0 部分） `278e747`
 - [x] 探测调度：按 interval 周期执行 + 手动触发 `278e747`
 
+### 探测类型高优缺失（probe-survey §26，13 项，按 §26.11 建议实现顺序）
+
+- [ ] HTTP(S) 端点探测：状态码白名单 + 关键字/正则断言 + 响应时间阈值，一次请求覆盖，超时/重定向可配置
+- [ ] TCP 端口连通：connect_timeout + 连接耗时记录，可选 TLS 握手
+- [ ] DNS 解析：指定 resolver server + record type（A/AAAA/CNAME）+ 应答断言
+- [ ] TLS 证书到期：peer 证书 not_after 剩余天数阈值（<30 warn / <7 crit），不依赖 HTTP 探针可对任意 host:port
+- [ ] 磁盘空间：statvfs（Linux）/GetDiskFreeSpaceExW（Windows），挂载点 + warn/crit 双阈值
+- [ ] 内存使用：/proc/meminfo MemAvailable（Linux）/GlobalMemoryStatusEx（Windows）
+- [ ] CPU 使用率 / 负载：/proc/loadavg 与核数比值 + /proc/stat 差分采样
+- [ ] 日志文件关键字监控：增量 offset + 正则匹配，轮转按 inode 检测，命中即 Unhealthy
+- [ ] systemd unit 状态：systemctl show ActiveState/SubState 归一化（Linux service 原生实现）
+- [ ] Docker 容器状态：docker.sock HTTP API 或 docker inspect，running/重启次数
+- [ ] ICMP Ping：raw socket，无权限时 TCP ping 兜底（Windows 用 IcmpSendEcho API）
+- [ ] Windows 服务状态：sc query / QueryServiceStatus，StartType=auto 且 state≠RUNNING 判 Unhealthy
+- [ ] 数据库连通（MySQL/PostgreSQL/Redis）：SELECT 1 / PING，连接失败与超时分别归一化
+
 ### 引擎（custos-engine）
 
 - [x] RecoveryRun 执行器骨架：驱动状态机从 Observing 走到终态 `278e747`
