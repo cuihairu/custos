@@ -174,7 +174,7 @@
 
 ### 用户裁定落地：内置能力与 Python 扩展
 
-- [ ] 内置能力口径固化（ADR 15 工具箱模型）：核心内部集成工具注册表（HTTP/RPC/SSH 客户端 + 进程/服务/磁盘/网络连通性探测 + 受控命令执行 + 重启控制），以 Capability+OperationParams 声明；插件=规则层，与内置能力同派发表，传输安全集中硬化一次
+- [x] 内置能力口径固化（ADR 15 工具箱模型）：核心内部集成工具注册表（HTTP/RPC/SSH 客户端 + 进程/服务/磁盘/网络连通性探测 + 受控命令执行 + 重启控制），以 Capability+OperationParams 声明；插件=规则层，与内置能力同派发表，传输安全集中硬化一次 `b1cc338`（`custos-toolbox` crate：统一派发表 ToolRegistry——内置工具与插件声明的 operation id 同表注册、重复 ID 拒绝；dispatch 回答"谁服务此操作"：内置→进程内执行、插件→ToPlugin 交 runtime 转发；权限门在执行前统一强制（ADR-0012），required_permission 未授权即 Denied 且执行器不跑；首批内置工具 `exec.run`（受控命令执行，复用 run_controlled：超时/输出上限/进程树清理，argv 为数据非 shell 文本）与 `process.status`（只读，复用 ProcessProbe）；14/14 绿，mingw 交叉检查过；后续 HTTP/SSH/重启控制按同口径注册）
 - [ ] Python 入向：脚本探测/恢复动作加载器，按插件契约执行（超时/权限/预算同口径）
 - [ ] Python 出向：PyO3 绑定 crate 骨架（custos-python 或 custos-py）
 - [ ] Python 出向：核心查询 API 暴露（资源/健康/历史）
