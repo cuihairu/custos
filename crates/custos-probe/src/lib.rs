@@ -12,6 +12,7 @@ pub mod dns;
 pub mod exec;
 pub mod factory;
 pub mod http;
+pub mod log;
 pub mod mem;
 pub mod process;
 pub mod scheduler;

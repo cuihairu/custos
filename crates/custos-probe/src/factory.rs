@@ -11,7 +11,7 @@ use crate::mem::MemProbe;
 use crate::process::ProcessProbe;
 use crate::tcp::TcpProbe;
 use crate::tls_cert::TlsCertProbe;
-use crate::{cpu, disk, dns, http, mem, tls_cert, Probe};
+use crate::{cpu, disk, dns, http, log, mem, tls_cert, Probe};
 use custos_model::Resource;
 use std::time::Duration;
 
@@ -77,6 +77,9 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
             .map_err(|reason| err(reason.as_str())),
         "cpu" => cpu::from_config(config)
             .map(|probe: CpuProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
+        "log" => log::from_config(config)
+            .map(|probe: crate::log::LogProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
         "custom-command" | "proxy" | "tunnel" | "service" => {
             // Any type may fall back to an exec check command in P0.
@@ -225,5 +228,19 @@ mod tests {
         resource.config = json!({"warn_load": 0.6, "crit_load": 0.9});
         let probe = build_probe(&resource).unwrap();
         assert_eq!(probe.name(), "cpu");
+    }
+
+    #[test]
+    fn builds_log_probe() {
+        let mut resource = Resource::new("svc-log", "log");
+        resource.config = json!({"path": "/tmp/service.log", "pattern": "panic"});
+        let probe = build_probe(&resource).unwrap();
+        assert_eq!(probe.name(), "log");
+    }
+
+    #[test]
+    fn log_probe_requires_path_and_pattern() {
+        let resource = Resource::new("svc-log", "log");
+        assert!(build_probe(&resource).is_err());
     }
 }
