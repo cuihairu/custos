@@ -295,7 +295,11 @@ fn shell_quote(value: &str) -> String {
 #[cfg(target_os = "macos")]
 fn bootstrap_macos_app() {
     use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
-    let mtm = unsafe { objc2::rc::MainThreadMarker::new_unchecked() };
+    use objc2_foundation::MainThreadMarker;
+    let Some(mtm) = MainThreadMarker::new() else {
+        tracing::error!(target: "custos::tray", "bootstrap must run on the main thread");
+        return;
+    };
     let app = unsafe { NSApplication::sharedApplication(mtm) };
     unsafe { app.setActivationPolicy(NSApplicationActivationPolicy::Accessory) };
 }
