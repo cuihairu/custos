@@ -1,6 +1,6 @@
 Package: custos
 Version: 0.1.0-1
-Depends: libc
+Depends:
 Source: https://github.com/cuihairu/custos
 SourceName: custos
 License: MIT
