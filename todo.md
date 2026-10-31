@@ -291,13 +291,13 @@
 
 ## 审核发现 2026-10-31
 
-- [ ] 审核发现：`ProcessProbe` 配置 `probe.rss_threshold_kb` 后，在 macOS/Windows 上 `resident_kb` 恒返回 `None`（macOS 无 `/proc`，Windows 走 `#[cfg(not(unix))]` 空实现），对**存活**进程也报告 `Unhealthy "pid {pid} exited before RSS could be read"`——把「平台不支持该阈值」与「进程已退出」混为一谈，健康进程会被判定故障并反复触发恢复动作。（crates/custos-probe/src/process.rs:70）
-- [ ] 审核发现：macOS 的「打开控制台」`spawn_console` 在 `#[cfg(target_os = "macos")]` 分支丢弃 `command`（`let _ = command;`），仅执行 `open -a Terminal` 打开一个空终端，配置/默认的 `custos status --db ...` 命令从不实际运行。（crates/custos-tray/src/driver.rs:276）
-- [ ] 审核发现：Windows 默认「打开控制台」命令被双重包装——`default_console_command` 已前置 `cmd /C start`（crates/custos-tray/src/main.rs:120），`spawn_console` 的 Windows 分支又整体再前置 `cmd /C start`（crates/custos-tray/src/driver.rs:268），实际执行 `cmd /C start cmd /C start custos status ...`，产生多余嵌套窗口。（crates/custos-tray/src/main.rs:120）
-- [ ] 审核发现：macOS 托盘驱动主循环用 `std::thread::sleep(50ms)` + `try_recv` 轮询，从不运行 `NSApplication` 的 run loop（`bootstrap_macos_app` 只建 app 未调用 `run()`），tray-icon/muda 的菜单与图标事件需经 Cocoa run loop 派发，注释「NSApplication services events while we sleep」不成立（`sleep` 不泵送 run loop），macOS 上右键菜单点击/图标事件可能无法送达、托盘交互失效。（crates/custos-tray/src/driver.rs:150）
-- [ ] 审核发现：Dashboard 无任何鉴权；`[dashboard].listen` 可配置为 `0.0.0.0:8080` 等非回环地址，只读 HTTP 端点（`/api/resources` `/api/permissions` `/api/graph` `/api/notifications` `/api/config`）向任何可达客户端泄漏资源 ID、恢复策略、风险等级、依赖图与通知内容，绑定层对非回环地址既无限制也无告警。（crates/custos-dashboard/src/lib.rs:39）
-- [ ] 审核发现：nightly 二进制 tarball 未包含新构建的 `custos-tray`——Linux（.github/workflows/nightly.yml:101）与 macOS（:139）的 `tar ... custos` 只打包 `custos`，而 Windows zip（:109）含 `custos-tray.exe`、macOS dmg（:126）含 `custos-tray`；macOS 上托盘进程可用却缺席于 tar.gz 二进制产物，跨平台产物集不一致。（.github/workflows/nightly.yml:139）
-- [ ] 审核发现：RPM 打包资产 `source = "../../target/release/custos"`（crates/custos-cli/Cargo.toml:21）固定指向非 target 目录，而 `cargo generate-rpm --target <triple>` 的产物在 `target/<triple>/release/`；该路径并未「honors --target」（注释所述），当前仅因每个 Linux runner 的宿主三元组恰好等于 matrix target 才凑效，跨架构打包会装入错误架构的二进制。（crates/custos-cli/Cargo.toml:21）
-- [ ] 审核发现：`driver.rs` 的私有函数 `shell_quote` 无任何调用者（dead code），仅在 Windows/macOS 构建时触发 `dead_code` 警告。（crates/custos-tray/src/driver.rs:289）
-- [ ] 审核发现：`wix/main.wxs` 的 MSI `Product Version="0.1.0"` 硬编码，不随工作区 crate 版本（Cargo.toml `version = "0.1.0"`）联动，后续升版后夜间 MSI 仍恒报 0.1.0。（crates/custos-cli/wix/main.wxs:3）
-- [ ] 审核发现：`timeout_kills_process_tree` 的「未等待完整 sleep」时间上界从 `< 2s` 放宽到 `< 30s`（exec.rs:295），而探测超时仅 200ms；30s 上界会让 25s 级的超时回归也通过，明显削弱该回归守卫（仍能区分 200ms 与 187s，但无法捕获 25s 级劣化）。（crates/custos-probe/src/exec.rs:295）
+- [x] 审核发现：RSS 平台混淆——已在 `64381b0` 修复：`resident_kb` 返回 `RssReading{Read,Exited,Unsupported}`，不支持平台报 `Unreachable`（§3.2 探针无法获取有效结果），存活进程不再误判 Unhealthy
+- [x] 审核发现：macOS 空终端——已在 `64381b0` 修复：`spawn_console` 纯 spawn，`default_console_command` 用 `osascript` + `Terminal do script` 实际运行命令
+- [x] 审核发现：Windows 双包装——已在 `64381b0` 修复：`spawn_console` 无平台分支，`default_console_command` 组合唯一一次包装
+- [x] 审计发现：macOS run loop——已在 `64381b0` 修复：`pump_events` 用 `CFRunLoopRunInMode(None, 0.05, false)` 替代裸 `sleep`，50ms 周期泵送 Cocoa 事件
+- [x] 审核发现：Dashboard 无鉴权非回环绑定——已在 `64381b0` 修复：`bind` 拒绝非回环地址（`PermissionDenied`），远程访问必须走带鉴权的本地反向代理
+- [x] 审核发现：tarball 缺 tray——已在 `64381b0` 修复：Linux/macOS tar 命令追加 `custos-tray`
+- [x] 审核发现：RPM 资产路径不随 target——已在 `64381b0` 修复：构建前把 `target/<matrix-triple>/release/custos` 复制到固定路径，资产路径不再碰巧依赖宿主三元组
+- [x] 审核发现：`shell_quote` dead code——已在 `64381b0` 修复：迁入 `main.rs` 并被 macOS osascript 组合使用
+- [x] 审核发现：MSI 版本硬编码——已在 `64381b0` 修复：nightly 打包前从 Cargo.toml 读取版本号并替换
+- [x] 审核发现：超时断言弱化——已在 `64381b0` 修复：收紧到 `< 10s`（捕获 25s 级回归，同时给 CI 负载留余量）
