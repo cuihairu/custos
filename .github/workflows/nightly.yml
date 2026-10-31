@@ -86,11 +86,13 @@ jobs:
           cp "target/${{ matrix.target }}/debian"/*.deb dist/
       - name: package rpm
         if: runner.os == 'Linux'
+        working-directory: crates/custos-cli
         run: |
           cargo install cargo-generate-rpm
-          cargo generate-rpm -p custos-cli --target "${{ matrix.target }}"
-          mkdir -p dist
-          cp "target/${{ matrix.target }}/generate-rpm"/*.rpm dist/
+          cargo generate-rpm --target "${{ matrix.target }}"
+          mkdir -p "${{ github.workspace }}/dist"
+          cp "${{ github.workspace }}/target/${{ matrix.target }}/generate-rpm"/*.rpm \
+             "${{ github.workspace }}/dist/"
       - name: package binary tarball
         if: runner.os == 'Linux'
         run: |
@@ -109,12 +111,10 @@ jobs:
         shell: pwsh
         run: |
           cargo install cargo-wix
-          Push-Location crates/custos-cli
-          cargo wix init
-          cargo wix --nocapture
-          Pop-Location
+          cargo wix init --package custos-cli
+          cargo wix --package custos-cli --nocapture
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "crates/custos-cli/target/wix"/*.msi dist/
+          Copy-Item "target/wix"/*.msi dist/
 
       # macOS: dmg (ad-hoc signed .app) + binary tarball.
       - name: package dmg
