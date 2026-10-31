@@ -82,6 +82,10 @@ fn enabled_server_serves_read_only_json() {
     assert!(status.contains("200 OK"), "{status}");
     assert!(body.contains("nodes"), "{body}");
 
+    let (status, body) = get(addr, "/api/permissions");
+    assert!(status.contains("200 OK"), "{status}");
+    assert!(body.contains("default_allow_high_risk"), "{body}");
+
     let (status, body) = get(addr, "/api/timeline");
     assert!(status.contains("200 OK"), "{status}");
     assert!(body.contains("runs"), "{body}");

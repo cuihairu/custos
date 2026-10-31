@@ -238,12 +238,12 @@
 - [x] RecoveryRun 时间线（`/api/timeline` 复用 `list_runs` 按 started_at 排序，含 status/trigger/attempt 信息；集成测试断言；`cargo test -p custos-dashboard` 绿 + `cargo test --workspace` 全绿）
 - [x] 通知状态页（`/api/notifications`：`list_notifications` 含 state/event_type/resource_id/attempts/created_at；集成测试；`cargo test -p custos-dashboard` 绿 + `cargo test --workspace` 全绿）
 - [x] 配置检查界面（`/api/config`：counts 摘要 + `read_only:true`；集成测试断言 read_only；`cargo test -p custos-dashboard` 绿 + `cargo test --workspace` 全绿）
-- [ ] macOS 适配（launchd 服务控制在 P2 已做；此处补 Wi-Fi/连通性/重启）
-- [ ] BSD 适配（rc.d/网络路由/重启）
-- [ ] OpenWrt 完整能力
-- [ ] 插件签名与分发策略
-- [ ] 操作授权界面完善
-- [ ] 更丰富通知插件（Telegram/Discord/Slack/企微/钉钉/飞书/ntfy/Gotify 任一起步）
+- [ ] macOS 适配（launchd 服务控制在 P2 已做；此处补 Wi-Fi/连通性/重启） BLOCKED（需真实 macOS 主机编译+运行 `cfg(target_os="macos")` 路径；当前 Linux 环境无法验证；launchd 控制器已由 `init_systems.rs` 实现并 compile-check）
+- [ ] BSD 适配（rc.d/网络路由/重启） BLOCKED（需真实 BSD 主机；当前 Linux 环境无法验证）
+- [ ] OpenWrt 完整能力 BLOCKED（需真实 OpenWrt 设备执行 procd/uci/ubus/网络重启全链路；当前 Linux 环境无 `/etc/openwrt_release`，`openwrt.rs` 全部明报 Unsupported；解析器与 fixture 已由 `c2f7325`/`6af14ec` 单测覆盖）
+- [ ] 插件签名与分发策略 BLOCKED（需用户拍板签名/信任模型与分发源；当前无密钥/信任锚，无法实现安全分发）
+- [x] 操作授权界面完善（`/api/permissions` 只读端点：default_allow_high_risk + 每资源 allow_high_risk + 各 plan 的 risk/idempotent/max_attempts；集成测试断言 `default_allow_high_risk`；授权强制执行仍由 `custos-toolbox` dispatch 权限门先于执行器；`cargo test -p custos-dashboard` 绿 + `cargo test --workspace` 全绿）
+- [ ] 更丰富通知插件（Telegram/Discord/Slack/企微/钉钉/飞书/ntfy/Gotify 任一起步） BLOCKED（需外部服务 API 凭据/机器人 token；当前无凭据，无法端到端验证）
 - [x] 验收：Dashboard 关闭无端口；不可用不影响核心；不绕过 Core Engine；高风险仍走统一授权审计（关闭：`disabled_config_binds_nothing` 断言默认不绑定监听 + CLI `start` 无 dashboard 配置时不产生监听；不影响核心：`DashboardServer` 仅读取 `Store`/`ValidatedConfig`，无引擎动作路径，请求失败仅 `tracing::warn` 继续；不绕过 Core Engine：端点全为只读查询，`/api/config` 返回 `read_only:true`；高风险授权：`custos-toolbox` `dispatch` 的 `granted` 权限门先于任何执行器，`permission_gate_refuses_before_execution`/`plugin_operations_require_permission_before_dispatch` 断言未授权拒绝；`cargo test --workspace` 全绿）
 
 ## ADR 落档（docs/adr/，adr-principles §17 十四条）

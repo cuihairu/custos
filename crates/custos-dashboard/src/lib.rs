@@ -119,6 +119,7 @@ fn route(path: &str, store: &Store, config: &ValidatedConfig) -> (String, String
         "/api/timeline" => json_response(runs_payload(store)),
         "/api/resources" => json_response(resources_payload(config)),
         "/api/graph" => json_response(graph_payload(config)),
+        "/api/permissions" => json_response(permissions_payload(config)),
         "/api/notifications" => json_response(notifications_payload(store)),
         "/api/config" => {
             // Read-only configuration summary: the dashboard never mutates.
@@ -216,6 +217,29 @@ fn graph_payload(config: &ValidatedConfig) -> Result<serde_json::Value, String> 
     Ok(serde_json::json!({ "nodes": nodes, "edges": edges }))
 }
 
+fn permissions_payload(config: &ValidatedConfig) -> Result<serde_json::Value, String> {
+    let resources: Vec<_> = config
+        .resources
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "resource_id": r.id,
+                "allow_high_risk": r.recovery_policy.allow_high_risk,
+                "plans": r.recovery_policy.plans.iter().map(|p| serde_json::json!({
+                    "plan_id": p.plan_id,
+                    "risk": format!("{:?}", p.risk_level),
+                    "idempotent": p.idempotent,
+                    "max_attempts": p.max_attempts,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    Ok(serde_json::json!({
+        "default_allow_high_risk": config.permissions.default_allow_high_risk,
+        "resources": resources,
+    }))
+}
+
 fn notifications_payload(store: &Store) -> Result<serde_json::Value, String> {
     let rows = store.list_notifications(100).map_err(|e| e.to_string())?;
     let items: Vec<_> = rows
@@ -297,6 +321,7 @@ mod tests {
     }
 }
 
+#[cfg(test)]
 fn load_config_for_test() -> ValidatedConfig {
     use custos_config::load;
     load("version = 1\n").expect("test config")
