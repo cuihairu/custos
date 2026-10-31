@@ -82,8 +82,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
       - name: build release binary
-        run: cargo build --release --bin custos --bin custos-tray
+        run: >
+          cargo build --release
+          --target ${{ matrix.target }}
+          --bin custos --bin custos-tray
+
+      # Binary location: target/<target>/release/custos (workspace root).
 
       # Linux: deb + rpm + binary tarball.
       - name: package deb
@@ -111,7 +119,18 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p dist
-          tar -C target/release -czf "dist/${{ matrix.artifact }}.tar.gz" custos custos-tray
+          tar -C "target/${{ matrix.target }}/release" -czf "dist/${{ matrix.artifact }}.tar.gz" custos custos-tray
+
+      # OpenWrt .ipk: musl static binary + procd init + LuCI interface
+      # (packaging/openwrt/build-ipk.sh; the tar.gz wrapper format
+      # installs via `opkg install custos*.ipk`).
+      - name: package openwrt ipk
+        if: runner.os == 'Linux' && matrix.static
+        run: |
+          sh packaging/openwrt/build-ipk.sh "target/${{ matrix.target }}/release/custos" dist/
+          ARCH=$(echo ${{ matrix.target }} | sed 's/unknown-linux-musl//;s/-//g')
+          mv "dist/custos_0.1.0-1_x86_64.ipk" "dist/custos_0.1.0-1_${ARCH}.ipk" 2>/dev/null \
+            || echo "ipk rename skipped"
 
       # Windows: zip binary + msi.
       - name: package binary zip
@@ -119,7 +138,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path target/release/custos.exe,target/release/custos-tray.exe -DestinationPath "dist/${{ matrix.artifact }}.zip"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/custos.exe","target/${{ matrix.target }}/release/custos-tray.exe" -DestinationPath "dist/${{ matrix.artifact }}.zip"
       - name: package msi
         if: runner.os == 'Windows'
         shell: pwsh
@@ -136,9 +155,10 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          BINDIR="target/${{ matrix.target }}/release"
           mkdir -p "staging/Custos.app/Contents/MacOS" dist
-          cp target/release/custos "staging/Custos.app/Contents/MacOS/custos"
-          cp target/release/custos-tray "staging/Custos.app/Contents/MacOS/custos-tray"
+          cp "$BINDIR/custos" "staging/Custos.app/Contents/MacOS/custos"
+          cp "$BINDIR/custos-tray" "staging/Custos.app/Contents/MacOS/custos-tray"
           cat > "staging/Custos.app/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -151,7 +171,7 @@ jobs:
           EOF
           codesign --force --deep -s - "staging/Custos.app"
           hdiutil create -volname Custos -srcfolder staging -ov -format UDZO "dist/${{ matrix.artifact }}.dmg"
-          tar -C target/release -czf "dist/${{ matrix.artifact }}.tar.gz" custos custos-tray
+          tar -C "target/${{ matrix.target }}/release" -czf "dist/${{ matrix.artifact }}.tar.gz" custos custos-tray
 
       - uses: actions/upload-artifact@v4
         with:
