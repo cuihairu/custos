@@ -374,3 +374,68 @@ fn action_spec_runs_the_configured_program() {
         custos_model::ActionOutcome::TimedOut
     );
 }
+
+#[test]
+fn network_recovery_end_to_end() {
+    // Network-recovery end-to-end: a network resource is probed by a script
+    // (marker file = connectivity up). When the marker is absent the engine
+    // diagnoses the network down, runs the recovery action that restores the
+    // marker, and verifies the resource is Healthy again.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let marker = dir.path().join("network.up");
+    let marker = marker.to_str().expect("utf8 path");
+    let config = format!(
+        r#"
+version = 1
+
+[[resources]]
+id = "wan"
+type = "custom-command"
+
+[resources.probe]
+command = ["test", "-f", "{marker}"]
+interval_ms = 20
+timeout_ms = 500
+
+[resources.health_policy]
+failure_threshold = 1
+success_threshold = 1
+
+[[resources.recovery_policy.plans]]
+plan_id = "restore-wan"
+applicable_faults = ["remote_endpoint_unreachable", "probe_timeout"]
+risk = "low"
+idempotent = true
+timeout_ms = 5000
+max_attempts = 1
+cooldown_ms = 60_000
+
+[resources.recovery_policy.plans.action]
+program = "sh"
+args = ["-c", "touch {marker}"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+"#
+    );
+
+    // Network starts down (no marker): the engine must detect it, restore it,
+    // and verify health.
+    let (mut engine, store) = build(&config, None);
+    let runs = tick_until(
+        &mut engine,
+        |e| {
+            e.snapshot(&ResourceId::new("wan"))
+                .is_some_and(|s| s.status == custos_model::HealthStatus::Healthy)
+        },
+        5_000,
+    );
+    let run = runs
+        .iter()
+        .find(|r| r.resource_id == ResourceId::new("wan"))
+        .expect("a recovery run for the network resource");
+    assert_eq!(run.status, RecoveryRunStatus::Recovered);
+    assert_eq!(run.action_attempts.len(), 1);
+    assert!(std::path::Path::new(marker).exists(), "marker restored");
+    assert!(store.event_types().contains(&"recovery.succeeded"));
+}
