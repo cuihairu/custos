@@ -89,6 +89,10 @@ jobs:
         working-directory: crates/custos-cli
         run: |
           cargo install cargo-generate-rpm
+          # Stage the matrix-triple binary at the fixed asset path: the RPM
+          # asset source is a literal path and cannot express --target.
+          cp "${{ github.workspace }}/target/${{ matrix.target }}/release/custos" \
+             "${{ github.workspace }}/target/release/custos"
           cargo generate-rpm --target "${{ matrix.target }}" --auto-req disabled
           mkdir -p "${{ github.workspace }}/dist"
           cp target/${{ matrix.target }}/generate-rpm/*.rpm \
@@ -98,7 +102,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p dist
-          tar -C target/release -czf "dist/${{ matrix.artifact }}.tar.gz" custos
+          tar -C target/release -czf "dist/${{ matrix.artifact }}.tar.gz" custos custos-tray
 
       # Windows: zip binary + msi.
       - name: package binary zip
@@ -112,6 +116,8 @@ jobs:
         shell: pwsh
         run: |
           cargo install cargo-wix
+          $ver = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches.Groups[1].Value
+          (Get-Content crates/custos-cli/wix/main.wxs) -replace 'Version="0.1.0"', "Version=\"$ver\"" | Set-Content crates/custos-cli/wix/main.wxs
           cargo wix --package custos-cli --nocapture
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item -Path "target/wix/*.msi" -Destination dist/
@@ -136,7 +142,7 @@ jobs:
           EOF
           codesign --force --deep -s - "staging/Custos.app"
           hdiutil create -volname Custos -srcfolder staging -ov -format UDZO "dist/${{ matrix.artifact }}.dmg"
-          tar -C target/release -czf "dist/${{ matrix.artifact }}.tar.gz" custos
+          tar -C target/release -czf "dist/${{ matrix.artifact }}.tar.gz" custos custos-tray
 
       - uses: actions/upload-artifact@v4
         with:

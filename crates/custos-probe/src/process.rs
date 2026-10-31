@@ -52,37 +52,64 @@ impl crate::Probe for ProcessProbe {
         match self.rss_threshold_kb {
             None => report(true, HealthStatus::Healthy, format!("pid {pid} alive")),
             Some(threshold) => match resident_kb(pid) {
-                Some(rss) if rss > threshold => report(
+                RssReading::Read(rss) if rss > threshold => report(
                     false,
                     HealthStatus::Unhealthy,
                     format!("pid {pid} alive but RSS {rss} KiB exceeds threshold {threshold} KiB"),
                 ),
-                Some(rss) => report(
+                RssReading::Read(rss) => report(
                     true,
                     HealthStatus::Healthy,
                     format!("pid {pid} alive, RSS {rss} KiB"),
                 ),
-                // The process may have exited between the alive check and
-                // the statm read; that is a liveness fact, not unreachability.
-                None => report(
+                RssReading::Exited => report(
                     false,
                     HealthStatus::Unhealthy,
                     format!("pid {pid} exited before RSS could be read"),
+                ),
+                RssReading::Unsupported => report(
+                    false,
+                    HealthStatus::Unreachable,
+                    "RSS threshold is not supported on this platform (no /proc/statm)".to_owned(),
                 ),
             },
         }
     }
 }
 
-/// Resident set size in KiB via `/proc/<pid>/statm` (Linux). `None` when
-/// the process no longer exists (exited between checks) or on platforms
-/// without a statm file — the caller decides how to report it.
+/// What an RSS read yielded — three honest outcomes, never conflated.
+/// Variants are constructed per-platform (unix: Read/Exited; otherwise
+/// Unsupported), so a single-target build sees some as unused.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RssReading {
+    /// The process's resident set, in KiB.
+    Read(u64),
+    /// The process is gone (statm vanished between the alive check and the
+    /// read, or /proc entry disappeared).
+    Exited,
+    /// This platform has no RSS source (`/proc/<pid>/statm` is Linux-only;
+    /// Windows would need psapi). A threshold there is declared
+    /// unsupported, never reported as "exited" (§11.1 不伪造支持).
+    Unsupported,
+}
+
+/// Resident set size via `/proc/<pid>/statm` (Linux).
 #[cfg(unix)]
-fn resident_kb(pid: u32) -> Option<u64> {
-    let statm = std::fs::read_to_string(format!("/proc/{pid}/statm")).ok()?;
+fn resident_kb(pid: u32) -> RssReading {
+    let Ok(statm) = std::fs::read_to_string(format!("/proc/{pid}/statm")) else {
+        // The pid directory is gone: the process exited.
+        return RssReading::Exited;
+    };
     // Fields: size resident shared text lib data dt (in pages).
-    let resident_pages = statm.split_whitespace().nth(1)?.parse::<u64>().ok()?;
-    Some(resident_pages * page_size_kb())
+    match statm
+        .split_whitespace()
+        .nth(1)
+        .and_then(|p| p.parse::<u64>().ok())
+    {
+        Some(resident_pages) => RssReading::Read(resident_pages * page_size_kb()),
+        None => RssReading::Exited,
+    }
 }
 
 /// Kernel page size in KiB (Linux), falling back to the common 4 KiB.
@@ -101,10 +128,8 @@ fn page_size_kb() -> u64 {
 }
 
 #[cfg(not(unix))]
-fn resident_kb(_pid: u32) -> Option<u64> {
-    // Windows: GetProcessMemoryInfo would need psapi; a threshold there is
-    // declared unsupported rather than silently skipped (§11.1 不伪造支持).
-    None
+fn resident_kb(_pid: u32) -> RssReading {
+    RssReading::Unsupported
 }
 
 fn is_alive(pid: u32) -> bool {

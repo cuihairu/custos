@@ -235,8 +235,24 @@ pub fn run(mut options: TrayOptions) -> Result<(), String> {
             next_beat = Instant::now() + beat_frame_step;
         }
 
-        std::thread::sleep(Duration::from_millis(50));
+        pump_events(Duration::from_millis(50));
     }
+}
+
+/// Waits one tick while letting the platform dispatch tray/menu events.
+/// A bare `sleep` never pumps the Cocoa run loop on macOS, so tray-icon and
+/// muda events (menu clicks, icon interactions) would never be delivered.
+#[cfg(target_os = "macos")]
+fn pump_events(duration: Duration) {
+    use objc2_core_foundation::CFRunLoop;
+    // Run the default-mode loop for the tick duration: pending menu and
+    // status-item events are dispatched, then control returns here.
+    unsafe { CFRunLoop::run_in_mode(None, duration.as_secs_f64(), false) };
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pump_events(duration: Duration) {
+    std::thread::sleep(duration);
 }
 
 /// The one-line status summary shown as the (disabled) first menu item.
@@ -259,35 +275,21 @@ fn summary_line(status: TrayStatus, summary: &HealthSummary) -> String {
 
 /// 「打开控制台」: spawns the platform terminal running the console
 /// command. Errors are logged, never fatal (§9.3 打开控制台).
+/// 「打开控制台」: spawns the configured command as-is. The console command
+/// (from `--console` or [`crate::default_console_command`]) is already the
+/// full platform-appropriate invocation — this layer must not re-wrap it
+/// (the old Windows path double-wrapped `cmd /C start` and the old macOS
+/// path discarded the command and opened an empty Terminal).
 fn spawn_console(command: &[String]) {
     use std::process::Command;
     let program = &command[0];
     let args: Vec<&str> = command[1..].iter().map(String::as_str).collect();
-    #[cfg(windows)]
-    let result = {
-        let mut full = vec!["/C".to_owned(), "start".to_owned()];
-        full.extend_from_slice(command);
-        Command::new("cmd").args(&full).spawn()
-    };
-    #[cfg(target_os = "macos")]
-    let result = {
-        // Best-effort: Terminal.app opens a shell window. A robust
-        // integration would use AppleScript to type the command.
-        let _ = command;
-        Command::new("open").args(["-a", "Terminal"]).spawn()
-    };
-    #[cfg(not(any(windows, target_os = "macos")))]
-    let result = Command::new(program).args(&args).spawn();
-    match result {
+    match Command::new(program).args(&args).spawn() {
         Ok(_) => tracing::info!(target: "custos::tray", program = %program, "console opened"),
         Err(err) => {
             tracing::warn!(target: "custos::tray", program = %program, error = %err, "console open failed")
         }
     }
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 /// macOS bootstrap: `NSApplication` in accessory (menu-bar-only) mode.

@@ -60,6 +60,25 @@ fn disabled_config_binds_nothing() {
 }
 
 #[test]
+fn non_loopback_listen_is_refused() {
+    let (_dir, store) = temp_db();
+    let validated = load_config("version = 1\n").unwrap();
+    // Port 1 on a public address: bind must refuse (PermissionDenied).
+    let config = DashboardConfig {
+        enabled: true,
+        listen: custos_config::ListenConfig {
+            addr: "192.168.1.1:1".parse().unwrap(),
+        },
+    };
+    let err = match DashboardServer::bind(&config, store, validated) {
+        Err(err) => err,
+        Ok(_) => panic!("non-loopback listen must be refused"),
+    };
+    assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    assert!(err.to_string().contains("loopback"), "{err}");
+}
+
+#[test]
 fn enabled_server_serves_read_only_json() {
     let (_dir, store) = temp_db();
     let config = DashboardConfig {

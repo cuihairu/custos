@@ -64,6 +64,19 @@ fn main() {
     run(db_path, config_path, console);
 }
 
+/// Escapes a value for embedding inside a double-quoted AppleScript string
+/// (backslash and double quote).
+#[allow(dead_code)]
+fn apple_quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// POSIX shell quoting for a command run inside Terminal's shell.
+#[allow(dead_code)]
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 /// Builds the health source over the store and hands control to the driver.
 #[cfg(any(windows, target_os = "macos"))]
 fn run(db_path: String, config_path: String, console: Vec<String>) {
@@ -121,6 +134,19 @@ fn default_console_command(db_path: &str) -> Vec<String> {
             .into_iter()
             .chain(status_args)
             .collect()
+    } else if cfg!(target_os = "macos") {
+        // Terminal.app opens a window and runs the command via AppleScript
+        // (a plain `open -a Terminal` would discard the command). The
+        // command is shell-quoted so paths with spaces survive.
+        let script = shell_quote(&status_args.join(" "));
+        vec![
+            "osascript".into(),
+            "-e".into(),
+            format!(
+                "tell application \"Terminal\" to do script {}",
+                apple_quote(&script)
+            ),
+        ]
     } else {
         status_args
     }

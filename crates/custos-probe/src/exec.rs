@@ -289,10 +289,11 @@ mod tests {
             4096,
         );
         assert_eq!(result, ExecResult::TimedOut);
-        // Generous bound: on a loaded 2-core CI runner the deadline check
-        // can overshoot; the real requirement is "not the full 187 s".
+        // The probe timeout is 200ms; even a heavily loaded 2-core CI
+        // runner returns within a few seconds. A 10s bound still catches a
+        // 25s-class regression (the old 30s bound could not).
         assert!(
-            start.elapsed() < Duration::from_secs(30),
+            start.elapsed() < Duration::from_secs(10),
             "must not wait for the full sleep"
         );
         // Fault injection (docs/guide/testing.md §16.3): after a timeout the

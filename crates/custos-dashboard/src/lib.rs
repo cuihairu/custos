@@ -31,12 +31,27 @@ pub struct DashboardServer {
 
 impl DashboardServer {
     /// Binds the listener. Call only when `config.is_enabled()`.
+    ///
+    /// Refuses non-loopback addresses: the endpoints are read-only but
+    /// unauthenticated, exposing resource names, recovery plans, risk
+    /// levels and notification content. Remote access should go through a
+    /// local reverse proxy with its own authentication, not this listener.
     pub fn bind(
         config: &DashboardConfig,
         store: Arc<Store>,
         validated: ValidatedConfig,
     ) -> std::io::Result<Self> {
-        let listener = TcpListener::bind(config.listen_addr())?;
+        let addr = config.listen_addr();
+        if !addr.ip().is_loopback() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "dashboard listen address {addr} is not loopback; refusing to expose \
+                     unauthenticated endpoints (use a local reverse proxy for remote access)"
+                ),
+            ));
+        }
+        let listener = TcpListener::bind(addr)?;
         Ok(Self {
             listener,
             store,
