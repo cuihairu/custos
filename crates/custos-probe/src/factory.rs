@@ -130,10 +130,12 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
                     ))
                 }
             } else {
-                exec_probe(config, resource)
+                exec_probe(config, resource).map(|probe| Box::new(probe) as Box<dyn Probe>)
             }
         }
-        "custom-command" | "tunnel" => exec_probe(config, resource),
+        "custom-command" | "tunnel" => {
+            exec_probe(config, resource).map(|probe| Box::new(probe) as Box<dyn Probe>)
+        }
         other => Err(err(&format!(
             "no builtin probe for type `{other}` in P0 (docs/guide/probe-diagnosis.md §5.4)"
         ))),
@@ -144,7 +146,7 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
 fn exec_probe(
     config: &serde_json::Value,
     resource: &Resource,
-) -> Result<Box<dyn Probe>, ProbeBuildError> {
+) -> Result<ExecProbe, ProbeBuildError> {
     let err = |reason: &str| ProbeBuildError {
         id: resource.id.to_string(),
         kind: resource.resource_type.clone(),
@@ -160,10 +162,14 @@ fn exec_probe(
         .filter(|argv| !argv.is_empty())
         .ok_or_else(|| err("`probe.command` is required for exec-probed resources"))?;
     let timeout_ms = config["timeout_ms"].as_u64().unwrap_or(3_000);
-    Ok(Box::new(ExecProbe::from_argv(
+    let max_output_bytes = config["max_output_bytes"]
+        .as_u64()
+        .unwrap_or(64 * 1024) as usize;
+    Ok(ExecProbe::from_argv(
         command,
         Duration::from_millis(timeout_ms),
-    )))
+        max_output_bytes,
+    ))
 }
 
 #[cfg(test)]
@@ -184,6 +190,14 @@ mod tests {
         resource.config = json!({"command": ["true"], "timeout_ms": 1000});
         let probe = build_probe(&resource).unwrap();
         assert_eq!(probe.name(), "exec");
+    }
+
+    #[test]
+    fn exec_probe_respects_configured_max_output_bytes() {
+        let resource = Resource::new("check", "custom-command");
+        let config = json!({"command": ["true"], "max_output_bytes": 4096});
+        let probe = exec_probe(&config, &resource).expect("exec probe");
+        assert_eq!(probe.max_output_bytes, 4096);
     }
 
     #[test]

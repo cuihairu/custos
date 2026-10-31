@@ -209,11 +209,11 @@ pub struct ExecProbe {
 }
 
 impl ExecProbe {
-    pub fn from_argv(command: Vec<String>, timeout: Duration) -> Self {
+    pub fn from_argv(command: Vec<String>, timeout: Duration, max_output_bytes: usize) -> Self {
         Self {
             command,
             timeout,
-            max_output_bytes: 64 * 1024,
+            max_output_bytes,
         }
     }
 }
