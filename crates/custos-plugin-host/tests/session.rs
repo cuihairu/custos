@@ -151,7 +151,20 @@ fn plugin_crash_is_isolated_and_reported() {
         .call(Method::Probe, json!({"resource_id": "mock"}))
         .expect_err("dead session");
     assert!(matches!(err, HostError::Unavailable));
-    assert!(session.stderr_tail().contains("dying on purpose"));
+    // The child's final stderr line races its exit; poll for the drain
+    // thread to capture it before asserting.
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        let tail = session.stderr_tail();
+        if tail.contains("dying on purpose") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "session stderr never drained; got {tail:?}"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 #[test]
