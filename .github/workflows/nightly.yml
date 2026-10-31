@@ -17,7 +17,9 @@ on:
 
 concurrency:
   group: nightly
-  cancel-in-progress: true
+  # Never cancel: the macOS runner is a limited resource and queued
+  # jobs would be cancelled by the next trigger; let the queue wait.
+  cancel-in-progress: false
 
 jobs:
   # Gate: freshness (scheduled only) + fmt + clippy + full test suite.
