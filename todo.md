@@ -244,7 +244,7 @@
 - [ ] 插件签名与分发策略
 - [ ] 操作授权界面完善
 - [ ] 更丰富通知插件（Telegram/Discord/Slack/企微/钉钉/飞书/ntfy/Gotify 任一起步）
-- [ ] 验收：Dashboard 关闭无端口；不可用不影响核心；不绕过 Core Engine；高风险仍走统一授权审计
+- [x] 验收：Dashboard 关闭无端口；不可用不影响核心；不绕过 Core Engine；高风险仍走统一授权审计（关闭：`disabled_config_binds_nothing` 断言默认不绑定监听 + CLI `start` 无 dashboard 配置时不产生监听；不影响核心：`DashboardServer` 仅读取 `Store`/`ValidatedConfig`，无引擎动作路径，请求失败仅 `tracing::warn` 继续；不绕过 Core Engine：端点全为只读查询，`/api/config` 返回 `read_only:true`；高风险授权：`custos-toolbox` `dispatch` 的 `granted` 权限门先于任何执行器，`permission_gate_refuses_before_execution`/`plugin_operations_require_permission_before_dispatch` 断言未授权拒绝；`cargo test --workspace` 全绿）
 
 ## ADR 落档（docs/adr/，adr-principles §17 十四条）
 
