@@ -219,7 +219,7 @@
 - [ ] Windows Wi-Fi 完整恢复场景
 - [x] OpenWrt 适配：procd / UCI / ubus / 网络检查 `6af14ec`（`openwrt.rs`：/etc/openwrt_release 检测；procd 服务经 /etc/init.d + ubus service list 实例存在性判断运行态；uci get 未设即 NotFound；ubus call 返回解析 JSON；WAN status 解析器（up/地址/默认路由）fixture 测试；非 OpenWrt 主机全部明报 Unsupported 不猜测）
 - [x] OpenClash 插件（节点诊断 + 有序切换） `105f6e2`（`plugins/openclash` bin：探测 clash core 版本+托管组当前节点；有序恢复=组成员 delay 实测取最快（无 delay 数据才退到首候选，绝不盲目轮询），重启走 /etc/init.d/openclash（OpenWrt 无 systemd）；Capability 三条含 interrupts 标记；宿主会话集成测试）
-- [ ] 网络恢复后端到端验证
+- [x] 网络恢复后端到端验证 `df85e14`（`crates/custos-engine/tests/vertical.rs` 新增 `network_recovery_end_to_end`：网络资源以脚本探针模拟（marker 文件=连通），marker 缺失→引擎诊断网络 down→恢复动作 restore→验证 Healthy；`cargo test -p custos-engine --test vertical network_recovery_end_to_end` 20 次零失败 + `cargo test --workspace` 全绿）
 - [x] 网络操作互斥 + 风险控制（禁默认清防火墙/重置全部路由） `7d9e8f9`（全局 NETWORK_OPS 互斥锁：接口重置与重启跨资源同时刻至多一个网络操作，并发者立即收到明确拒绝而非排队等惊喜；重置=显式单接口 down+up；无任何防火墙清空/全路由重置原语存在）
 - [ ] 验收场景 1：向日葵离线网络正常 → 只恢复向日葵相关
 - [ ] 验收场景 2：Wi-Fi 断开 → 先网络后验证远程管理
