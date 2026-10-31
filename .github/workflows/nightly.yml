@@ -89,9 +89,10 @@ jobs:
         working-directory: crates/custos-cli
         run: |
           cargo install cargo-generate-rpm
-          cargo generate-rpm --target "${{ matrix.target }}"
+          cargo generate-rpm --target "${{ matrix.target }}" --auto-req disabled
           mkdir -p "${{ github.workspace }}/dist"
-          cp "${{ github.workspace }}/target/${{ matrix.target }}/generate-rpm"/*.rpm \
+          cp target/${{ matrix.target }}/generate-rpm/*.rpm \
+             "${{ github.workspace }}/dist/" || cp target/generate-rpm/*.rpm \
              "${{ github.workspace }}/dist/"
       - name: package binary tarball
         if: runner.os == 'Linux'

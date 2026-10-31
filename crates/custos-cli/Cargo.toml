@@ -1,5 +1,6 @@
 [package]
 name = "custos-cli"
+description = "Cross-platform local self-healing engine (CLI)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,6 +8,17 @@ license.workspace = true
 [[bin]]
 name = "custos"
 path = "src/main.rs"
+
+# RPM packaging (cargo-generate-rpm): the built binary at /usr/bin/custos.
+# cargo-generate-rpm requires this section; the asset source is resolved
+# against the cargo target directory (which honors --target for the matrix).
+[package.metadata.generate-rpm]
+assets = [
+    # The built binary lives at the workspace target directory (two levels
+    # up from this package). cargo-generate-rpm resolves asset sources
+    # relative to the package root.
+    { source = "../../target/release/custos", dest = "/usr/bin/custos", mode = "0755" },
+]
 
 [dependencies]
 custos-config = { workspace = true }
