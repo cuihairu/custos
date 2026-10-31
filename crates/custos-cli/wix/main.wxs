@@ -13,11 +13,11 @@
     </Directory>
     <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
       <Component Id="MainExecutable" Guid="A1B2C3D4-E5F6-4789-AB12-CD34EF56AB01">
-        <File Id="CustosExe" Name="custos.exe" Source="..\..\..\target\release\custos.exe" KeyPath="yes" />
+        <File Id="CustosExe" Name="custos.exe" Source="target\release\custos.exe" KeyPath="yes" />
         <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
       </Component>
       <Component Id="TrayExecutable" Guid="B2C3D4E5-F6A7-4BCD-8912-EF34AB56CD02">
-        <File Id="CustosTrayExe" Name="custos-tray.exe" Source="..\..\..\target\release\custos-tray.exe" />
+        <File Id="CustosTrayExe" Name="custos-tray.exe" Source="target\release\custos-tray.exe" />
       </Component>
     </ComponentGroup>
   </Product>
