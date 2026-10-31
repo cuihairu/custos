@@ -1,6 +1,7 @@
 [package]
 name = "custos-cli"
 description = "Cross-platform local self-healing engine (CLI)"
+authors = ["cuihairu <chuihairu@gmail.com>"]
 version.workspace = true
 edition.workspace = true
 license.workspace = true
