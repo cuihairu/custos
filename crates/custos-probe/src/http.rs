@@ -30,6 +30,136 @@ pub struct HttpProbe {
     pub max_redirects: u32,
     pub verify_tls: bool,
     pub max_response_bytes: usize,
+    /// JSON assertions evaluated on the response body when it parses as JSON
+    /// (probe-survey.md §26.2: JSON path / value comparison).
+    pub json_assertions: Vec<JsonAssertion>,
+}
+
+/// One JSON assertion over a dot-path into the response body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsonAssertion {
+    /// Dot-path like `$.status` or `items.0.name` (leading `$` optional).
+    pub path: String,
+    pub op: JsonOp,
+    /// The comparison value as text; numeric ops coerce both sides.
+    pub value: String,
+}
+
+/// The comparison operators a JSON assertion supports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsonOp {
+    /// The path must exist and equal the value (text or number).
+    Equals,
+    /// The path must exist and not equal the value.
+    NotEquals,
+    /// The path must exist (value ignored).
+    Exists,
+    /// The path must exist and be numerically greater than the value.
+    GreaterThan,
+    /// The path must exist and be numerically less than the value.
+    LessThan,
+}
+
+impl JsonOp {
+    fn from_str(value: &str) -> Result<Self, String> {
+        match value {
+            "==" | "eq" => Ok(JsonOp::Equals),
+            "!=" | "ne" => Ok(JsonOp::NotEquals),
+            "exists" => Ok(JsonOp::Exists),
+            ">" | "gt" => Ok(JsonOp::GreaterThan),
+            "<" | "lt" => Ok(JsonOp::LessThan),
+            other => Err(format!(
+                "invalid `probe.json_assertions[].op` {other:?} (expected ==, !=, exists, >, <)"
+            )),
+        }
+    }
+}
+
+/// Resolves a dot-path (`$.a.b`, `items.0.name`) against a JSON value.
+/// Returns `None` when the path does not exist or a segment is a type
+/// mismatch (an object key on an array, a non-numeric index, etc.).
+pub fn json_path<'a>(root: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let trimmed = path.trim_start_matches('$');
+    let trimmed = trimmed.trim_start_matches('.');
+    let mut current = root;
+    for segment in trimmed.split('.') {
+        if segment.is_empty() {
+            return None;
+        }
+        current = match current {
+            serde_json::Value::Object(map) => map.get(segment)?,
+            serde_json::Value::Array(items) => items.get(segment.parse::<usize>().ok()?)?,
+            _ => return None,
+        };
+    }
+    Some(current)
+}
+
+/// Checks one assertion against a parsed body; returns a problem string
+/// when it fails. Pure and unit-testable.
+pub fn check_json_assertion(root: &serde_json::Value, assertion: &JsonAssertion) -> Option<String> {
+    let found = json_path(root, &assertion.path);
+    match assertion.op {
+        JsonOp::Exists => {
+            if found.is_some() {
+                None
+            } else {
+                Some(format!("json path {} missing", assertion.path))
+            }
+        }
+        JsonOp::Equals | JsonOp::NotEquals | JsonOp::GreaterThan | JsonOp::LessThan => {
+            let Some(actual) = found else {
+                return Some(format!("json path {} missing", assertion.path));
+            };
+            let equal = json_values_equal(actual, &assertion.value);
+            let op_symbol = match assertion.op {
+                JsonOp::Equals => "==",
+                JsonOp::NotEquals => "!=",
+                JsonOp::GreaterThan => ">",
+                JsonOp::LessThan => "<",
+                JsonOp::Exists => unreachable!(),
+            };
+            let ok = match assertion.op {
+                JsonOp::Equals => equal,
+                JsonOp::NotEquals => !equal,
+                JsonOp::GreaterThan => json_greater(actual, &assertion.value),
+                JsonOp::LessThan => !json_greater(actual, &assertion.value) && !equal,
+                JsonOp::Exists => unreachable!(),
+            };
+            if ok {
+                None
+            } else {
+                Some(format!(
+                    "json path {} = {actual} does not satisfy {op_symbol} {}",
+                    assertion.path, assertion.value
+                ))
+            }
+        }
+    }
+}
+
+/// Value equality: a string compares by text; a number compares numerically
+/// (so `"1"` matches `1`); everything else compares its JSON text form.
+fn json_values_equal(actual: &serde_json::Value, expected: &str) -> bool {
+    match actual {
+        serde_json::Value::String(text) => text == expected,
+        serde_json::Value::Number(num) => num.to_string() == expected,
+        serde_json::Value::Bool(flag) => flag.to_string() == expected,
+        other => other == expected,
+    }
+}
+
+/// Numeric "greater": both sides must be numbers (or numeric strings).
+fn json_greater(actual: &serde_json::Value, expected: &str) -> bool {
+    let parse = |value: &serde_json::Value| match value {
+        serde_json::Value::Number(num) => num.as_f64(),
+        serde_json::Value::String(text) => text.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    match (parse(actual), expected.trim().parse::<f64>()) {
+        (Some(left), Ok(right)) => left > right,
+        _ => false,
+    }
 }
 
 /// Builds from `[resources.probe]` (docs/guide/probe-survey.md §26.2).
@@ -42,6 +172,30 @@ pub fn from_config(config: &serde_json::Value) -> Result<HttpProbe, String> {
         ),
         None => None,
     };
+    let mut json_assertions = Vec::new();
+    if let Some(list) = config["json_assertions"].as_array() {
+        for (index, entry) in list.iter().enumerate() {
+            let path = required_str(entry, "path")
+                .ok_or_else(|| format!("`probe.json_assertions[{index}].path` is required"))?;
+            let op_text = entry["op"].as_str().unwrap_or("==");
+            let op = JsonOp::from_str(op_text)
+                .map_err(|err| format!("`probe.json_assertions[{index}]`: {err}"))?;
+            let value = entry["value"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_default();
+            if op != JsonOp::Exists && value.is_empty() {
+                return Err(format!(
+                    "`probe.json_assertions[{index}].value` is required for operator {op_text}"
+                ));
+            }
+            json_assertions.push(JsonAssertion {
+                path: path.to_owned(),
+                op,
+                value,
+            });
+        }
+    }
     Ok(HttpProbe {
         url,
         timeout: Duration::from_millis(u64_or(config, "timeout_ms", 5_000)),
@@ -63,6 +217,7 @@ pub fn from_config(config: &serde_json::Value) -> Result<HttpProbe, String> {
                 DEFAULT_MAX_RESPONSE_BYTES
             }
         },
+        json_assertions,
     })
 }
 
@@ -418,6 +573,21 @@ impl HttpProbe {
                     problems.push(format!("body matches forbidden pattern {pattern}"));
                 }
             }
+            if !self.json_assertions.is_empty() {
+                match serde_json::from_str::<serde_json::Value>(body) {
+                    Ok(root) => {
+                        for assertion in &self.json_assertions {
+                            if let Some(problem) = check_json_assertion(&root, assertion) {
+                                problems.push(problem);
+                            }
+                        }
+                    }
+                    Err(err) => problems.push(format!(
+                        "body is not valid JSON ({} assertion(s) skipped): {err}",
+                        self.json_assertions.len()
+                    )),
+                }
+            }
             problems
         };
         let threshold = self.response_time_threshold_ms;
@@ -566,6 +736,7 @@ fn dechunk(body: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
     use std::net::TcpListener;
     use std::thread;
 
@@ -599,7 +770,199 @@ mod tests {
             max_redirects: MAX_REDIRECTS,
             verify_tls: true,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
+            json_assertions: Vec::new(),
         }
+    }
+
+    // ── JSON assertion tests (survey §26.2 JSON path/value compare) ──────
+
+    #[test]
+    fn json_path_walks_objects_arrays_and_indices() {
+        let body = serde_json::json!({
+            "status": "ok",
+            "count": 42,
+            "items": [{ "name": "first" }, { "name": "second" }],
+            "nested": { "enabled": true },
+            "flag": false
+        });
+        // Object chain.
+        assert_eq!(
+            json_path(&body, "$.status").and_then(Value::as_str),
+            Some("ok")
+        );
+        // Without the leading $.
+        assert_eq!(json_path(&body, "count").and_then(Value::as_i64), Some(42));
+        // Numeric array index.
+        assert_eq!(
+            json_path(&body, "items.0.name").and_then(Value::as_str),
+            Some("first")
+        );
+        // Nested boolean.
+        assert_eq!(
+            json_path(&body, "nested.enabled").and_then(Value::as_bool),
+            Some(true)
+        );
+        // Missing path → None.
+        assert!(json_path(&body, "missing.key").is_none());
+        // Non-numeric index on an array → None.
+        assert!(json_path(&body, "items.name").is_none());
+        // Object key on a scalar → None.
+        assert!(json_path(&body, "status.sub").is_none());
+    }
+
+    #[test]
+    fn json_assertion_operators_cover_the_matrix() {
+        let body = serde_json::json!({
+            "status": "ok",
+            "count": 42,
+            "ratio": 3.5,
+            "text": "hello world",
+            "enabled": true,
+            "nested": { "deep": { "leaf": "found" } },
+            "items": [1, 2, 3],
+            "empty": null
+        });
+        let check = |path: &str, op: JsonOp, value: &str| {
+            check_json_assertion(
+                &body,
+                &JsonAssertion {
+                    path: path.into(),
+                    op,
+                    value: value.into(),
+                },
+            )
+        };
+        // Equals: string, number, number-as-string (text compare matches),
+        // boolean, nested path.
+        assert_eq!(check("$.status", JsonOp::Equals, "ok"), None);
+        assert_eq!(check("$.count", JsonOp::Equals, "42"), None);
+        assert!(check("$.count", JsonOp::Equals, "43").is_some());
+        assert_eq!(check("$.nested.deep.leaf", JsonOp::Equals, "found"), None);
+        // NotEquals.
+        assert_eq!(check("$.status", JsonOp::NotEquals, "error"), None);
+        assert!(check("$.status", JsonOp::NotEquals, "ok").is_some());
+        // Exists.
+        assert_eq!(check("$.items", JsonOp::Exists, ""), None);
+        assert!(check("$.missing", JsonOp::Exists, "").is_some());
+        // GreaterThan / LessThan: numeric on number and numeric-string.
+        assert_eq!(check("$.count", JsonOp::GreaterThan, "10"), None);
+        assert!(check("$.count", JsonOp::GreaterThan, "100").is_some());
+        assert_eq!(check("$.ratio", JsonOp::LessThan, "4"), None);
+        assert!(check("$.ratio", JsonOp::LessThan, "3").is_some());
+        // Missing path fails every value operator.
+        assert!(check("$.missing", JsonOp::Equals, "x").is_some());
+        // null is present: Exists passes; Equals to "null" also matches by
+        // JSON text form.
+        assert_eq!(check("$.empty", JsonOp::Exists, ""), None);
+        // Boolean equality.
+        assert_eq!(check("$.enabled", JsonOp::Equals, "true"), None);
+        assert!(check("$.enabled", JsonOp::Equals, "false").is_some());
+    }
+
+    #[test]
+    fn from_config_parses_json_assertions_and_rejects_bad_ops() {
+        let config = serde_json::json!({
+            "url": "http://x/",
+            "json_assertions": [
+                { "path": "$.status", "op": "==", "value": "ok" },
+                { "path": "$.items", "op": "exists" }
+            ]
+        });
+        let probe = from_config(&config).unwrap();
+        assert_eq!(probe.json_assertions.len(), 2);
+        assert_eq!(probe.json_assertions[0].path, "$.status");
+        assert_eq!(probe.json_assertions[0].op, JsonOp::Equals);
+        assert_eq!(probe.json_assertions[1].op, JsonOp::Exists);
+        // Bad operator.
+        let bad = serde_json::json!({
+            "url": "http://x/",
+            "json_assertions": [{ "path": "$.a", "op": "~~", "value": "1" }]
+        });
+        let err = from_config(&bad).unwrap_err();
+        assert!(err.contains("invalid"), "{err}");
+        // Value required for a value operator.
+        let missing = serde_json::json!({
+            "url": "http://x/",
+            "json_assertions": [{ "path": "$.a", "op": "==" }]
+        });
+        assert!(from_config(&missing).unwrap_err().contains("required"));
+    }
+
+    #[test]
+    fn json_assertion_evaluate_fails_on_bad_json_body() {
+        let mut probe = probe_with("http://x/");
+        probe.json_assertions = vec![JsonAssertion {
+            path: "$.status".into(),
+            op: JsonOp::Equals,
+            value: "ok".into(),
+        }];
+        let report = probe.evaluate(
+            &|succeeded, status, observation: String| ProbeReport {
+                resource_id: resource().id,
+                probe_name: "http".into(),
+                succeeded,
+                status,
+                observation,
+            },
+            "http://x/",
+            200,
+            "<html>not json</html>",
+            Duration::from_millis(10),
+        );
+        assert!(!report.succeeded);
+        assert!(
+            report.observation.contains("not valid JSON"),
+            "{}",
+            report.observation
+        );
+    }
+
+    #[test]
+    fn live_json_body_passes_and_fails_assertions() {
+        let body = r#"{"status":"ok","version":"1.2","items":[{"name":"a"},{"name":"b"}]}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+             Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let make_url = || serve_once(response.clone()).0;
+
+        // Passing assertions: string equality + nested path.
+        let mut probe = probe_with(&make_url());
+        probe.json_assertions = vec![
+            JsonAssertion {
+                path: "$.status".into(),
+                op: JsonOp::Equals,
+                value: "ok".into(),
+            },
+            JsonAssertion {
+                path: "items.1.name".into(),
+                op: JsonOp::Equals,
+                value: "b".into(),
+            },
+        ];
+        let report = probe.probe(&Resource::new("r", "http-endpoint"));
+        assert_eq!(
+            report.status,
+            HealthStatus::Healthy,
+            "{}",
+            report.observation
+        );
+
+        // Failing assertion: version != expected → Unhealthy with the path.
+        let mut probe = probe_with(&make_url());
+        probe.json_assertions = vec![JsonAssertion {
+            path: "$.version".into(),
+            op: JsonOp::Equals,
+            value: "9.9".into(),
+        }];
+        let report = probe.probe(&Resource::new("r", "http-endpoint"));
+        assert_eq!(report.status, HealthStatus::Unhealthy);
+        assert!(
+            report.observation.contains("$.version"),
+            "{}",
+            report.observation
+        );
     }
 
     #[test]
