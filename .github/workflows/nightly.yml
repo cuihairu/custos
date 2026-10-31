@@ -68,10 +68,8 @@ jobs:
             target: x86_64-unknown-linux-musl
             artifact: custos-linux-musl-x86_64
             static: true
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
-            artifact: custos-linux-musl-aarch64
-            static: true
+            install_musl_tools: true
+
           - os: windows-2022
             target: x86_64-pc-windows-msvc
             artifact: custos-windows-x86_64
@@ -79,11 +77,16 @@ jobs:
             target: aarch64-apple-darwin
             artifact: custos-macos-aarch64
     runs-on: ${{ matrix.os }}
+    env:
+      CC_x86_64_unknown_linux_musl: musl-gcc
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: install musl toolchain
+        if: matrix.static
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - uses: Swatinem/rust-cache@v2
       - name: build release binary
         run: >
@@ -144,8 +147,10 @@ jobs:
         shell: pwsh
         run: |
           cargo install cargo-wix
-          $ver = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches.Groups[1].Value
-          (Get-Content crates/custos-cli/wix/main.wxs) -replace 'Version="0.1.0"', "Version=\"$ver\"" | Set-Content crates/custos-cli/wix/main.wxs
+          $ver = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          $wxs = Get-Content crates/custos-cli/wix/main.wxs -Raw
+          $wxs = $wxs -replace 'Version="0.1.0"', ('Version="' + $ver + '"')
+          Set-Content crates/custos-cli/wix/main.wxs $wxs
           cargo wix --package custos-cli --nocapture
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item -Path "target/wix/*.msi" -Destination dist/
