@@ -237,9 +237,10 @@ mod tests {
     #[test]
     fn allowlist_bypasses_blocks() {
         let mut p = policy();
-        p.allowlist = vec!["internal.example.com".to_owned()];
-        // A loopback host named on the allowlist is accepted.
-        let addrs = validate_target("http://internal.example.com/", &p).unwrap();
+        p.allowlist = vec!["localhost".to_owned()];
+        // `localhost` resolves on every CI runner; the allowlist entry bypasses
+        // the loopback block and the DNS must still answer.
+        let addrs = validate_target("http://localhost/", &p).unwrap();
         assert!(!addrs.is_empty());
         // Non-allowlisted loopback still blocked.
         assert_eq!(

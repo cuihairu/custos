@@ -403,9 +403,9 @@ mod tests {
         // loopback, and the channel then fails on connect (refused) rather
         // than on the SSRF policy.
         let mut ssrf = SsrfPolicy::default_blocking();
-        ssrf.allowlist = vec!["internal.example.com".into()];
+        ssrf.allowlist = vec!["localhost".into()];
         let cfg = WebhookConfig {
-            url: "http://internal.example.com:9/hook".into(),
+            url: "http://localhost:9/hook".into(),
             timeout_ms: 500,
             retries: 0,
             backoff_ms: 1,
