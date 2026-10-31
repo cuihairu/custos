@@ -115,7 +115,7 @@ jobs:
           cargo wix init --package custos-cli
           cargo wix --package custos-cli --nocapture
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "target/wix"/*.msi dist/
+          Copy-Item -Path "target/wix/*.msi" -Destination dist/
 
       # macOS: dmg (ad-hoc signed .app) + binary tarball.
       - name: package dmg
