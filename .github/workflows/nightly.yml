@@ -74,7 +74,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: build release binary
-        run: cargo build --release --bin custos
+        run: cargo build --release --bin custos --bin custos-tray
 
       # Linux: deb + rpm + binary tarball.
       - name: package deb
@@ -106,13 +106,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path target/release/custos.exe -DestinationPath "dist/${{ matrix.artifact }}.zip"
+          Compress-Archive -Path target/release/custos.exe,target/release/custos-tray.exe -DestinationPath "dist/${{ matrix.artifact }}.zip"
       - name: package msi
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           cargo install cargo-wix
-          cargo wix init --package custos-cli
           cargo wix --package custos-cli --nocapture
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item -Path "target/wix/*.msi" -Destination dist/
@@ -124,6 +123,7 @@ jobs:
           VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           mkdir -p "staging/Custos.app/Contents/MacOS" dist
           cp target/release/custos "staging/Custos.app/Contents/MacOS/custos"
+          cp target/release/custos-tray "staging/Custos.app/Contents/MacOS/custos-tray"
           cat > "staging/Custos.app/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

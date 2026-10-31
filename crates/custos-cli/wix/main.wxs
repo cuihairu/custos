@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Custos" Language="1033" Version="0.1.0" Manufacturer="cuihairu" UpgradeCode="F8D4A5C3-2B9E-4D8A-BE7C-6E1F8D3A7B42">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+    <MediaTemplate EmbedCab="yes" />
+    <Feature Id="ProductFeature" Title="Custos" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Custos" />
+      </Directory>
+    </Directory>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="MainExecutable" Guid="A1B2C3D4-E5F6-4789-AB12-CD34EF56AB01">
+        <File Id="CustosExe" Name="custos.exe" Source="..\..\target\release\custos.exe" KeyPath="yes" />
+        <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
+      </Component>
+      <Component Id="TrayExecutable" Guid="B2C3D4E5-F6A7-4BCD-8912-EF34AB56CD02">
+        <File Id="CustosTrayExe" Name="custos-tray.exe" Source="..\..\target\release\custos-tray.exe" />
+      </Component>
+    </ComponentGroup>
+  </Product>
+</Wix>
