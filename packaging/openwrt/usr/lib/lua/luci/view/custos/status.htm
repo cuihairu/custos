@@ -12,8 +12,9 @@
 </div>
 <script type="text/javascript">
 	fetch('/cgi-bin/luci/admin/services/custos/api/status')
-		.then(r => r.text()).then(t => {
-			document.getElementById('custos-status').textContent = t;
+		.then(r => r.json()).then(j => {
+			document.getElementById('custos-status').textContent =
+				(j.status === 'running') ? 'running' : 'stopped';
 		}).catch(() => {
 			document.getElementById('custos-status').textContent = '(unavailable)';
 		});

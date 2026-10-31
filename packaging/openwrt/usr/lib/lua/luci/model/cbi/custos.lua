@@ -4,6 +4,12 @@
 m = Map("custos", translate("Custos 自愈引擎"),
 	translate("跨平台本地故障检测与自动恢复引擎。探测资源并按恢复策略自动处理故障。"))
 
+-- Restart the procd service after a successful apply so enabled/db/interval
+-- changes take effect immediately (the init script re-reads UCI on start).
+function m.on_commit()
+	luci.sys.call("/etc/init.d/custos restart >/dev/null 2>&1")
+end
+
 s = m:section(NamedSection, "main", "custos", translate("全局设置"))
 s.addremove = false
 
