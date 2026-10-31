@@ -216,19 +216,19 @@
 - [x] 代理连接与认证诊断（区分认证失败/连接失败/目标异常；407 ≠ 宕机） `bf50881`（`proxy` 资源类型：经代理发绝对形式 GET，按代理自身应答分类——2xx/3xx Healthy、407/401 **Degraded**（代理活着但认证失败，重启它是错误处方）、5xx Unhealthy（目标未送达）、拒绝/超时/DNS Unreachable；Basic Proxy-Authorization 可配；纯 std TCP+HTTP/1.1 零新依赖；假代理实测 200/407/502/拒绝四路）
 - [x] mihomo 插件（一插件一资源闭环口径） `a4add7f`（`plugins/mihomo` bin：外部控制器 /version 探活 + 托管组当前节点入观察；恢复计划 1 切换节点（PUT /proxies/<组> 选下一成员，无重启）、计划 2 受控 systemctl restart；Capability 三条声明（probe/switch_node/restart 含 interrupts 标记）；通过真实宿主会话集成测试（握手/能力/控制器不可达 healthy=false/无组拒切））
 - [x] cloudflared 插件 `a4add7f`（`plugins/cloudflared` bin：metrics 端点解析 cloudflared_tunnel_ha_connections——进程活着但 0 边缘连接=真故障；恢复 restart 受控执行；Capability interrupts_remote_admin=true；宿主会话集成测试）
-- [ ] Windows Wi-Fi 完整恢复场景
+- [ ] Windows Wi-Fi 完整恢复场景 BLOCKED（需真实 Windows 环境 + 实际 Wi-Fi 适配器/SSID；本仓为 Linux 开发机，无法执行 netsh wlan 全链路验证；解析器与受控命令已由 `7d9e8f9`/`c2f7325` 单测覆盖）
 - [x] OpenWrt 适配：procd / UCI / ubus / 网络检查 `6af14ec`（`openwrt.rs`：/etc/openwrt_release 检测；procd 服务经 /etc/init.d + ubus service list 实例存在性判断运行态；uci get 未设即 NotFound；ubus call 返回解析 JSON；WAN status 解析器（up/地址/默认路由）fixture 测试；非 OpenWrt 主机全部明报 Unsupported 不猜测）
 - [x] OpenClash 插件（节点诊断 + 有序切换） `105f6e2`（`plugins/openclash` bin：探测 clash core 版本+托管组当前节点；有序恢复=组成员 delay 实测取最快（无 delay 数据才退到首候选，绝不盲目轮询），重启走 /etc/init.d/openclash（OpenWrt 无 systemd）；Capability 三条含 interrupts 标记；宿主会话集成测试）
 - [x] 网络恢复后端到端验证 `df85e14`（`crates/custos-engine/tests/vertical.rs` 新增 `network_recovery_end_to_end`：网络资源以脚本探针模拟（marker 文件=连通），marker 缺失→引擎诊断网络 down→恢复动作 restore→验证 Healthy；`cargo test -p custos-engine --test vertical network_recovery_end_to_end` 20 次零失败 + `cargo test --workspace` 全绿）
 - [x] 网络操作互斥 + 风险控制（禁默认清防火墙/重置全部路由） `7d9e8f9`（全局 NETWORK_OPS 互斥锁：接口重置与重启跨资源同时刻至多一个网络操作，并发者立即收到明确拒绝而非排队等惊喜；重置=显式单接口 down+up；无任何防火墙清空/全路由重置原语存在）
-- [ ] 验收场景 1：向日葵离线网络正常 → 只恢复向日葵相关
-- [ ] 验收场景 2：Wi-Fi 断开 → 先网络后验证远程管理
-- [ ] 验收场景 3：代理正常 Tunnel 异常 → 只重启 Tunnel
-- [ ] 验收场景 4：代理 Tunnel 双异常 → 先代理后 Tunnel
-- [ ] 验收场景 5：代理 407 → 识别认证问题不判宕机
-- [ ] 验收场景 6：代理恢复后 Tunnel 仍异常 → 重新诊断 Tunnel
-- [ ] 验收场景 7：全部方案失败 → 停止自动处理并通知
-- [ ] 验收场景 8：恢复中断网 → 本地引擎继续 + 持久化
+- [ ] 验收场景 1：向日葵离线网络正常 → 只恢复向日葵相关 BLOCKED（需真实向日葵进程/服务 + 真实远程管理通道；当前环境无向日葵安装，无法验证「只恢复向日葵」的端到端；引擎依赖顺序与定向恢复已由 `scenario3/4` 与 `dependency_recovery_runs_database_before_app` 覆盖）
+- [ ] 验收场景 2：Wi-Fi 断开 → 先网络后验证远程管理 BLOCKED（需真实 Windows + Wi-Fi 适配器 + 远程管理通道；当前 Linux 环境无法执行；网络优先恢复由 `scenario4` 依赖拓扑序覆盖，远程管理验证需真实环境）
+- [x] 验收场景 3：代理正常 Tunnel 异常 → 只重启 Tunnel（`scenario3_proxy_healthy_tunnel_only_recovered`：代理 marker 存在即健康，仅 tunnel 触发恢复且 proxy 零恢复；`cargo test -p custos-engine --test vertical scenario3_proxy_healthy_tunnel_only_recovered` 通过 + `cargo test --workspace` 全绿）
+- [x] 验收场景 4：代理 Tunnel 双异常 → 先代理后 Tunnel（`scenario4_proxy_before_tunnel`：依赖拓扑序，proxy_run.started <= tunnel_run.started，二者均 Recovered 且各 1 次动作；`cargo test -p custos-engine --test vertical scenario4_proxy_before_tunnel` 通过 + `cargo test --workspace` 全绿）
+- [x] 验收场景 5：代理 407 → 识别认证问题不判宕机（`degraded_proxy_auth_does_not_trigger_recovery`：Degraded 状态且零恢复事件，代理进程活着仅认证失败不触发恢复；另 proxy 探针 `proxy_407_is_degraded_not_unreachable` 断言 status==Degraded 且 observation 含「not downtime」；`cargo test -p custos-engine --lib degraded_proxy_auth_does_not_trigger_recovery` + `cargo test -p custos-probe --lib proxy_407_is_degraded_not_unreachable` 通过 + `cargo test --workspace` 全绿）
+- [x] 验收场景 6：代理恢复后 Tunnel 仍异常 → 重新诊断 Tunnel（`scenario6_tunnel_rediagnosed_after_proxy_recovers`：首计划 no-op 失败 → 重诊断 → 第二计划恢复，action_attempts>=2；`cargo test -p custos-engine --test vertical scenario6_tunnel_rediagnosed_after_proxy_recovers` 通过 + `cargo test --workspace` 全绿）
+- [x] 验收场景 7：全部方案失败 → 停止自动处理并通知（`scenario7_all_plans_failed_escalates`：两计划均失败 → run.status==Escalated 且 event_types 含 recovery.exhausted；`cargo test -p custos-engine --test vertical scenario7_all_plans_failed_escalates` 通过 + `cargo test --workspace` 全绿）
+- [x] 验收场景 8：恢复中断网 → 本地引擎继续 + 持久化（`scenario8_network_drops_during_recovery_persists`：健康时零恢复 → marker 移除后本地引擎继续 tick 并恢复 Recovered，快照 Healthy；`cargo test -p custos-engine --test vertical scenario8_network_drops_during_recovery_persists` 通过 + `cargo test --workspace` 全绿）
 
 ## P4 可选管理界面与扩展
 

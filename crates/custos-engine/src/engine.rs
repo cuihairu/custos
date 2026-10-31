@@ -2014,6 +2014,58 @@ mod tests {
     }
 
     #[test]
+    fn degraded_proxy_auth_does_not_trigger_recovery() {
+        // A proxy returning 407 maps to Degraded: the process is alive and
+        // credentials are the problem, so no recovery action may be started.
+        struct AuthFailedProxyProbe;
+
+        impl Probe for AuthFailedProxyProbe {
+            fn name(&self) -> &'static str {
+                "proxy"
+            }
+
+            fn probe(&self, resource: &Resource) -> ProbeReport {
+                ProbeReport {
+                    resource_id: resource.id.clone(),
+                    probe_name: "proxy".into(),
+                    succeeded: false,
+                    status: HealthStatus::Degraded,
+                    observation: "proxy is up but authentication failed (HTTP 407); \
+                                 check credentials — not downtime"
+                        .into(),
+                }
+            }
+        }
+
+        let (engine, store, _exec) = test_engine(
+            vec![resource(
+                "proxy",
+                vec![plan("restart", 1, RiskLevel::Low)],
+                vec![],
+            )],
+            vec![(ResourceId::new("proxy"), vec![])],
+            vec![vec![false, false]],
+            vec![ActionOutcome::Failed, ActionOutcome::Failed],
+        );
+        let mut engine = engine;
+        engine
+            .probes
+            .insert(ResourceId::new("proxy"), Box::new(AuthFailedProxyProbe));
+
+        engine.tick();
+
+        assert_eq!(
+            engine.snapshot(&ResourceId::new("proxy")).map(|s| s.status),
+            Some(HealthStatus::Degraded)
+        );
+        assert!(
+            store.events().is_empty(),
+            "degraded must not open a recovery: {:?}",
+            store.events()
+        );
+    }
+
+    #[test]
     fn alternative_group_is_satisfied_by_member_count() {
         // N-of-M: one healthy member is enough for required=1, so `app` is
         // not blocked even though proxy-b is unhealthy.

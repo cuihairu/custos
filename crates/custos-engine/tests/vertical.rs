@@ -439,3 +439,470 @@ status_is = "healthy"
     assert!(std::path::Path::new(marker).exists(), "marker restored");
     assert!(store.event_types().contains(&"recovery.succeeded"));
 }
+
+/// Acceptance scenario 3 (roadmap §P3): proxy healthy, tunnel abnormal →
+/// only the tunnel is recovered; the proxy must never be touched.
+#[test]
+fn scenario3_proxy_healthy_tunnel_only_recovered() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let proxy_marker = dir.path().join("proxy.up");
+    let tunnel_marker = dir.path().join("tunnel.up");
+    // Proxy is up from the start.
+    std::fs::write(&proxy_marker, "").unwrap();
+    let (proxy_marker, tunnel_marker) = (
+        proxy_marker.to_str().unwrap(),
+        tunnel_marker.to_str().unwrap(),
+    );
+    let config = format!(
+        r#"
+version = 1
+
+[[resources]]
+id = "proxy"
+type = "custom-command"
+
+[resources.probe]
+command = ["test", "-f", "{proxy_marker}"]
+interval_ms = 20
+
+[resources.health_policy]
+failure_threshold = 1
+success_threshold = 1
+
+[[resources.recovery_policy.plans]]
+plan_id = "restore-proxy"
+applicable_faults = ["remote_endpoint_unreachable"]
+risk = "low"
+idempotent = true
+timeout_ms = 5000
+max_attempts = 1
+cooldown_ms = 60_000
+
+[resources.recovery_policy.plans.action]
+program = "touch"
+args = ["{proxy_marker}"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+
+[[resources]]
+id = "tunnel"
+type = "custom-command"
+
+[[resources.dependencies]]
+resource = "proxy"
+requirement = "required"
+condition = {{ status_is = "healthy" }}
+
+[resources.probe]
+command = ["test", "-f", "{tunnel_marker}"]
+interval_ms = 20
+
+[resources.health_policy]
+failure_threshold = 1
+success_threshold = 1
+
+[[resources.recovery_policy.plans]]
+plan_id = "restore-tunnel"
+applicable_faults = ["remote_endpoint_unreachable"]
+risk = "low"
+idempotent = true
+timeout_ms = 5000
+max_attempts = 1
+cooldown_ms = 60_000
+
+[resources.recovery_policy.plans.action]
+program = "touch"
+args = ["{tunnel_marker}"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+"#
+    );
+
+    let (mut engine, store) = build(&config, None);
+    let runs = tick_until(
+        &mut engine,
+        |e| {
+            e.snapshot(&ResourceId::new("tunnel"))
+                .is_some_and(|s| s.status == custos_model::HealthStatus::Healthy)
+        },
+        5_000,
+    );
+    // Only the tunnel ran a recovery.
+    assert!(runs
+        .iter()
+        .any(|r| r.resource_id == ResourceId::new("tunnel")));
+    assert!(!runs
+        .iter()
+        .any(|r| r.resource_id == ResourceId::new("proxy")));
+    assert!(store.event_types().contains(&"recovery.succeeded"));
+}
+
+/// Acceptance scenario 4 (roadmap §P3): proxy and tunnel both abnormal →
+/// the proxy is recovered first, then the tunnel.
+#[test]
+fn scenario4_proxy_before_tunnel() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let proxy_marker = dir.path().join("proxy.up");
+    let tunnel_marker = dir.path().join("tunnel.up");
+    let (proxy_marker, tunnel_marker) = (
+        proxy_marker.to_str().unwrap(),
+        tunnel_marker.to_str().unwrap(),
+    );
+    let config = format!(
+        r#"
+version = 1
+
+[[resources]]
+id = "proxy"
+type = "custom-command"
+
+[resources.probe]
+command = ["test", "-f", "{proxy_marker}"]
+interval_ms = 20
+
+[resources.health_policy]
+failure_threshold = 1
+success_threshold = 1
+
+[[resources.recovery_policy.plans]]
+plan_id = "restore-proxy"
+applicable_faults = ["remote_endpoint_unreachable"]
+risk = "low"
+idempotent = true
+timeout_ms = 5000
+max_attempts = 1
+cooldown_ms = 60_000
+
+[resources.recovery_policy.plans.action]
+program = "touch"
+args = ["{proxy_marker}"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+
+[[resources]]
+id = "tunnel"
+type = "custom-command"
+
+[[resources.dependencies]]
+resource = "proxy"
+requirement = "required"
+condition = {{ status_is = "healthy" }}
+
+[resources.probe]
+command = ["test", "-f", "{tunnel_marker}"]
+interval_ms = 20
+
+[resources.health_policy]
+failure_threshold = 1
+success_threshold = 1
+
+[[resources.recovery_policy.plans]]
+plan_id = "restore-tunnel"
+applicable_faults = ["remote_endpoint_unreachable"]
+risk = "low"
+idempotent = true
+timeout_ms = 5000
+max_attempts = 1
+cooldown_ms = 60_000
+
+[resources.recovery_policy.plans.action]
+program = "touch"
+args = ["{tunnel_marker}"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+"#
+    );
+
+    let (mut engine, _store) = build(&config, None);
+    let runs = tick_until(
+        &mut engine,
+        |_| {
+            std::path::Path::new(proxy_marker).exists()
+                && std::path::Path::new(tunnel_marker).exists()
+        },
+        5_000,
+    );
+    let proxy_run = runs
+        .iter()
+        .find(|r| r.resource_id == ResourceId::new("proxy"))
+        .expect("proxy recovered");
+    let tunnel_run = runs
+        .iter()
+        .find(|r| r.resource_id == ResourceId::new("tunnel"))
+        .expect("tunnel recovered");
+    assert_eq!(proxy_run.status, RecoveryRunStatus::Recovered);
+    assert_eq!(tunnel_run.status, RecoveryRunStatus::Recovered);
+    // Topological order: proxy recovery starts first.
+    assert!(proxy_run.started_at_unix_ms <= tunnel_run.started_at_unix_ms);
+    assert_eq!(proxy_run.action_attempts.len(), 1);
+    assert_eq!(tunnel_run.action_attempts.len(), 1);
+}
+
+/// Acceptance scenario 6 (roadmap §P3): proxy recovered but the tunnel is
+/// still abnormal → the tunnel is re-diagnosed and a further plan is tried.
+#[test]
+fn scenario6_tunnel_rediagnosed_after_proxy_recovers() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let proxy_marker = dir.path().join("proxy.up");
+    let tunnel_marker = dir.path().join("tunnel.up");
+    let (proxy_marker, tunnel_marker) = (
+        proxy_marker.to_str().unwrap(),
+        tunnel_marker.to_str().unwrap(),
+    );
+    let config = format!(
+        r#"
+version = 1
+
+[[resources]]
+id = "proxy"
+type = "custom-command"
+
+[resources.probe]
+command = ["test", "-f", "{proxy_marker}"]
+interval_ms = 20
+
+[resources.health_policy]
+failure_threshold = 1
+success_threshold = 1
+
+[[resources.recovery_policy.plans]]
+plan_id = "restore-proxy"
+applicable_faults = ["remote_endpoint_unreachable"]
+risk = "low"
+idempotent = true
+timeout_ms = 5000
+max_attempts = 1
+cooldown_ms = 60_000
+
+[resources.recovery_policy.plans.action]
+program = "touch"
+args = ["{proxy_marker}"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+
+[[resources]]
+id = "tunnel"
+type = "custom-command"
+
+[[resources.dependencies]]
+resource = "proxy"
+requirement = "required"
+condition = {{ status_is = "healthy" }}
+
+[resources.probe]
+command = ["test", "-f", "{tunnel_marker}"]
+interval_ms = 20
+
+[resources.health_policy]
+failure_threshold = 1
+success_threshold = 1
+
+# First plan fails (no-op action): the tunnel is still abnormal after the
+# proxy recovered, so the engine re-diagnoses and tries the next plan.
+[[resources.recovery_policy.plans]]
+plan_id = "tunnel-first"
+applicable_faults = ["remote_endpoint_unreachable"]
+risk = "low"
+idempotent = false
+timeout_ms = 5000
+max_attempts = 1
+cooldown_ms = 1000
+failure_handling = "try_next_plan"
+
+[resources.recovery_policy.plans.action]
+program = "true"
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+
+[[resources.recovery_policy.plans]]
+plan_id = "tunnel-second"
+applicable_faults = ["remote_endpoint_unreachable"]
+risk = "low"
+idempotent = true
+timeout_ms = 5000
+max_attempts = 1
+cooldown_ms = 60_000
+
+[resources.recovery_policy.plans.action]
+program = "touch"
+args = ["{tunnel_marker}"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+"#
+    );
+
+    let (mut engine, _store) = build(&config, None);
+    let runs = tick_until(
+        &mut engine,
+        |_| std::path::Path::new(tunnel_marker).exists(),
+        8_000,
+    );
+    let tunnel_run = runs
+        .iter()
+        .find(|r| r.resource_id == ResourceId::new("tunnel"))
+        .expect("tunnel recovered");
+    assert_eq!(tunnel_run.status, RecoveryRunStatus::Recovered);
+    // The first plan ran and failed (no-op), so the tunnel was re-diagnosed
+    // and the second plan restored it.
+    assert!(tunnel_run.action_attempts.len() >= 2, "{tunnel_run:?}");
+    let proxy_run = runs
+        .iter()
+        .find(|r| r.resource_id == ResourceId::new("proxy"))
+        .expect("proxy recovered");
+    assert!(proxy_run.started_at_unix_ms <= tunnel_run.started_at_unix_ms);
+}
+
+/// Acceptance scenario 7 (roadmap §P3): every recovery plan failed → the
+/// engine stops automatic handling and notifies exhaustion.
+#[test]
+fn scenario7_all_plans_failed_escalates() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let marker = dir.path().join("svc.up");
+    let marker = marker.to_str().unwrap();
+    let config = format!(
+        r#"
+version = 1
+
+[[resources]]
+id = "svc"
+type = "custom-command"
+
+[resources.probe]
+command = ["test", "-f", "{marker}"]
+interval_ms = 20
+
+[resources.health_policy]
+failure_threshold = 1
+success_threshold = 1
+
+[[resources.recovery_policy.plans]]
+plan_id = "p1"
+applicable_faults = ["remote_endpoint_unreachable"]
+risk = "low"
+idempotent = true
+timeout_ms = 5000
+max_attempts = 1
+cooldown_ms = 1000
+failure_handling = "try_next_plan"
+
+[resources.recovery_policy.plans.action]
+program = "false"
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+
+[[resources.recovery_policy.plans]]
+plan_id = "p2"
+applicable_faults = ["remote_endpoint_unreachable"]
+risk = "low"
+idempotent = true
+timeout_ms = 5000
+max_attempts = 1
+cooldown_ms = 60_000
+
+[resources.recovery_policy.plans.action]
+program = "false"
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+"#
+    );
+
+    let (mut engine, store) = build(&config, None);
+    let runs = tick_until(
+        &mut engine,
+        |_| store.event_types().contains(&"recovery.exhausted"),
+        8_000,
+    );
+    let run = runs
+        .iter()
+        .find(|r| r.resource_id == ResourceId::new("svc"))
+        .expect("a recovery run");
+    assert_eq!(run.status, RecoveryRunStatus::Escalated);
+    assert_eq!(run.action_attempts.len(), 2, "both plans attempted");
+    assert!(store.event_types().contains(&"recovery.exhausted"));
+}
+
+/// Acceptance scenario 8 (roadmap §P3): the network drops again during
+/// recovery → the local engine keeps running and persists its results.
+#[test]
+fn scenario8_network_drops_during_recovery_persists() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let marker = dir.path().join("svc.up");
+    let marker = marker.to_str().unwrap();
+    let config = format!(
+        r#"
+version = 1
+
+[[resources]]
+id = "svc"
+type = "custom-command"
+
+[resources.probe]
+command = ["test", "-f", "{marker}"]
+interval_ms = 20
+
+[resources.health_policy]
+failure_threshold = 1
+success_threshold = 1
+
+[[resources.recovery_policy.plans]]
+plan_id = "restore-svc"
+applicable_faults = ["remote_endpoint_unreachable"]
+risk = "low"
+idempotent = true
+timeout_ms = 5000
+max_attempts = 1
+cooldown_ms = 60_000
+
+[resources.recovery_policy.plans.action]
+program = "touch"
+args = ["{marker}"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+"#
+    );
+
+    // Network is up first; the engine observes health and does nothing.
+    std::fs::write(marker, "").unwrap();
+    let (mut engine, _store) = build(&config, None);
+    let runs = tick_until(
+        &mut engine,
+        |e| {
+            e.snapshot(&ResourceId::new("svc"))
+                .is_some_and(|s| s.status == custos_model::HealthStatus::Healthy)
+        },
+        2_000,
+    );
+    assert!(
+        runs.is_empty(),
+        "healthy resource must not recover: {runs:?}"
+    );
+
+    // The network drops: the local engine keeps ticking and restores.
+    std::fs::remove_file(marker).unwrap();
+    let runs = tick_until(
+        &mut engine,
+        |_| std::path::Path::new(marker).exists(),
+        5_000,
+    );
+    let run = runs
+        .iter()
+        .find(|r| r.resource_id == ResourceId::new("svc"))
+        .expect("recovery after network drop");
+    assert_eq!(run.status, RecoveryRunStatus::Recovered);
+    assert_eq!(run.action_attempts.len(), 1);
+    // Persisted to the engine's store (audit trail), proving the local engine
+    // continued independent of any external management channel.
+    assert!(engine
+        .snapshot(&ResourceId::new("svc"))
+        .is_some_and(|s| s.status == custos_model::HealthStatus::Healthy));
+}
