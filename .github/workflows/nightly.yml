@@ -63,6 +63,15 @@ jobs:
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             artifact: custos-linux-aarch64
+          # musl: fully static, runs on OpenWrt/iStoreOS, Alpine, and any libc
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            artifact: custos-linux-musl-x86_64
+            static: true
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            artifact: custos-linux-musl-aarch64
+            static: true
           - os: windows-2022
             target: x86_64-pc-windows-msvc
             artifact: custos-windows-x86_64
@@ -78,14 +87,14 @@ jobs:
 
       # Linux: deb + rpm + binary tarball.
       - name: package deb
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !matrix.static
         run: |
           cargo install cargo-deb
           cargo deb --no-strip -p custos-cli --target "${{ matrix.target }}"
           mkdir -p dist
           cp "target/${{ matrix.target }}/debian"/*.deb dist/
       - name: package rpm
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !matrix.static
         working-directory: crates/custos-cli
         run: |
           cargo install cargo-generate-rpm
