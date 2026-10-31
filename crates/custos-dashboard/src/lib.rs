@@ -301,6 +301,11 @@ fn html_shell() -> String {
 mod tests {
     use super::*;
 
+    fn load_config_for_test() -> ValidatedConfig {
+        use custos_config::load;
+        load("version = 1\n").expect("test config")
+    }
+
     #[test]
     fn disabled_config_has_no_listener_path() {
         let config = DashboardConfig::default();
@@ -309,7 +314,7 @@ mod tests {
 
     #[test]
     fn route_unknown_path_is_404() {
-        let config = crate::load_config_for_test();
+        let config = load_config_for_test();
         let (status, _, _) = route("/nope", &dummy_store(), &config);
         assert!(status.contains("404"), "{status}");
     }
@@ -319,10 +324,4 @@ mod tests {
         // temp file. This is only for routing tests that don't hit SQL.
         Store::open(":memory:").unwrap()
     }
-}
-
-#[cfg(test)]
-fn load_config_for_test() -> ValidatedConfig {
-    use custos_config::load;
-    load("version = 1\n").expect("test config")
 }

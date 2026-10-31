@@ -62,9 +62,12 @@ fn disabled_config_binds_nothing() {
 #[test]
 fn enabled_server_serves_read_only_json() {
     let (_dir, store) = temp_db();
-    let mut config = DashboardConfig::default();
-    config.enabled = true;
-    config.listen.addr = "127.0.0.1:0".parse().unwrap();
+    let config = DashboardConfig {
+        enabled: true,
+        listen: custos_config::ListenConfig {
+            addr: "127.0.0.1:0".parse().unwrap(),
+        },
+    };
     let validated = load_config("version = 1\n").unwrap();
     let server = DashboardServer::bind(&config, store, validated).unwrap();
     let addr = server.local_addr().unwrap();
