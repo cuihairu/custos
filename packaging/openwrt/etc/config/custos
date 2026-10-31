@@ -1,0 +1,8 @@
+config custos 'main'
+	option enabled '0'
+	option db '/etc/custos/custos.db'
+	option interval '5000'
+
+# Resource probes are defined in the TOML config file:
+#   /etc/custos/custos.toml
+# See docs/guide/resources.md for the full schema.

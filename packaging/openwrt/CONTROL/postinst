@@ -1,0 +1,7 @@
+#!/bin/sh
+mkdir -p /etc/custos
+mkdir -p /usr/lib/lua/luci/controller
+mkdir -p /usr/lib/lua/luci/model/cbi
+mkdir -p /usr/lib/lua/luci/view/custos
+[ -x /etc/init.d/custos ] && /etc/init.d/custos enable
+exit 0

@@ -1,0 +1,12 @@
+Package: custos
+Version: 0.1.0-1
+Depends: libc
+Source: https://github.com/cuihairu/custos
+SourceName: custos
+License: MIT
+Section: admin
+SourceDateEpoch: 1793542800
+Maintainer: cuihairu <chuihairu@gmail.com>
+Architecture: x86_64
+Description: Cross-platform local self-healing engine. Dependency-aware failure detection and automatic recovery with a procd service and LuCI status/config interface.
+Installed-Size: 15728640

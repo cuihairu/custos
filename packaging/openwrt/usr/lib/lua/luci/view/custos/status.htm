@@ -1,0 +1,21 @@
+<%+header%>
+<h2><a id="content" name="content"><%:Custos 运行状态%></a></h2>
+<div class="cbi-map">
+	<fieldset class="cbi-section">
+		<legend><%:服务状态%></legend>
+		<table class="table">
+			<tr><td><%:procd 状态%></td><td><code id="custos-status">…</code></td></tr>
+			<tr><td><%:数据库%></td><td><code>/etc/custos/custos.db</code></td></tr>
+			<tr><td><%:TOML 配置%></td><td><code>/etc/custos/custos.toml</code></td></tr>
+		</table>
+	</fieldset>
+</div>
+<script type="text/javascript">
+	fetch('/cgi-bin/luci/admin/services/custos/api/status')
+		.then(r => r.text()).then(t => {
+			document.getElementById('custos-status').textContent = t;
+		}).catch(() => {
+			document.getElementById('custos-status').textContent = '(unavailable)';
+		});
+</script>
+<%+footer%>
