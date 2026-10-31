@@ -173,20 +173,17 @@ fn join_reader(handle: Option<std::thread::JoinHandle<CappedOutput>>) -> CappedO
 fn kill_tree(child: &std::process::Child) {
     #[cfg(unix)]
     {
-        // process_group(0) made the child a group leader; `kill -9 -<pgid>`
-        // (negative target = process group, per procps kill(1)) takes the
-        // whole tree down without orphaned children.
-        let _ = Command::new("kill")
-            .args(["-9", &format!("-{}", child.id())])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        // Belt and braces: if the group is already gone this is a no-op.
-        let _ = Command::new("kill")
-            .args(["-9", &child.id().to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        // process_group(0) made the child a group leader (pgid = pid);
+        // kill(-pgid, SIGKILL) takes the whole tree down without orphaned
+        // children. Direct syscall — spawning an external `kill` binary can
+        // itself fail under CI load (fork limits), which left child.wait()
+        // blocked forever and orphans behind (the 5-hour nightly hang).
+        let pgid = child.id() as libc::pid_t;
+        unsafe {
+            libc::kill(-pgid, libc::SIGKILL);
+            // Belt and braces: the pid itself, in case the group is gone.
+            libc::kill(pgid, libc::SIGKILL);
+        }
     }
     #[cfg(windows)]
     {
@@ -292,8 +289,10 @@ mod tests {
             4096,
         );
         assert_eq!(result, ExecResult::TimedOut);
+        // Generous bound: on a loaded 2-core CI runner the deadline check
+        // can overshoot; the real requirement is "not the full 187 s".
         assert!(
-            start.elapsed() < Duration::from_secs(2),
+            start.elapsed() < Duration::from_secs(30),
             "must not wait for the full sleep"
         );
         // Fault injection (docs/guide/testing.md §16.3): after a timeout the
