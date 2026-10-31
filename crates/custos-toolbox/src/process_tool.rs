@@ -58,6 +58,7 @@ impl BuiltinTool for ProcessStatusTool {
         resource.config = serde_json::json!({ "pid_file": pid_file });
         let report = ProcessProbe {
             pid_file: pid_file.into(),
+            rss_threshold_kb: None,
         }
         .probe(&resource);
         let healthy = report.status == HealthStatus::Healthy;
