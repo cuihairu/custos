@@ -57,6 +57,10 @@ pub struct Dependency {
     pub target_resource_id: ResourceId,
     pub requirement: DependencyRequirement,
     pub condition: HealthCondition,
+    /// For `AlternativeGroup` dependencies: the group this edge refers to.
+    /// Ignored for other requirement kinds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alternative_group_id: Option<String>,
     /// Mode key that activates a `Conditional` dependency; ignored otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conditional_on: Option<String>,
@@ -70,6 +74,7 @@ impl Dependency {
             target_resource_id: target.into(),
             requirement: DependencyRequirement::Required,
             condition: HealthCondition::StatusIs(HealthStatus::Healthy),
+            alternative_group_id: None,
             conditional_on: None,
             timeout: None,
         }

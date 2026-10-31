@@ -174,6 +174,10 @@ struct RawDependency {
     resource: String,
     #[serde(default)]
     requirement: Option<String>,
+    /// Alternative-group reference: when set, the edge is an N-of-M
+    /// `AlternativeGroup` dependency and `requirement` is implied.
+    #[serde(default)]
+    group: Option<String>,
     #[serde(default)]
     condition: Option<HealthCondition>,
     #[serde(default)]
@@ -441,18 +445,50 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
                     format!("unknown resource `{}`", dep.resource),
                 ));
             }
-            let requirement = match dep.requirement.as_deref() {
-                None | Some("required") => custos_model::DependencyRequirement::Required,
-                Some("optional") => custos_model::DependencyRequirement::Optional,
-                Some("conditional") => custos_model::DependencyRequirement::Conditional,
-                Some(other) => {
+            let (requirement, alternative_group_id) = if let Some(group) = dep.group.as_deref() {
+                // N-of-M backup group: the group must exist, and `resource`
+                // must be one of its members (used only as the graph anchor).
+                let group_def = alternative_groups
+                    .iter()
+                    .find(|g| g.group_id == group)
+                    .ok_or_else(|| {
+                        ConfigError::validation(
+                            format!("{path}.group"),
+                            format!("unknown alternative group `{group}`"),
+                        )
+                    })?;
+                if !group_def
+                    .members
+                    .iter()
+                    .any(|m| m.as_str() == dep.resource)
+                {
                     return Err(ConfigError::validation(
-                        format!("{path}.requirement"),
+                        format!("{path}.resource"),
                         format!(
-                            "unknown requirement `{other}` (expected required|optional|conditional)"
+                            "`{}` is not a member of alternative group `{group}`",
+                            dep.resource
                         ),
                     ));
                 }
+                (
+                    custos_model::DependencyRequirement::AlternativeGroup,
+                    Some(group.to_owned()),
+                )
+            } else {
+                let requirement = match dep.requirement.as_deref() {
+                    None | Some("required") => custos_model::DependencyRequirement::Required,
+                    Some("optional") => custos_model::DependencyRequirement::Optional,
+                    Some("conditional") => custos_model::DependencyRequirement::Conditional,
+                    Some(other) => {
+                        return Err(ConfigError::validation(
+                            format!("{path}.requirement"),
+                            format!(
+                                "unknown requirement `{other}` (expected required|optional|conditional|group)"
+                            ),
+                        ));
+                    }
+                };
+                (requirement, None)
             };
             if requirement == custos_model::DependencyRequirement::Conditional
                 && dep.conditional_on.is_none()
@@ -475,6 +511,7 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
                 target_resource_id: ResourceId::new(dep.resource.clone()),
                 requirement,
                 condition,
+                alternative_group_id,
                 conditional_on: dep.conditional_on.clone(),
                 timeout: None,
             });
@@ -483,6 +520,11 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
             id.clone(),
             dependencies
                 .iter()
+                // Alternative-group edges are N-of-M: they do not make any
+                // single member a hard dependency (that would demand all
+                // members healthy). Group satisfaction is judged in the
+                // engine against `alternative_groups`, not via graph edges.
+                .filter(|d| d.requirement != custos_model::DependencyRequirement::AlternativeGroup)
                 .map(|d| d.target_resource_id.clone())
                 .collect(),
         ));
@@ -1184,6 +1226,100 @@ hostt = "typo"
         let err = load(config).unwrap_err();
         assert!(
             err.to_string().contains("unknown field"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn alternative_group_dependency_is_parsed() {
+        let config = r#"
+version = 1
+
+[[alternative_groups]]
+id = "egress"
+members = ["proxy-a", "proxy-b"]
+required = 1
+
+[[resources]]
+id = "proxy-a"
+type = "proxy"
+
+[[resources]]
+id = "proxy-b"
+type = "proxy"
+
+[[resources]]
+id = "app"
+type = "custom-command"
+dependencies = [
+  { resource = "proxy-a", group = "egress" },
+]
+"#;
+        let cfg = load(config).expect("group dependency must parse");
+        let app = cfg
+            .resources
+            .iter()
+            .find(|r| r.id.as_str() == "app")
+            .expect("app resource");
+        let dep = &app.dependencies[0];
+        assert_eq!(
+            dep.requirement,
+            custos_model::DependencyRequirement::AlternativeGroup
+        );
+        assert_eq!(dep.alternative_group_id.as_deref(), Some("egress"));
+    }
+
+    #[test]
+    fn alternative_group_dependency_rejects_unknown_group() {
+        let config = r#"
+version = 1
+
+[[resources]]
+id = "proxy-a"
+type = "proxy"
+
+[[resources]]
+id = "app"
+type = "custom-command"
+dependencies = [
+  { resource = "proxy-a", group = "missing" },
+]
+"#;
+        let err = load(config).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown alternative group"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn alternative_group_dependency_rejects_non_member() {
+        let config = r#"
+version = 1
+
+[[alternative_groups]]
+id = "egress"
+members = ["proxy-a"]
+required = 1
+
+[[resources]]
+id = "proxy-a"
+type = "proxy"
+
+[[resources]]
+id = "proxy-b"
+type = "proxy"
+
+[[resources]]
+id = "app"
+type = "custom-command"
+dependencies = [
+  { resource = "proxy-b", group = "egress" },
+]
+"#;
+        let err = load(config).unwrap_err();
+        assert!(
+            err.to_string().contains("not a member of alternative group"),
             "got: {err}"
         );
     }

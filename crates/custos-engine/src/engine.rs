@@ -12,6 +12,7 @@ use crate::clock::Clock;
 use crate::events::{EngineEvent, RunStore};
 use crate::executor::ActionExecutor;
 use custos_config::ValidatedConfig;
+use custos_model::AlternativeGroup;
 use custos_model::ids::{ActionId, IncidentId, RecoveryRunId};
 use custos_model::{
     ActionAttempt, ActionOutcome, Diagnosis, FaultCode, HealthStatus, RecoveryPlan, RecoveryRun,
@@ -72,6 +73,9 @@ pub struct Engine {
     /// Waiting runs restored from the store at startup; re-driven (and
     /// re-keyed) on the first tick.
     resume_queue: Vec<RecoveryRun>,
+    /// N-of-M backup groups (§3.3 AlternativeGroup): satisfied by member
+    /// count, never by "every member healthy".
+    alternative_groups: Vec<AlternativeGroup>,
     seq: u64,
 }
 
@@ -132,6 +136,7 @@ impl Engine {
             waiters: HashMap::new(),
             wait_cycles: HashMap::new(),
             resume_queue: Vec::new(),
+            alternative_groups: config.alternative_groups.clone(),
             seq: 0,
         }
     }
@@ -959,33 +964,55 @@ impl Engine {
             if !dep.is_binding(&self.active_modes) {
                 continue;
             }
+            if dep.requirement == custos_model::DependencyRequirement::AlternativeGroup {
+                if !self.alternative_group_satisfied(run, id, dep, step) {
+                    return false;
+                }
+                continue;
+            }
             let target = dep.target_resource_id.clone();
+            if !self.single_dependency_satisfied(id, run, &target, step) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// §3.6 for one binding single-resource dependency: re-probe, recover if
+    /// unhealthy, re-verify. Returns false when the run must stop driving.
+    fn single_dependency_satisfied(
+        &mut self,
+        id: &ResourceId,
+        run: &mut RecoveryRun,
+        target: &ResourceId,
+        step: &mut u32,
+    ) -> bool {
             // Re-probe: state must be fresh, not assumed (§2.3 rules 4/5).
-            self.probe_one(&target, self.clock.now_unix_ms());
-            if self.managed[&target].snapshot.status != HealthStatus::Healthy {
+            self.probe_one(target, self.clock.now_unix_ms());
+            if self.managed[target].snapshot.status != HealthStatus::Healthy {
                 // Recover the dependency first (its own policy and budgets),
                 // unless a recovery is already in flight or its next attempt
                 // is scheduled behind a cooldown — then wait on that result.
-                if self.active_runs.contains(&target)
+                if self.active_runs.contains(target)
                     || now_lt(
                         self.clock.now_unix_ms(),
-                        self.managed[&target].cooldown_until_ms,
+                        self.managed[target].cooldown_until_ms,
                     )
                 {
-                    self.suspend_on(run, &target, step);
+                    self.suspend_on(run, target, step);
                     return false;
                 }
-                let _ = self.try_recover(&target);
+                let _ = self.try_recover(target);
                 // Re-verify after dependency recovery.
-                self.probe_one(&target, self.clock.now_unix_ms());
-                if self.managed[&target].snapshot.status != HealthStatus::Healthy {
+                self.probe_one(target, self.clock.now_unix_ms());
+                if self.managed[target].snapshot.status != HealthStatus::Healthy {
                     if now_lt(
                         self.clock.now_unix_ms(),
-                        self.managed[&target].cooldown_until_ms,
+                        self.managed[target].cooldown_until_ms,
                     ) {
                         // The dependency just failed an attempt and is cooling
                         // down towards its next one: wait for that result.
-                        self.suspend_on(run, &target, step);
+                        self.suspend_on(run, target, step);
                         return false;
                     }
                     self.store.emit(EngineEvent::DependencyUnsatisfied {
@@ -1012,8 +1039,91 @@ impl Engine {
                     return false;
                 }
             }
-        }
         true
+    }
+
+    /// §3.3/§3.6 N-of-M backup group: satisfied when at least
+    /// `required_count` members are healthy. Unhealthy members are recovered
+    /// first (each with its own policy/budget), then the group is re-judged;
+    /// if it still cannot satisfy N the run escalates.
+    fn alternative_group_satisfied(
+        &mut self,
+        run: &mut RecoveryRun,
+        id: &ResourceId,
+        dep: &custos_model::Dependency,
+        step: &mut u32,
+    ) -> bool {
+        let group_id = dep.alternative_group_id.as_deref();
+        let Some(group) = group_id.and_then(|gid| {
+            self.alternative_groups
+                .iter()
+                .find(|g| g.group_id == gid)
+                .cloned()
+        }) else {
+            self.finish_escalated(run, id);
+            return false;
+        };
+        let members = group.members.clone();
+        let required = group.required_count;
+        // Re-probe every member: state must be fresh, never assumed.
+        for member in &members {
+            self.probe_one(member, self.clock.now_unix_ms());
+        }
+        if group.satisfied_by(&|m| {
+            self.managed[m].snapshot.status == HealthStatus::Healthy
+        }) {
+            return true;
+        }
+        // Recover each unhealthy member (respecting in-flight/cooldown), then
+        // re-probe and re-judge the group.
+        for member in &members {
+            if self.managed[member].snapshot.status == HealthStatus::Healthy {
+                continue;
+            }
+            if self.active_runs.contains(member)
+                || now_lt(
+                    self.clock.now_unix_ms(),
+                    self.managed[member].cooldown_until_ms,
+                )
+            {
+                continue;
+            }
+            let _ = self.try_recover(member);
+            self.probe_one(member, self.clock.now_unix_ms());
+        }
+        if group.satisfied_by(&|m| {
+            self.managed[m].snapshot.status == HealthStatus::Healthy
+        }) {
+            return true;
+        }
+        self.store.emit(EngineEvent::DependencyUnsatisfied {
+            run_id: run.id.clone(),
+            resource_id: id.clone(),
+            dependency_id: group_id
+                .map(|g| ResourceId::new(format!("group:{g}")))
+                .unwrap_or_else(|| ResourceId::new("group")),
+            at_unix_ms: self.clock.now_unix_ms(),
+        });
+        self.store.save_step(
+            &run.id,
+            bump(step),
+            "resolving_dependencies",
+            &format!(
+                "alternative group `{}` unsatisfied ({required} of {} required)",
+                group.group_id,
+                members.len()
+            ),
+            self.clock.now_unix_ms(),
+        );
+        tracing::warn!(
+            target: "custos::engine",
+            run = run.id.as_str(),
+            resource = id.as_str(),
+            group = group.group_id.as_str(),
+            "alternative group unsatisfied after recovery: upstream action blocked"
+        );
+        self.finish_escalated(run, id);
+        false
     }
 
     /// Suspends the run in `Waiting` on `target`, registering it as a
@@ -1255,6 +1365,56 @@ mod tests {
 
     fn required_dep(target: &str) -> Dependency {
         Dependency::required(ResourceId::new(target))
+    }
+
+    fn group_dep(group: &str, anchor: &str) -> Dependency {
+        Dependency {
+            target_resource_id: ResourceId::new(anchor),
+            requirement: custos_model::DependencyRequirement::AlternativeGroup,
+            condition: HealthCondition::StatusIs(HealthStatus::Healthy),
+            alternative_group_id: Some(group.to_owned()),
+            conditional_on: None,
+            timeout: None,
+        }
+    }
+
+    fn test_engine_with_groups(
+        resources: Vec<Resource>,
+        edges: Vec<(ResourceId, Vec<ResourceId>)>,
+        probe_results: Vec<Vec<bool>>,
+        executor_steps: Vec<ActionOutcome>,
+        alternative_groups: Vec<custos_model::AlternativeGroup>,
+    ) -> (Engine, Arc<crate::MemoryStore>) {
+        let (engine, store, _scripted, _clock) = {
+            let store = Arc::new(crate::MemoryStore::default());
+            let scripted = std::sync::Arc::new(ScriptedExecutor::new(executor_steps));
+            let executor: Box<dyn ActionExecutor> = {
+                let scripted = scripted.clone();
+                Box::new(
+                    move |action: &custos_model::ActionSpec, timeout: Duration| {
+                        scripted.execute(action, timeout)
+                    },
+                )
+            };
+            let mut probes = HashMap::new();
+            for (resource, results) in resources.iter().zip(probe_results) {
+                probes.insert(
+                    resource.id.clone(),
+                    Box::new(ScriptedProbe::new(results)) as Box<dyn Probe>,
+                );
+            }
+            let config = ValidatedConfig {
+                resources,
+                alternative_groups,
+                graph: DependencyGraph::build(edges).expect("test graph"),
+                permissions: Default::default(),
+                notification: Default::default(),
+            };
+            let clock = Arc::new(crate::clock::FakeClock::new(1_000));
+            let engine = Engine::new(&config, probes, executor, store.clone(), clock.clone());
+            (engine, store, scripted, clock)
+        };
+        (engine, store)
     }
 
     /// Two dependents park on the SAME dependency recovery (dedup): the
@@ -1849,5 +2009,83 @@ mod tests {
                 _ => {}
             }
         }
+    }
+
+    #[test]
+    fn alternative_group_is_satisfied_by_member_count() {
+        // N-of-M: one healthy member is enough for required=1, so `app` is
+        // not blocked even though proxy-b is unhealthy.
+        let group = custos_model::AlternativeGroup {
+            group_id: "egress".into(),
+            members: vec![ResourceId::new("proxy-a"), ResourceId::new("proxy-b")],
+            required_count: 1,
+        };
+        let (mut engine, store) = test_engine_with_groups(
+            vec![
+                resource("proxy-a", vec![], vec![]),
+                resource("proxy-b", vec![], vec![]),
+                resource(
+                    "app",
+                    vec![plan("restart-app", 1, RiskLevel::Low)],
+                    vec![group_dep("egress", "proxy-a")],
+                ),
+            ],
+            vec![(ResourceId::new("app"), vec![])],
+            // proxy-a healthy, proxy-b unhealthy, app unhealthy (needs recover).
+            vec![
+                vec![true, true, true, true, true, true, true, true],
+                vec![false, false, false, false, false, false, false, false],
+                vec![false, true],
+            ],
+            vec![ActionOutcome::Succeeded],
+            vec![group],
+        );
+        // Trigger recovery of the app: the group (1-of-2) is satisfied by
+        // proxy-a alone, so the app plan runs and verifies.
+        let runs = engine.tick();
+        let app_run = runs
+            .iter()
+            .find(|r| r.resource_id == ResourceId::new("app"))
+            .expect("app recovery run");
+        assert_eq!(app_run.status, RecoveryRunStatus::Recovered);
+        assert_eq!(app_run.action_attempts.len(), 1);
+        assert!(store.event_types().contains(&"recovery.succeeded"));
+    }
+
+    #[test]
+    fn alternative_group_blocks_when_no_member_is_healthy() {
+        // required=2 of 2 and both members unhealthy: the group is never
+        // satisfied, so the app recovery escalates.
+        let group = custos_model::AlternativeGroup {
+            group_id: "egress".into(),
+            members: vec![ResourceId::new("proxy-a"), ResourceId::new("proxy-b")],
+            required_count: 2,
+        };
+        let (mut engine, _store) = test_engine_with_groups(
+            vec![
+                resource("proxy-a", vec![], vec![]),
+                resource("proxy-b", vec![], vec![]),
+                resource(
+                    "app",
+                    vec![plan("restart-app", 1, RiskLevel::Low)],
+                    vec![group_dep("egress", "proxy-a")],
+                ),
+            ],
+            vec![(ResourceId::new("app"), vec![])],
+            vec![
+                vec![false, false],
+                vec![false, false],
+                vec![false, false, true],
+            ],
+            vec![ActionOutcome::Succeeded],
+            vec![group],
+        );
+        let runs = engine.tick();
+        let app_run = runs
+            .iter()
+            .find(|r| r.resource_id == ResourceId::new("app"))
+            .expect("app recovery run");
+        assert_eq!(app_run.status, RecoveryRunStatus::Escalated);
+        assert_eq!(app_run.action_attempts.len(), 0);
     }
 }
