@@ -1,55 +1,55 @@
 ---
-title: 实施任务书
+title: Implementation Brief
 ---
 
-你负责实现 Custos，一个基于 Rust 的跨平台本地自愈引擎。
+>You are responsible for implementing Custos, a Rust-based cross-platform local self-healing engine.
 
-请先完整阅读项目根目录下的架构设计文档，并检查当前仓库的实际状态。
+Please first read the architecture design documents in the project root in full, and inspect the actual state of the repository.
 
-第一阶段只实施 P0：核心领域模型、Resource/Dependency Graph、配置验证、Process Probe、Exec Probe、RecoveryRun 状态机、有序恢复候选方案、动作后健康验证、恢复预算、资源级互斥、SQLite 持久化、CLI 基础命令和集成测试。
+Phase one implements P0 only: the core domain model, the Resource/Dependency Graph, configuration validation, Process Probe, Exec Probe, the RecoveryRun state machine, ordered recovery candidate plans, post-action health verification, recovery budgets, per-resource mutexes, SQLite persistence, basic CLI commands and integration tests.
 
-严格遵守以下要求：
+Strictly follow these requirements:
 
-1. 不要一次性实现全部规划功能。
-2. 不要在 P0 实现 HTTP Probe、Dashboard、OpenClash 或复杂网络恢复。
-3. 先分析现有代码，再提出实施计划；不得假设仓库为空。
-4. 依赖恢复由 Core Engine 统一协调，插件不能绕过核心引擎直接执行恢复流程。
-5. 依赖不满足时，不得执行依赖它的上层恢复动作。
-6. 恢复动作成功不代表资源健康，必须执行独立验证。
-7. 动作失败后必须重新诊断，并重新评估依赖和候选方案。
-8. 所有恢复任务都必须具有明确的超时、预算和终止条件。
-9. 关键动作执行前必须持久化状态；进程崩溃后不能无条件重复结果未知的动作。
-10. 同一资源不能并发执行多个恢复任务。
-11. 所有状态转换和动作尝试必须可审计。
-12. 不允许用虚假的测试、硬编码成功结果或未实现的能力声明来满足验收。
+1. Do not implement every planned feature in one go.
+2. Do not implement HTTP Probe, Dashboard, OpenClash or complex network recovery in P0.
+3. Analyze the existing code before proposing an implementation plan; do not assume the repository is empty.
+4. Dependency recovery is coordinated by the Core Engine; plugins must not bypass the core engine and run recovery flows directly.
+5. When a dependency is unsatisfied, upstream recovery actions that depend on it must not execute.
+6. A recovery action succeeding does not mean the resource is healthy; independent verification is mandatory.
+7. After an action fails, diagnose again and re-evaluate dependencies and candidate plans.
+8. Every recovery task must have explicit timeout, budget and termination conditions.
+9. Persist state before executing critical actions; after a process crash, do not unconditionally repeat actions with unknown outcomes.
+10. One resource must not run multiple recovery tasks concurrently.
+11. All state transitions and action attempts must be auditable.
+12. Fake tests, hardcoded success results or unimplemented capability claims must never be used to pass acceptance.
 
-请按照以下步骤执行：
+Execute in the following steps:
 
-A. 输出当前仓库结构、现有模块、依赖关系和需要保留的实现。
+A. Output the current repository structure, existing modules, dependency relationships and the implementations to be preserved.
 
-B. 将 P0 拆成可以独立验收的小任务，列出每个任务的文件、接口、测试和依赖。
+B. Break P0 into independently acceptable small tasks, listing each task's files, interfaces, tests and dependencies.
 
-C. 先实现最小完整垂直闭环：受控进程探测失败 → 故障判定 → 创建 RecoveryRun → 执行恢复动作 → 独立健康验证 → 持久化最终结果。
+C. First implement the minimal complete vertical loop: controlled process probe failure → fault verdict → create RecoveryRun → execute recovery action → independent health verification → persist the final result.
 
-D. 在此基础上增加依赖图、依赖恢复、多个候选方案、恢复预算和崩溃恢复。
+D. On that foundation, add the dependency graph, dependency recovery, multiple candidate plans, recovery budgets and crash recovery.
 
-E. 完成 SQLite 持久化和 CLI。
+E. Complete SQLite persistence and the CLI.
 
-F. 为插件超时、动作执行结果未知、依赖循环、并发恢复、数据库失败和动作后验证失败增加测试。
+F. Add tests for plugin timeouts, unknown action outcomes, dependency cycles, concurrent recovery, database failures and post-action verification failures.
 
-G. 运行格式化、静态检查、单元测试和集成测试，报告实际结果。
+G. Run formatting, static checks, unit tests and integration tests, and report the actual results.
 
-每个任务完成后都必须提供修改文件清单、设计说明、测试命令、实际测试结果和未解决问题。遇到架构文档与实际代码冲突时，先说明冲突和影响，不得静默覆盖。
+After every task, you must provide the list of modified files, design notes, test commands, actual test results and unresolved issues. When the architecture documents conflict with the actual code, state the conflict and its impact first; never silently overwrite.
 
-不要提前进入 P1 或 P2。只有 P0 的验收条件全部满足后，才提交下一阶段实施计划。
+Do not move on to P1 or P2 early. Only after every P0 acceptance criterion is met should you submit the next phase's implementation plan.
 
 
-**一个重要建议：** 将这两份文档放入仓库的 `docs/architecture.md` 和 `docs/implementation/p0.md`。后续让不同 Code Agent 分别实现核心引擎、插件运行时和通知模块时，所有 Agent 都应以同一份领域模型和状态机为准，避免各自设计出互不兼容的接口。
+**One important suggestion:** put these two documents into the repository as `docs/architecture.md` and `docs/implementation/p0.md`. When different Code Agents later implement the core engine, the plugin runtime and the notification module separately, all of them should work from the same domain model and state machine, to avoid designing mutually incompatible interfaces.
 
 ---
 
 If you want, I can:
 
-- 继续详细描述 Recovery Engine 状态机及恢复流程
-- 详述 RecoveryRun 的管理与审计实现细节
-- 展开解释插件架构中插件权限及安全策略设计
+- Describe the Recovery Engine state machine and recovery flow in more detail
+- Elaborate on RecoveryRun management and auditing implementation details
+- Expand on plugin permissions and security policy design in the plugin architecture

@@ -1,72 +1,72 @@
 ---
-title: 测试与验收体系
+title: Testing and Acceptance System
 ---
 
-# 16. 测试与验收体系
+# 16. Testing and Acceptance System
 
-## 16.1 单元测试
+## 16.1 Unit tests
 
-必须覆盖：
+Must cover:
 
-- 状态转换。
-- 依赖判定。
-- 依赖图循环检测。
-- AlternativeGroup 判定。
-- 故障阈值。
-- 恢复预算。
-- 候选方案排序。
-- 通知规则。
-- 事件去重。
-- 敏感信息脱敏。
+- State transitions.
+- Dependency verdicts.
+- Dependency graph cycle detection.
+- AlternativeGroup verdicts.
+- Failure thresholds.
+- Recovery budgets.
+- Candidate plan ordering.
+- Notification rules.
+- Event deduplication.
+- Sensitive data redaction.
 
-## 16.2 集成测试
+## 16.2 Integration tests
 
-必须覆盖：
+Must cover:
 
-- Process Probe。
-- Exec Probe。
-- 插件启动失败。
-- 插件输出阻塞。
-- 插件超时。
-- 插件崩溃。
-- 资源依赖恢复。
-- 多个上层资源共同依赖一个资源。
-- 同一资源并发恢复。
-- 通知队列持久化。
-- 数据库重启恢复。
-- Dashboard 默认关闭。
+- Process Probe.
+- Exec Probe.
+- Plugin startup failure.
+- Plugin output blocking.
+- Plugin timeout.
+- Plugin crash.
+- Resource dependency recovery.
+- Multiple upstream resources depending on one resource.
+- Concurrent recovery of the same resource.
+- Notification queue persistence.
+- Database restart recovery.
+- Dashboard disabled by default.
 
-## 16.3 故障注入测试
+## 16.3 Fault injection tests
 
-必须模拟：
+Must simulate:
 
-1. 恢复动作执行前进程崩溃。
-2. 恢复动作执行期间进程崩溃。
-3. 恢复动作完成但记录前崩溃。
-4. 动作执行成功但健康验证失败。
-5. 依赖在恢复过程中再次故障。
-6. 插件在请求中途退出。
-7. 通知发送时网络中断。
-8. SQLite 写入失败。
-9. 多个任务同时要求恢复同一资源。
-10. 达到恢复预算上限。
+1. A process crash before a recovery action executes.
+2. A process crash while a recovery action is executing.
+3. A crash after the action completed but before it was recorded.
+4. An action succeeding but health verification failing.
+5. A dependency failing again during recovery.
+6. A plugin exiting mid-request.
+7. The network dropping while a notification is being sent.
+8. A SQLite write failure.
+9. Multiple tasks requesting recovery of the same resource simultaneously.
+10. The recovery budget limit being reached.
 
-每种故障都必须有明确的预期状态和验证断言。
+Every fault must have explicit expected states and verification assertions.
 
-## 16.4 完成定义
+## 16.4 Definition of done
 
-一个阶段只有满足以下条件才算完成：
+A phase is only complete when:
 
-- 代码可编译。
-- 格式化检查通过。
-- 静态检查通过。
-- 单元测试通过。
-- 集成测试通过。
-- 关键失败路径有测试。
-- 文档与实际实现一致。
-- 不存在未解释的 TODO 或虚假的能力声明。
-- 失败时不会无限循环。
-- 所有恢复动作都有明确结果。
-- 关键状态变化可审计。
+- The code compiles.
+- Formatting checks pass.
+- Static checks pass.
+- Unit tests pass.
+- Integration tests pass.
+- Critical failure paths have tests.
+- Documentation matches the actual implementation.
+- There are no unexplained TODOs or fake capability claims.
+- Failures never cause infinite loops.
+- Every recovery action has an explicit result.
+- Critical state changes are auditable.
 
 ---

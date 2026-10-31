@@ -1,37 +1,30 @@
-# ADR-0001: 为什么选择 Rust
+# ADR-0001: Why Rust
 
-- 状态：已接受
-- 日期：2026-10-31
-- 关联：docs/guide/overview.md，workspace.md
+- Status: Accepted
+- Date: 2026-10-31
+- Related: docs/guide/overview.md, workspace.md
 
-## 背景
+## Background
 
-Custos 是常驻本地的自愈引擎：长期运行、低抖动要求高、必须跨平台（Linux/Windows 优先）、
-单二进制部署、领域模型里有严格的状态机（恢复运行、健康转换、预算与互斥）。选型决定了
-内存安全、部署形态和长期维护成本。
+Custos is a persistent local self-healing engine: long-running, latency-sensitive, must be cross-platform (Linux/Windows first), single-binary deployment, with strict state machines in the domain model (recovery runs, health transitions, budgets, mutexes). The language choice determines memory safety, deployment shape, and long-term maintenance cost.
 
-## 决策
+## Decision
 
-选择 Rust 作为唯一实现语言：领域模型用类型编码（`HealthStatus` 七态、`RecoveryRunStatus`
-状态机、强类型 ID），workspace 按 crate 分层（model/engine/probe/notify/store/config/cli），
-异步仅在 store 内部（sync 门面 + current-thread runtime），TLS 用 rustls 保持纯 Rust 可交叉编译。
+Rust as the only implementation language: domain models type-encoded (`HealthStatus` seven states, `RecoveryRunStatus` state machine, strongly-typed IDs), workspace layered by crate (model/engine/probe/notify/store/config/cli), async only inside the store (sync facade + current-thread runtime), TLS via rustls for pure-Rust cross-compilation.
 
-## 替代方案
+## Alternatives
 
-- **Go**：GC 停顿与常驻内存占用更高；错误处理靠约定（err != nil）无编译期约束；
-  交叉编译单二进制可行但状态机正确性靠人。
-- **C/C++**：内存安全不可接受——自愈引擎拥有系统级权限，UAF/溢出即权限提升。
-- **Python/脚本**：性能与部署（解释器、依赖树）不适合常驻引擎；类型约束弱。
+- **Go**: GC pauses and higher persistent memory footprint; error handling by convention (err != nil) with no compile-time constraint; cross-compilation to a single binary works but state-machine correctness relies on humans.
+- **C/C++**: Memory safety is unacceptable — a self-healing engine holds system-level privileges; UAF/overflow is privilege escalation.
+- **Python/Scripts**: Performance and deployment (interpreter, dependency tree) unsuitable for a persistent engine; weak type constraints.
 
-## 优缺点
+## Pros and Cons
 
-优点：无 GC 的可预测延迟；`enum + match` 穷尽性检查让状态机漏分支编译期报错；
-crates.io 成熟生态（rustls/sqlx/lettre/ureq）符合"核心用成熟库"的裁定；
-单二进制、交叉编译到 mingw 验证过。
-缺点：编译时间长；开发迭代慢于脚本语言；部分生态（PyO3 出向绑定）有额外复杂度。
+Pros: predictable latency without GC; `enum + match` exhaustiveness makes missing state-machine branches a compile-time error; mature ecosystem (rustls/sqlx/lettre/ureq) aligns with the "core uses mature crates" ruling; single binary, mingw cross-compilation verified.
+Cons: longer compile times; slower iteration than scripting languages; some ecosystem complexity (PyO3 outbound bindings).
 
-## 后续影响
+## Follow-up Impact
 
-- workspace 11 个 crate 的分层由 Rust 模块系统承载（依赖方向单向）。
-- 所有"核心用成熟 crate、插件侧轻依赖"的裁定以此为基础。
-- rust-toolchain.toml 需声明 stable 通道（todo.md 工程修缮项）。
+- The 11-crate workspace layering is carried by Rust's module system (one-way dependencies).
+- All "core uses mature crates, plugin-side is lightweight" rulings build on this.
+- rust-toolchain.toml must declare the stable channel (todo.md engineering cleanup).

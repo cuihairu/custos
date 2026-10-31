@@ -1,34 +1,28 @@
-# ADR-0010: 为什么 Dashboard 默认关闭
+# ADR-0010: Why Dashboard is Off by Default
 
-- 状态：已接受
-- 日期：2026-10-31
-- 关联：docs/guide/dashboard-cli-config.md §9/§10，roadmap P4
+- Status: Accepted
+- Date: 2026-10-31
+- Related: docs/guide/dashboard-cli-config.md §9/§10, roadmap P4
 
-## 背景
+## Background
 
-Dashboard 是管理面：能看到全部资源健康、能触发恢复操作。一个默认监听端口的
-自愈引擎等于在每台目标机器上开一个常驻管理入口——这正是自愈系统最不该有的
-攻击面。P0/P1 的目标（核心恢复闭环）完全不需要 UI。
+The Dashboard is a management plane: it can see all resource health and trigger recovery operations. A self-healing engine with a default listening port is a persistent management entry on every target machine — exactly the attack surface a self-healing system should not have. P0/P1 goals (core recovery loop) require no UI.
 
-## 决策
+## Decision
 
-Dashboard 是**默认关闭**的可选组件：不启用则零监听端口、零 HTTP 代码路径
-（验收：关闭时无端口、不可用不影响核心、不绕过 Core Engine、高风险仍走
-统一授权审计）。启用前，HTTP 传输安全（认证、CSRF、绑定地址、只读语义）
-必须集中硬化（与 ADR-0015 工具箱的传输安全同一处）。
+The Dashboard is a **disabled by default** optional component: when not enabled there are zero listening ports and zero HTTP code paths (acceptance: closed = no port, unavailability does not affect core, does not bypass the Core Engine, high-risk still goes through unified authorization audit). Before enabling, HTTP transport security (auth, CSRF, bind address, read-only semantics) must be centrally hardened (with the toolbox transport security, ADR-0015).
 
-## 替代方案
+## Alternatives
 
-- **默认开启**：每台机器常开管理面；家庭/路由器部署（OpenWrt）尤其危险。
-- **只做 CLI 不做 Dashboard**：CLI 已覆盖 status/runs/incidents/notify/graph；
-  UI 推迟不损失核心能力。
+- **On by default**: every machine has a persistent management plane; home/router deployments (OpenWrt) are especially dangerous.
+- **CLI only, no Dashboard**: the CLI already covers status/runs/incidents/notify/graph; deferring the UI loses no core capability.
 
-## 优缺点
+## Pros and Cons
 
-优点：默认部署零新增攻击面；核心保持无头、可嵌入；UI 迭代不触碰恢复语义。
-缺点：前期可视性依赖 CLI；运维上手需要读文档。
+Pros: zero new attack surface by default; the core stays headless and embeddable; UI iteration never touches recovery semantics.
+Cons: early visibility relies on the CLI; operators need documentation.
 
-## 后续影响
+## Follow-up Impact
 
-- P4 的所有 Dashboard 条目都以"默认关闭"为前提验收。
-- 操作授权界面（P4）复用核心的授权审计，不自建权限模型。
+- All P4 Dashboard entries are accepted under the "disabled by default" prerequisite.
+- The P4 authorization UI reuses the core's authorization audit, not a custom permission model.

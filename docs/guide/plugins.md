@@ -1,55 +1,55 @@
 ---
-title: 插件架构
+title: Plugin Architecture
 ---
 
-# 4. 插件架构
+# 4. Plugin Architecture
 
-## 4.1 插件的职责
+## 4.1 Plugin responsibilities
 
-插件负责封装具体资源或能力，而不是实现一套独立的自愈系统。
+Plugins encapsulate specific resources or capabilities; they do not implement an independent self-healing system of their own.
 
-插件可以提供：
+A plugin may provide:
 
-- Resource Provider。
-- Probe Provider。
-- Diagnosis Provider。
-- Recovery Action Provider。
-- Verification Provider。
-- Notification Channel Provider。
+- Resource Provider.
+- Probe Provider.
+- Diagnosis Provider.
+- Recovery Action Provider.
+- Verification Provider.
+- Notification Channel Provider.
 
-一个插件可以提供多种能力。
+One plugin may provide multiple capabilities.
 
-例如 OpenClash 插件可以提供：
+For example, the OpenClash plugin could provide:
 
-- OpenClash 服务资源。
-- 代理端口探测。
-- 代理认证验证。
-- 节点状态诊断。
-- 节点切换动作。
-- 服务重启动作。
-- 节点恢复验证。
+- The OpenClash service resource.
+- Proxy port probing.
+- Proxy authentication verification.
+- Node state diagnosis.
+- Node switching actions.
+- Service restart actions.
+- Node recovery verification.
 
-Core Engine 负责判断何时调用这些能力以及是否允许执行。
+The Core Engine decides when these capabilities are invoked and whether execution is allowed.
 
-## 4.2 插件执行模型
+## 4.2 Plugin execution model
 
-第一版使用：
+The first version uses:
 
-**Rust Core + 外部可执行插件 + JSON-RPC 2.0 over stdio。**
+**Rust Core + external executable plugins + JSON-RPC 2.0 over stdio.**
 
-优势：
+Advantages:
 
-- 插件崩溃不会直接导致核心进程崩溃。
-- 插件可以使用不同语言实现。
-- 不需要立即设计稳定的 Rust 动态库 ABI。
-- 插件协议可以独立版本化。
-- 有利于隔离插件生命周期和超时。
+- A plugin crash does not directly crash the core process.
+- Plugins can be implemented in different languages.
+- No need to design a stable Rust dynamic library ABI right away.
+- The plugin protocol can be versioned independently.
+- Easier to isolate plugin lifecycles and enforce timeouts.
 
-但需要明确：外部进程并不自动构成安全沙箱。插件仍然需要最小权限、受控执行目录、受控环境变量和明确的操作授权。
+But be clear about this: an external process does not automatically constitute a security sandbox. Plugins still require least privilege, controlled working directories, controlled environment variables and explicit operation authorization.
 
-## 4.3 插件协议
+## 4.3 Plugin protocol
 
-第一版至少需要：
+The first version needs at least:
 
 ```text
 initialize
@@ -62,86 +62,86 @@ verify
 shutdown
 ```
 
-这些是逻辑操作名称，最终应映射为有版本约束的 JSON-RPC 方法。
+These are logical operation names; they should ultimately map to versioned JSON-RPC methods.
 
-请求必须具有：
+A request must carry:
 
-- JSON-RPC ID。
-- 协议版本。
-- 方法名称。
-- 参数。
-- 请求超时。
-- 关联的 Resource ID。
-- 必要时关联的 RecoveryRun ID。
+- A JSON-RPC ID.
+- The protocol version.
+- The method name.
+- Parameters.
+- A request timeout.
+- The associated Resource ID.
+- The associated RecoveryRun ID, when applicable.
 
-恢复操作必须使用显式操作 ID，并携带参数化输入。禁止把任意用户输入直接拼接到 Shell 命令中。
+Recovery operations must use explicit action IDs with parameterized inputs. Piping arbitrary user input directly into Shell commands is forbidden.
 
-## 4.4 stdio 的工程要求
+## 4.4 Engineering requirements for stdio
 
-Windows 子进程 stdio 管道可能因为缓冲区被写满而阻塞。实现时必须：
+On Windows, subprocess stdio pipes can block when their buffers fill up. The implementation must:
 
-- 独立、持续读取 stdout 和 stderr。
-- stdout 只用于协议消息。
-- stderr 用于插件诊断日志。
-- 限制单条消息大小。
-- 限制总缓冲区大小。
-- 支持分块读取。
-- 处理不完整的消息。
-- 处理插件提前退出。
-- 处理无响应和超时。
-- 支持请求取消。
-- 对异常 JSON 和未知方法返回明确错误。
-- 禁止将 stderr 原样作为协议响应解析。
+- Read stdout and stderr continuously and independently.
+- Use stdout only for protocol messages.
+- Use stderr for plugin diagnostic logs.
+- Limit single-message size.
+- Limit total buffer size.
+- Support chunked reading.
+- Handle incomplete messages.
+- Handle plugins exiting early.
+- Handle unresponsive plugins and timeouts.
+- Support request cancellation.
+- Return clear errors for malformed JSON and unknown methods.
+- Never parse stderr as a protocol response.
 
-建议第一版将单条协议消息限制在 1 MiB 以内，具体值作为可配置的安全上限，并对大型证据采用摘要、截断或分块方式处理。
+For the first version, it is recommended to cap a single protocol message at 1 MiB, treat the exact value as a configurable safety limit, and handle large evidence via digest, truncation or chunking.
 
-## 4.5 插件生命周期
+## 4.5 Plugin lifecycle
 
-建议采用长生命周期插件进程：
+Long-lived plugin processes are recommended:
 
-1. Custos 启动。
-2. 启动已配置的插件。
-3. 完成协议握手。
-4. 获取能力声明。
-5. 验证协议兼容性。
-6. 接受请求。
-7. 监测插件健康状态。
-8. 插件崩溃时根据策略重启。
-9. 插件无法恢复时，将相关资源标记为无法有效探测或操作。
-10. 记录插件故障并通知。
+1. Custos starts.
+2. Configured plugins are started.
+3. Protocol handshake completes.
+4. Capability declarations are obtained.
+5. Protocol compatibility is verified.
+6. Requests are accepted.
+7. Plugin health is monitored.
+8. On plugin crash, restart according to policy.
+9. If a plugin cannot be recovered, mark related resources as not effectively probeable or operable.
+10. Record the plugin failure and notify.
 
-插件不应因为每次探测都重新创建进程而产生过高开销。
+Plugins should not pay excessive overhead by re-creating a process for every probe.
 
-## 4.6 能力权限
+## 4.6 Capability permissions
 
-每项能力应声明：
+Every capability should declare:
 
-- 只读或修改状态。
-- 所需权限。
-- 影响的资源范围。
-- 是否会中断网络。
-- 是否会中断远程管理。
-- 是否支持取消。
-- 是否幂等。
-- 是否支持验证。
-- 可能的失败状态。
-- 是否有补偿或回滚方法。
+- Read-only or state-modifying.
+- Required permissions.
+- The scope of resources affected.
+- Whether it can interrupt the network.
+- Whether it can interrupt remote management.
+- Whether cancellation is supported.
+- Whether it is idempotent.
+- Whether verification is supported.
+- Possible failure states.
+- Whether compensation or rollback exists.
 
-Core Engine 根据配置和策略决定是否执行。
+The Core Engine decides whether to execute based on configuration and policy.
 
-不能因为插件声明了某个动作，就自动允许它执行。
+A plugin declaring an action does not automatically make it allowed.
 
 ---
 
-## 插件口径补充（用户裁定 2026-10-29）
+## Plugin model ruling (user decision, 2026-10-29)
 
-- **一个插件 = 一种资源的完整监控与处理逻辑**：探测、诊断、恢复动作、验证闭环在同一个插件内完成，不留半截。
-- **插件可以被其他插件依赖**：依赖方向与资源依赖图一致，由 Core Engine 统一解析。
-- **使用方只需简单配置即可启用**：声明资源类型与参数，不写胶水代码；配置加载遵循 §10 的配置规范。
+- **One plugin = the complete monitoring and handling logic for one resource type**: probing, diagnosis, recovery actions and the verification loop live inside the same plugin, with no half-finished splits.
+- **Plugins can be depended on by other plugins**: dependency direction matches the resource dependency graph, resolved uniformly by the Core Engine.
+- **Consumers enable a plugin with simple configuration only**: declare the resource type and parameters, no glue code; configuration loading follows the configuration specification in §10.
 
-## 集成基础能力与 Python 脚本扩展（用户裁定 2026-10-29）
+## Builtin capabilities and Python script extension (user decision, 2026-10-29)
 
-- **集成基础能力**：核心引擎内置常见资源（服务、进程、磁盘、网络连通性等）的基础适配，开箱即用——基础场景不需要任何插件开发。
-- **Python 脚本扩展（双向）**：
-  - 出向：核心功能经 PyO3 绑定可被 Python 脚本调用；
-  - 入向：自定义探测与恢复动作可以用 Python 脚本编写，由核心按插件契约加载执行（超时、权限、预算同插件口径）。
+- **Builtin capabilities**: the core engine ships built-in basic adapters for common resources (services, processes, disks, network connectivity, etc.) that work out of the box — basic scenarios require no plugin development at all.
+- **Python script extension (bidirectional)**:
+  - Outbound: core functionality can be called from Python scripts via PyO3 bindings;
+  - Inbound: custom probes and recovery actions can be written as Python scripts, loaded and executed by the core according to the plugin contract (timeouts, permissions and budgets follow the same rules as plugins).

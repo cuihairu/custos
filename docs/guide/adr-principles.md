@@ -1,52 +1,52 @@
 ---
-title: ADR 与最终实施原则
+title: ADRs and Final Implementation Principles
 ---
 
-# 17. ADR：必须记录的架构决策
+# 17. ADRs: Architecture Decisions That Must Be Recorded
 
-以下决策需要以 ADR 形式落档：
+The following decisions need to be archived as ADRs:
 
-1. 为什么选择 Rust。
-2. 为什么第一版采用外部进程插件。
-3. 为什么选择 JSON-RPC over stdio。
-4. 为什么采用 Resource + Dependency Graph。
-5. 为什么依赖图由 Core Engine 协调。
-6. 为什么动作结果必须经过独立验证。
-7. 为什么使用 SQLite。
-8. 为什么恢复动作前必须持久化关键状态。
-9. 为什么通知系统与恢复引擎解耦。
-10. 为什么 Dashboard 默认关闭。
-11. 为什么 P0 只实现 Process 和 Exec Probe。
-12. 为什么不允许未经授权的高风险网络动作。
-13. 为什么未知执行结果不能直接重试。
-14. 为什么禁止普通依赖图循环。
+1. Why Rust was chosen.
+2. Why the first version uses external-process plugins.
+3. Why JSON-RPC over stdio was chosen.
+4. Why Resource + Dependency Graph was chosen.
+5. Why the dependency graph is coordinated by the Core Engine.
+6. Why action results must go through independent verification.
+7. Why SQLite was chosen.
+8. Why critical state must be persisted before recovery actions.
+9. Why the notification system is decoupled from the recovery engine.
+10. Why the Dashboard is disabled by default.
+11. Why P0 implements only the Process and Exec Probes.
+12. Why unauthorized high-risk network actions are not allowed.
+13. Why unknown execution outcomes must not be retried directly.
+14. Why ordinary dependency graph cycles are forbidden.
 
-ADR 必须记录背景、决策、替代方案、优缺点和后续影响。
+An ADR must record the background, the decision, the alternatives, the pros and cons, and the follow-up impact.
 
-15. 为什么核心维护内部集成工具箱（HTTP/RPC/SSH/探测原语），插件只是规则层。
+15. Why the core maintains an internal integration toolbox (HTTP/RPC/SSH/probing primitives) and plugins are only the rule layer.
 
-**背景**：随着探测与恢复动作覆盖 HTTP、RPC、SSH、服务控制等传输/协议，若每个插件各自实现传输，安全硬化（TLS 校验、SSRF 防护、SSH 主机密钥验证、超时/重试/取消、凭据安全读取）会被 N 份实现稀释，且无法统一强制。
+**Background**: as probing and recovery actions come to cover HTTP, RPC, SSH, service control and other transports/protocols, if every plugin implements its own transport, the security hardening (TLS verification, SSRF protection, SSH host-key verification, timeout/retry/cancellation, credential-safe reads) is diluted across N implementations and cannot be uniformly enforced.
 
-**决策**：核心收敛一组“内部集成工具”作为能力执行器（HTTP 客户端、RPC 客户端、SSH 客户端、进程/服务/磁盘/网络连通性探测、受控命令执行、重启控制），以 Capability（十一项元数据）+ OperationParams（参数化输入）对外声明。插件与内置能力走同一张派发表：内置能力由核心进程内执行器直接执行，插件声明的能力由插件子进程执行。插件不再自行实现底层传输，只提供能力声明与规则逻辑（目标、参数、决策、验证）。
+**Decision**: the core converges a set of "internal integration tools" as capability executors (HTTP client, RPC client, SSH client, process/service/disk/network-connectivity probes, controlled command execution, reboot control), declared via Capability + OperationParams. Plugins and built-in capabilities share one dispatch table: built-in capabilities execute in-process in the core, plugin-declared capabilities execute in the plugin subprocess. Plugins no longer implement transports themselves; they provide capability declarations and rule logic (targets, parameters, decisions, verification).
 
-**替代方案**：保持插件自包含、各自实现传输。缺点：重复的传输实现、安全硬化易被绕过、插件体积与攻击面大。
+**Alternatives**: keep plugins self-contained, each implementing its own transport. Drawbacks: duplicated transports, hardening easily bypassed, larger plugin footprint and attack surface.
 
-**优缺点**：集中硬化一次、语义统一（超时/取消/预算/审计）、插件变薄；代价是核心的工具面需要维护，插件自由度下降（不再能任意实现自定义协议）。
+**Pros and cons**: hardening happens once, in one place; unified semantics (timeout/cancel/budget/audit); thinner plugins. The cost is that the core's tool surface must be maintained, and plugin freedom shrinks (no arbitrary custom protocols).
 
-**后续影响**：P2 平台适配器（systemd/launchd/SCM、网络接口/路由/DNS）作为工具执行器注册进同一注册表；Webhook 通知渠道复用工具箱 HTTP 客户端（含 SSRF 防护）；Python 出向绑定暴露的是工具调用而非任意执行。
+**Follow-up impact**: P2 platform adapters (systemd/launchd/SCM, network interface/route/DNS) register as tool executors in the same registry; the Webhook notification channel reuses the toolbox HTTP client (with SSRF protection); the Python outbound bindings expose tool calls, not arbitrary execution.
 
 ---
 
-# 18. 最终实施原则
+# 18. Final Implementation Principles
 
-Custos 的成功标准不是能够监控多少种服务，而是遇到真实故障时，能够正确判断依赖、执行适当的恢复动作、验证结果，并留下完整记录。
+Custos's success criterion is not how many kinds of services it can monitor, but whether, when a real failure strikes, it can correctly judge dependencies, execute appropriate recovery actions, verify the results, and leave a complete record.
 
-整个系统应遵循：
+The whole system should follow:
 
-**资源负责描述对象，依赖负责描述前置条件，插件负责提供能力，策略负责决定动作，核心引擎负责协调执行，验证负责判定结果，持久化负责保留事实，通知负责传递事件，Dashboard 负责可选展示。**
+**Resources describe objects, dependencies describe preconditions, plugins provide capabilities, policies decide actions, the core engine coordinates execution, verification judges results, persistence preserves facts, notification delivers events, and the Dashboard provides optional display.**
 
-第一阶段必须先把核心恢复闭环、依赖语义、持久化和失败处理实现正确。后续再逐步加入 Windows 网络恢复、代理、Cloudflare Tunnel、OpenClash 和其他平台能力。
+Phase one must first get the core recovery loop, dependency semantics, persistence and failure handling right. Windows network recovery, proxies, Cloudflare Tunnel, OpenClash and other platform capabilities are added gradually afterwards.
 
-不要一次性实现所有插件，也不要提前构建复杂的 Dashboard 或插件市场。
+Do not implement every plugin at once, and do not build a complex Dashboard or plugin marketplace ahead of time.
 
-先用最小但完整的恢复闭环证明架构，再根据真实部署中无法处理的故障逐步扩展。
+Prove the architecture with the minimal but complete recovery loop first, then expand based on the failures that real deployments cannot yet handle.

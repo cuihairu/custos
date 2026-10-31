@@ -4,7 +4,7 @@ title: Recovery Engine
 
 # 6. Recovery Engine
 
-## 6.1 核心状态机
+## 6.1 Core state machine
 
 ```mermaid
 stateDiagram-v2
@@ -26,20 +26,20 @@ stateDiagram-v2
     Suppressed --> [*]
 ```
 
-此外还必须支持：
+In addition, the following must be supported:
 
 - `Waiting`
 - `Cancelled`
 - `Interrupted`
 - `OutcomeUnknown`
 
-实际实现可以采用数据库状态枚举，但必须定义合法状态转换，不能在业务代码中随意修改状态。
+The actual implementation may use a database state enum, but legal state transitions must be defined; state must not be modified arbitrarily in business code.
 
 ## 6.2 RecoveryRun
 
-每次故障处理创建独立的 RecoveryRun。
+Every failure-handling episode creates an independent RecoveryRun.
 
-建议字段：
+Suggested fields:
 
 ```text
 RecoveryRun
@@ -61,94 +61,94 @@ RecoveryRun
 └── error_summary
 ```
 
-同一故障的多次恢复尝试可以归属于同一个 Incident，但每个恢复周期应具有独立的 RecoveryRun，方便审计和统计。
+Multiple recovery attempts for the same fault may belong to the same Incident, but every recovery cycle should have its own RecoveryRun for easier auditing and statistics.
 
-## 6.3 有序恢复方案
+## 6.3 Ordered recovery plans
 
-每个资源可以定义多个候选方案。
+Each resource may define multiple candidate plans.
 
-例如代理：
+For a proxy, for example:
 
-1. 检查当前节点。
-2. 切换到备用节点。
-3. 重启代理服务。
-4. 重新建立网络连接。
-5. 终止自动处理并通知用户。
+1. Check the current node.
+2. Switch to a backup node.
+3. Restart the proxy service.
+4. Re-establish the network connection.
+5. Stop automatic handling and notify the user.
 
-每个候选方案必须包含：
+Every candidate plan must include:
 
-- 唯一 ID。
-- 适用故障类型。
-- 前置条件。
-- 风险等级。
-- 所需权限。
-- 执行超时。
-- 最大尝试次数。
-- 冷却时间。
-- 幂等性声明。
-- 验证条件。
-- 失败处理。
-- 可选补偿动作。
+- A unique ID.
+- Applicable failure types.
+- Preconditions.
+- Risk level.
+- Required permissions.
+- Execution timeout.
+- Maximum attempt count.
+- Cooldown.
+- Idempotency declaration.
+- Verification criteria.
+- Failure handling.
+- An optional compensation action.
 
-Core Engine 根据诊断结果选择适用方案，而不是无条件执行列表中的每一项。
+The Core Engine selects applicable plans based on the diagnosis result; it does not unconditionally execute every item in the list.
 
-## 6.4 恢复后重新诊断
+## 6.4 Re-diagnosis after recovery
 
-这是 Custos 的关键语义。
+This is a key semantic of Custos.
 
-例如：
+For example:
 
 ```text
-代理节点切换
+Proxy node switch
     ↓
-重新检查代理
+Re-check the proxy
     ↓
-代理正常
+Proxy healthy
     ↓
-重新检查 Cloudflare Tunnel
+Re-check the Cloudflare Tunnel
     ↓
-Tunnel 仍然异常
+Tunnel still abnormal
     ↓
-诊断 Tunnel 自身问题
+Diagnose the Tunnel itself
     ↓
-重启 cloudflared
+Restart cloudflared
     ↓
-验证 Tunnel 和业务入口
+Verify the Tunnel and the business entry point
 ```
 
-不能在第一个动作失败后直接假设根因仍然相同。
+Do not assume the root cause is still the same after the first action fails.
 
-每次恢复动作完成后：
+After every recovery action completes:
 
-1. 保存动作结果。
-2. 重新探测受影响资源。
-3. 重新评估依赖关系。
-4. 判断原故障是否仍存在。
-5. 如果故障发生变化，重新诊断。
-6. 选择下一项适用方案。
-7. 达到预算上限后终止并告警。
+1. Save the action result.
+2. Re-probe the affected resources.
+3. Re-evaluate dependencies.
+4. Determine whether the original fault still exists.
+5. If the fault changed, diagnose again.
+6. Select the next applicable plan.
+7. Once the budget limit is reached, terminate and alert.
 
-## 6.5 恢复预算
+## 6.5 Recovery budget
 
-必须同时限制：
+All of the following must be limited:
 
-- 单动作超时。
-- 单个资源的恢复次数。
-- 单个 RecoveryRun 的总耗时。
-- 同一 Incident 的恢复总预算。
-- 单位时间内的重启次数。
-- 同一资源的并发恢复数量。
-- 高风险动作次数。
+- Per-action timeout.
+- Recovery count per resource.
+- Total duration of a single RecoveryRun.
+- Total recovery budget for the same Incident.
+- Restart count per unit of time.
+- Concurrent recovery count for the same resource.
+- Number of high-risk actions.
 
-达到任意强制限制时，任务必须终止或进入人工介入状态。
+When any mandatory limit is reached, the task must terminate or enter a state requiring human intervention.
 
-不得存在没有明确终止条件的恢复循环。
+There must be no recovery loop without an explicit termination condition.
 
-## 6.6 动作执行结果
+## 6.6 Action execution results
 
-动作执行结果不能只有成功和失败。
+Action execution results must not be limited to success and failure.
 
-至少区分：
+At least distinguish:
 
 ```text
 Succeeded
@@ -158,8 +158,8 @@ Cancelled
 OutcomeUnknown
 ```
 
-例如，重启服务时 Custos 进程突然崩溃，无法确认命令是否已经执行。重启后恢复任务时，不能直接再次执行同一动作。
+For example, if the Custos process suddenly crashes while restarting a service, there is no way to confirm whether the command actually executed. When the recovery task resumes after restart, the same action must not simply be executed again.
 
-必须先检查当前资源状态和动作可观察结果，再决定继续、验证还是要求人工介入。
+The current resource state and the action's observable results must be checked first before deciding to continue, verify, or require human intervention.
 
 ---

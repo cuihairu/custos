@@ -1,100 +1,100 @@
-> 本文整理自 ChatGPT 分享文档（源：https://chatgpt.com/s/t_6ae30fee51e081918c88645c26817ff7，取回日期 2026-10-29）。外部建议口径，非本仓事实陈述；落地前须对照代码逐项核验。
+> This document is compiled from a ChatGPT shared conversation (source: https://chatgpt.com/s/t_6ae30fee51e081918c88645c26817ff7, retrieved 2026-10-29). It is external advice, not a statement of fact about this repository; verify every item against the actual code before putting it into practice.
 
 ---
-title: 概述与架构决策
+title: Overview and Architecture Decisions
 ---
 
-# 1. 项目目标与边界
+# 1. Project Goals and Boundaries
 
-## 1.1 项目要解决的问题
+## 1.1 The problem Custos solves
 
-Custos 解决的是设备或服务发生故障后，需要人工介入才能恢复的问题，尤其是管理通道与故障本身存在依赖关系的场景。
+Custos addresses the situation where a device or service has failed and needs human intervention to recover — especially scenarios where the management channel itself depends on the thing that failed.
 
-典型场景：
+Typical scenarios:
 
-1. Windows 电脑 Wi-Fi 断开，导致向日葵离线，需要自动恢复网络。
-2. 代理节点异常，导致外网访问失败，需要切换节点或重启代理服务。
-3. Cloudflare Tunnel 断线，但代理正常，只需要重启 cloudflared。
-4. Cloudflare Tunnel 断线，同时代理异常，必须先恢复代理，再恢复 Tunnel。
-5. Linux 服务异常，根因可能是依赖服务、网络或本机资源。
-6. OpenClash 节点异常，需要诊断连接状态并有序切换节点。
-7. 自动恢复连续失败，必须记录完整证据并通知用户。
+1. A Windows PC loses Wi-Fi, so Sunlogin goes offline, and the network needs to be restored automatically.
+2. A proxy node misbehaves, external access fails, and the node needs to be switched or the proxy service restarted.
+3. A Cloudflare Tunnel drops while the proxy is fine — only cloudflared needs restarting.
+4. A Cloudflare Tunnel drops while the proxy is also broken — the proxy must be recovered first, then the Tunnel.
+5. A Linux service misbehaves, and the root cause may be a dependency service, the network, or local resources.
+6. An OpenClash node misbehaves, and connection state must be diagnosed and the node switched in an orderly way.
+7. Automatic recovery fails repeatedly, so complete evidence must be recorded and the user notified.
 
-共同特点：
+Common traits:
 
-- 故障发生时，远程管理通道可能已经不可用。
-- 设备必须在本地独立完成检测与恢复。
-- 单个服务的存活状态不足以证明其正常。
-- 修复动作之间存在前置条件和依赖关系。
-- 修复动作可能执行成功，但业务依然不可用。
-- 网络中断时，通知服务可能暂时无法使用。
-- 用户需要在事后查看故障原因、处理过程和最终结果。
+- When the failure happens, the remote management channel may already be unusable.
+- The device must complete detection and recovery locally, on its own.
+- A single service being alive is not enough to prove it is actually working.
+- Repair actions have preconditions and dependencies between them.
+- A repair action may execute successfully while the service remains unusable.
+- When the network is down, notification services may be temporarily unavailable.
+- The user needs to review the cause, the handling process and the final outcome afterwards.
 
-## 1.2 产品目标
+## 1.2 Product goals
 
-Custos 应当提供：
+Custos should provide:
 
-- 本地持续监控。
-- 资源和依赖关系管理。
-- 故障检测与根因诊断。
-- 依赖感知的恢复编排。
-- 有序候选方案和失败后的重新诊断。
-- 恢复后的健康验证。
-- 崩溃可恢复的任务状态持久化。
-- 完整的结构化审计记录。
-- 可扩展的插件运行时。
-- 常见通知渠道的内置实现。
-- 第三方通知渠道扩展。
-- 默认关闭的可选 Web Dashboard。
-- Windows、Linux、macOS，以及后续 BSD、OpenWrt 的平台适配能力。
+- Local continuous monitoring.
+- Resource and dependency management.
+- Failure detection and root-cause diagnosis.
+- Dependency-aware recovery orchestration.
+- Ordered candidate plans and re-diagnosis after failures.
+- Health verification after recovery.
+- Crash-recoverable persistence of task state.
+- Complete structured audit records.
+- An extensible plugin runtime.
+- Built-in implementations of common notification channels.
+- Extension points for third-party notification channels.
+- An optional Web Dashboard, disabled by default.
+- Platform adaptation for Windows, Linux and macOS, with BSD and OpenWrt to follow.
 
-## 1.3 明确不做的事情
+## 1.3 What is explicitly out of scope
 
-第一阶段不实现：
+Phase one does not implement:
 
-- 云端必需的控制平面。
-- 多租户 SaaS 运维平台。
-- 通用远程桌面和远程命令执行平台。
-- 软件包管理与自动升级平台。
-- 任意脚本的无限制自动执行。
-- 默认监听公网的管理 API。
-- 必须通过网络才能工作的监控和恢复流程。
-- 插件市场、插件自动下载和自动安装。
-- 将所有平台行为强行抽象成完全一致的接口。
+- A mandatory cloud control plane.
+- A multi-tenant SaaS operations platform.
+- A general-purpose remote desktop and remote command execution platform.
+- A software package management and auto-upgrade platform.
+- Unrestricted automatic execution of arbitrary scripts.
+- A management API listening on the public internet by default.
+- Monitoring and recovery flows that only work over the network.
+- A plugin marketplace, plugin auto-download or auto-install.
+- Forcing every platform's behavior into a completely identical interface.
 
-Custos 的定位是本地自治的自愈引擎，而不是另一套大型运维平台。
+Custos is positioned as a locally autonomous self-healing engine, not yet another large operations platform.
 
 ---
 
-# 2. 核心架构决策
+# 2. Core Architecture Decisions
 
-## 2.1 统一领域模型
+## 2.1 Unified domain model
 
-Custos 使用以下核心概念：
+Custos uses the following core concepts:
 
-| 概念 | 职责 |
+| Concept | Responsibility |
 |---|---|
-| Resource | 被管理的资源，例如 Wi-Fi、代理、Cloudflare Tunnel、进程或业务入口 |
-| Dependency | 资源之间的依赖关系和满足条件 |
-| Probe | 采集资源健康状态的能力 |
-| Evidence | 探测结果、错误、时间戳及相关证据 |
-| Diagnosis | 根据证据得出的故障判断 |
-| RecoveryPolicy | 决定如何处理故障的策略 |
-| RecoveryAction | 可以执行的恢复动作 |
-| Verification | 判断恢复是否真正成功 |
-| RecoveryRun | 一次完整的故障处理过程 |
-| Plugin | 封装具体资源、探测、恢复或通知能力的扩展模块 |
-| Notification | 需要通知用户或外部系统的事件 |
-| AuditEvent | 可追溯的系统事件 |
-| RecoveryStore | 保存状态、证据、动作和审计数据的持久化组件 |
+| Resource | The managed resource, e.g. Wi-Fi, proxy, Cloudflare Tunnel, a process or a business entry point |
+| Dependency | The dependency relationship between resources and its satisfaction condition |
+| Probe | The capability that collects resource health state |
+| Evidence | Probe results, errors, timestamps and related evidence |
+| Diagnosis | The fault judgment derived from evidence |
+| RecoveryPolicy | The policy deciding how failures are handled |
+| RecoveryAction | A recovery action that can be executed |
+| Verification | Judging whether recovery truly succeeded |
+| RecoveryRun | One complete failure-handling process |
+| Plugin | An extension module encapsulating specific resources, probing, recovery or notification capabilities |
+| Notification | An event that must be reported to the user or external systems |
+| AuditEvent | A traceable system event |
+| RecoveryStore | The persistence component holding state, evidence, actions and audit data |
 
-必须保持以下区别：
+The following distinctions must be preserved:
 
-**Resource 是对象，Dependency 是关系，Plugin 是能力实现，RecoveryPolicy 是策略，RecoveryRun 是一次执行实例。**
+**A Resource is an object, a Dependency is a relationship, a Plugin is a capability implementation, a RecoveryPolicy is a policy, and a RecoveryRun is one execution instance.**
 
-不能将这些概念混为一谈。
+These concepts must not be conflated.
 
-## 2.2 组件架构
+## 2.2 Component architecture
 
 ```mermaid
 flowchart TB
@@ -138,21 +138,21 @@ Host[Plugin Host]
     Core --> Store
 ```
 
-Dashboard 只是一个可选客户端。即使完全不编译 Dashboard，核心引擎也必须具备全部自愈能力。
+The Dashboard is just an optional client. Even if the Dashboard is not compiled at all, the core engine must retain the full self-healing capability.
 
-CLI 是首要的管理接口。
+The CLI is the primary management interface.
 
-## 2.3 核心运行原则
+## 2.3 Core operating principles
 
-1. Core Engine 控制整个恢复生命周期。
-2. 插件提供能力，不拥有全局恢复决策权。
-3. 所有恢复动作必须经过策略、权限和预算检查。
-4. 任何动作完成后都需要重新评估资源健康状态。
-5. 依赖恢复完成后，必须重新检测依赖，而不是假设恢复成功。
-6. 每个任务和关键状态转换必须持久化。
-7. 通知失败不得阻塞恢复。
-8. Dashboard 故障不得影响恢复。
-9. 结果未知的动作不得盲目重复执行。
-10. 恢复任务必须具备明确的终止条件。
+1. The Core Engine controls the entire recovery lifecycle.
+2. Plugins provide capabilities; they do not own global recovery decisions.
+3. Every recovery action must pass policy, permission and budget checks.
+4. After any action completes, resource health must be re-evaluated.
+5. Once dependency recovery completes, dependencies must be re-probed, not assumed healthy.
+6. Every task and critical state transition must be persisted.
+7. Notification failure must not block recovery.
+8. Dashboard failure must not affect recovery.
+9. Actions with unknown outcomes must not be blindly repeated.
+10. Recovery tasks must have explicit termination conditions.
 
 ---

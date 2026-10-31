@@ -1,14 +1,14 @@
 ---
-title: Resource 与 Dependency 模型
+title: Resource and Dependency Model
 ---
 
-# 3. Resource 与 Dependency 模型
+# 3. Resource and Dependency Model
 
-## 3.1 Resource 定义
+## 3.1 Resource definition
 
-Resource 是 Custos 监控和恢复的基本对象。
+A Resource is the basic object that Custos monitors and recovers.
 
-资源类型示例：
+Example resource types:
 
 - `process`
 - `system-service`
@@ -21,7 +21,7 @@ Resource 是 Custos 监控和恢复的基本对象。
 - `database`
 - `application`
 
-每个资源应具有：
+Every resource should have:
 
 ```text
 Resource
@@ -37,23 +37,23 @@ Resource
 └── enabled
 ```
 
-字段语义：
+Field semantics:
 
-- `id`：配置范围内稳定且唯一的标识。
-- `type`：资源类型。
-- `plugin_ref`：实现资源能力的插件。
-- `config`：资源类型专属配置。
-- `health_policy`：健康判定、连续失败阈值和恢复确认要求。
-- `recovery_policy`：恢复候选方案和恢复限制。
-- `dependencies`：资源的前置依赖。
-- `permissions`：该资源允许的操作范围。
-- `enabled`：是否启用监控和自动恢复。
+- `id`: a stable, unique identifier within configuration scope.
+- `type`: the resource type.
+- `plugin_ref`: the plugin implementing the resource capabilities.
+- `config`: configuration specific to the resource type.
+- `health_policy`: health criteria, consecutive failure thresholds and recovery confirmation requirements.
+- `recovery_policy`: recovery candidate plans and recovery limits.
+- `dependencies`: the resource's upstream dependencies.
+- `permissions`: the scope of operations allowed for this resource.
+- `enabled`: whether monitoring and automatic recovery are enabled.
 
-资源 ID 不应因进程重启、插件重启或机器重启而变化。
+Resource IDs must not change across process restarts, plugin restarts or machine reboots.
 
-## 3.2 Resource 健康状态
+## 3.2 Resource health status
 
-建议使用以下健康状态：
+The following health states are recommended:
 
 ```rust
 enum HealthStatus {
@@ -67,32 +67,32 @@ enum HealthStatus {
 }
 ```
 
-状态语义：
+State semantics:
 
-- `Unknown`：尚未获得足够证据。
-- `Healthy`：满足健康条件。
-- `Degraded`：部分能力异常，但仍能提供服务。
-- `Unhealthy`：明确不满足健康条件。
-- `Recovering`：正在执行恢复流程。
-- `Suppressed`：依据策略暂停自动处理。
-- `Unreachable`：探测手段本身无法取得有效结果，尚不能确认根因。
+- `Unknown`: not enough evidence has been collected yet.
+- `Healthy`: health criteria are satisfied.
+- `Degraded`: some capability is impaired, but the service still works.
+- `Unhealthy`: health criteria are clearly not satisfied.
+- `Recovering`: a recovery process is being executed.
+- `Suppressed`: automatic handling is paused by policy.
+- `Unreachable`: the probe itself cannot obtain a valid result, so the root cause cannot yet be confirmed.
 
-`Unreachable` 不能直接等同于 `Unhealthy`。例如，探测远端服务超时，可能是远端故障，也可能是本机网络故障。
+`Unreachable` must not be treated as equivalent to `Unhealthy`. For example, a probe timeout against a remote service could mean the remote end failed, or that the local network failed.
 
-资源状态还应记录：
+Resource state should also record:
 
-- 状态更新时间。
-- 连续成功与失败次数。
-- 最近一次有效探测时间。
-- 当前生效的故障标识。
-- 正在执行的 RecoveryRun。
-- 当前证据摘要。
+- When the state was last updated.
+- Consecutive success and failure counts.
+- The time of the last valid probe.
+- The currently active fault identifier.
+- The RecoveryRun currently being executed.
+- A summary of the current evidence.
 
-## 3.3 Dependency 定义
+## 3.3 Dependency definition
 
-依赖关系描述资源正常运行所需要满足的条件。
+A dependency describes the conditions a resource needs satisfied in order to run normally.
 
-建议定义：
+Suggested definition:
 
 ```rust
 struct Dependency {
@@ -104,7 +104,7 @@ struct Dependency {
 }
 ```
 
-其中：
+where:
 
 ```rust
 enum DependencyRequirement {
@@ -115,47 +115,47 @@ enum DependencyRequirement {
 }
 ```
 
-具体语义：
+Concrete semantics:
 
 ### Required
 
-必须满足的依赖。
+A dependency that must be satisfied.
 
-如果不满足，则不能执行依赖该条件的恢复动作，除非该动作被明确标记为用于恢复该依赖本身。
+If it is not, recovery actions that depend on it cannot be executed — unless the action is explicitly marked as being for recovering that dependency itself.
 
 ### Optional
 
-非强制依赖。
+A non-mandatory dependency.
 
-可以尝试恢复，但是否阻塞上层操作由策略决定。
+Recovery may be attempted, but whether it blocks upstream operations is decided by policy.
 
 ### Conditional
 
-仅在特定条件下需要满足。
+Only required under specific conditions.
 
-例如，使用代理模式时需要代理健康；直连模式下则不需要。
+For example, the proxy must be healthy in proxy mode, but not in direct-connection mode.
 
 ### AlternativeGroup
 
-多个候选资源中满足指定数量即可。
+A set of candidate resources where the specified number must be satisfied.
 
-例如：
+For example:
 
 ```text
 ProxyAccess
 ├── PrimaryProxy
 └── BackupProxy
 
-要求：至少一个可用
+Requirement: at least one available
 ```
 
-不能把备用资源简单地建模成所有依赖都必须正常。
+Backup resources must not be naively modeled as "every dependency must be healthy".
 
-## 3.4 健康条件
+## 3.4 Health conditions
 
-依赖必须声明依赖的是哪种健康条件，而不是只声明依赖某个资源。
+A dependency must declare which health condition it depends on, not merely which resource it depends on.
 
-示例：
+Example:
 
 ```yaml
 dependencies:
@@ -165,73 +165,73 @@ dependencies:
       status: healthy
 ```
 
-更复杂的条件可以要求：
+More complex conditions may require:
 
-- 资源状态为 Healthy。
-- 特定能力可用。
-- 最近一次成功探测不超过指定时间。
-- 连续成功达到指定次数。
-- 特定业务检查通过。
+- The resource status to be Healthy.
+- A specific capability to be available.
+- The last successful probe to be no older than a specified time.
+- Consecutive successes to reach a specified count.
+- A specific business check to pass.
 
-第一版应只实现少量明确、可测试的条件，不要设计任意表达式语言。
+The first version should implement only a small set of clear, testable conditions — no arbitrary expression language.
 
-## 3.5 依赖图和循环检测
+## 3.5 Dependency graph and cycle detection
 
-依赖关系构成有向图。
+Dependencies form a directed graph.
 
-如果资源 A 依赖 B，则依赖边为：
+If resource A depends on B, the dependency edge is:
 
 ```text
 A -> B
 ```
 
-恢复 A 时，先评估 B。
+When recovering A, B is evaluated first.
 
-配置加载时必须：
+At configuration load time, Custos must:
 
-1. 验证资源 ID 唯一。
-2. 验证所有依赖引用存在。
-3. 检测硬依赖循环。
-4. 验证 AlternativeGroup 的配置合法。
-5. 检查是否存在不可能满足的依赖条件。
-6. 输出具体的配置错误路径。
+1. Verify resource IDs are unique.
+2. Verify all dependency references exist.
+3. Detect hard dependency cycles.
+4. Verify that AlternativeGroup configurations are valid.
+5. Check for dependency conditions that can never be satisfied.
+6. Report the exact configuration error path.
 
-对于：
+For:
 
 ```text
 A -> B -> C -> A
 ```
 
-必须在配置阶段拒绝启动，不能等到恢复时才无限递归。
+startup must be rejected at configuration time; the system must not wait until recovery and recurse forever.
 
-第一版可以禁止所有普通依赖环；未来如果需要循环或互为备份关系，应通过显式的冗余组建模，而不是允许任意循环。
+The first version may forbid all ordinary dependency cycles. If cycles or mutual-backup relationships are ever needed later, they should be modeled through explicit redundancy constructs, not by allowing arbitrary cycles.
 
-## 3.6 依赖恢复算法
+## 3.6 Dependency recovery algorithm
 
-恢复资源 A 时：
+When recovering resource A:
 
-1. 获取 A 的依赖集合。
-2. 检查每个依赖的当前状态是否足够新。
-3. 状态未知或已过期时重新探测。
-4. 满足条件的依赖直接通过。
-5. 未满足的依赖按照自身策略进入恢复流程。
-6. 等待依赖恢复完成。
-7. 重新验证依赖健康状态。
-8. 全部必需依赖满足后，才允许执行 A 的恢复动作。
-9. 如果依赖恢复失败，则根据 A 的策略决定等待、跳过非关键依赖、终止或升级告警。
+1. Collect A's dependency set.
+2. Check whether each dependency's current state is fresh enough.
+3. Re-probe when state is unknown or stale.
+4. Dependencies whose conditions are satisfied pass directly.
+5. Unsatisfied dependencies enter recovery according to their own policy.
+6. Wait for dependency recovery to complete.
+7. Re-verify dependency health.
+8. Only after all required dependencies are satisfied may A's recovery actions execute.
+9. If dependency recovery fails, A's policy decides whether to wait, skip non-critical dependencies, terminate or escalate.
 
-必须区分两种动作：
+Two kinds of actions must be distinguished:
 
-- 为了修复依赖本身而执行的恢复动作。
-- 必须等待依赖健康后才能执行的上层动作。
+- Recovery actions executed in order to fix the dependency itself.
+- Upstream actions that must wait for the dependency to be healthy before executing.
 
-例如，代理不健康时，允许执行“切换代理节点”；但不应该执行依赖代理才能完成的 Cloudflare Tunnel 重启，然后期待它成功。
+For example, when the proxy is unhealthy, "switch proxy node" is allowed; but restarting the Cloudflare Tunnel — which depends on the proxy — should not be executed while expecting it to succeed.
 
-## 3.7 并发与依赖去重
+## 3.7 Concurrency and dependency deduplication
 
-同一资源可能被多个上层资源依赖。
+The same resource may be depended on by multiple upstream resources.
 
-例如：
+For example:
 
 ```text
 Cloudflare Tunnel ──> Proxy
@@ -239,15 +239,15 @@ Sunlogin ────────────> Network
 Other Service ───────> Proxy
 ```
 
-如果多个恢复任务同时发现 Proxy 不健康，不能同时启动多个代理重启任务。
+If multiple recovery tasks discover at the same time that the Proxy is unhealthy, multiple proxy restart tasks must not be started simultaneously.
 
-要求：
+Requirements:
 
-- 每个资源有独立的恢复互斥锁。
-- 同一资源同时最多有一个活动 RecoveryRun。
-- 其他任务可以等待同一个恢复结果。
-- 资源健康状态变化时，等待中的任务重新评估依赖。
-- 恢复任务不能重复启动相同的高风险动作。
-- 必须定义全局与资源级恢复预算。
+- Each resource has its own recovery mutex.
+- At most one active RecoveryRun per resource at a time.
+- Other tasks may wait on the same recovery result.
+- When resource health changes, waiting tasks re-evaluate their dependencies.
+- Recovery tasks must not repeatedly start the same high-risk action.
+- Global and per-resource recovery budgets must be defined.
 
 ---

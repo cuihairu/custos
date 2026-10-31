@@ -1,167 +1,167 @@
 ---
-title: 分阶段实施计划
+title: Phased Implementation Plan
 ---
 
-# 14. 分阶段实施计划
+# 14. Phased Implementation Plan
 
-## P0：核心恢复引擎
+## P0: Core recovery engine
 
-目标：先实现完整且可测试的恢复闭环，不接入复杂网络能力。
+Goal: implement a complete, testable recovery loop first, without wiring in complex network capabilities.
 
-实现内容：
+Implementation items:
 
-1. Cargo Workspace。
-2. Resource、Dependency、Evidence、Diagnosis、RecoveryPolicy、RecoveryRun 等领域模型。
-3. 配置解析和验证。
-4. 依赖图构建和循环检测。
-5. Process Probe。
-6. Exec Probe。
-7. 连续失败阈值和健康状态转换。
-8. RecoveryRun 状态机。
-9. 有序候选动作。
-10. 恢复动作执行后重新验证。
-11. 失败后的重新诊断。
-12. 超时、预算和冷却时间。
-13. 资源级恢复互斥。
-14. SQLite 持久化。
-15. 崩溃恢复和未知结果处理。
-16. CLI 基础命令。
-17. 结构化日志与审计事件。
-18. 集成测试与故障注入。
+1. Cargo Workspace.
+2. Domain models such as Resource, Dependency, Evidence, Diagnosis, RecoveryPolicy and RecoveryRun.
+3. Configuration parsing and validation.
+4. Dependency graph construction and cycle detection.
+5. Process Probe.
+6. Exec Probe.
+7. Consecutive failure thresholds and health state transitions.
+8. The RecoveryRun state machine.
+9. Ordered candidate actions.
+10. Re-verification after a recovery action executes.
+11. Re-diagnosis after failure.
+12. Timeouts, budgets and cooldowns.
+13. Per-resource recovery mutexes.
+14. SQLite persistence.
+15. Crash recovery and unknown-outcome handling.
+16. Basic CLI commands.
+17. Structured logging and audit events.
+18. Integration tests and fault injection.
 
-P0 不包含：
+P0 does not include:
 
-- HTTP Probe。
-- Web Dashboard。
-- 远程管理 API。
-- 插件市场。
-- OpenClash。
-- 复杂 Wi-Fi 恢复。
-- 企业通知平台。
+- HTTP Probe.
+- Web Dashboard.
+- Remote management API.
+- Plugin marketplace.
+- OpenClash.
+- Complex Wi-Fi recovery.
+- Enterprise notification platforms.
 
-验收标准：
+Acceptance criteria:
 
-- 一个进程退出后能被检测。
-- 一个受控命令失败后能触发恢复。
-- 第一个恢复方案失败时能选择第二个方案。
-- 命令返回成功但资源仍异常时，不得报告恢复成功。
-- 依赖不健康时，上层动作不会提前执行。
-- 同一资源不会并发执行多个恢复任务。
-- Custos 崩溃重启后可以恢复未完成任务。
-- 结果未知的动作不会被无条件重复执行。
-- 所有状态转换都可以通过日志和数据库追溯。
-- 所有预算耗尽的任务都能明确终止。
+- A process exiting can be detected.
+- A controlled command failing can trigger recovery.
+- When the first recovery plan fails, the second plan can be selected.
+- When a command returns success but the resource is still unhealthy, recovery must not be reported as successful.
+- When a dependency is unhealthy, upstream actions do not execute early.
+- The same resource never runs multiple recovery tasks concurrently.
+- After Custos crashes and restarts, unfinished tasks can be resumed.
+- Actions with unknown outcomes are not unconditionally repeated.
+- All state transitions are traceable through logs and the database.
+- Every task that exhausts its budget terminates explicitly.
 
-## P1：插件运行时与通知基础设施
+## P1: Plugin runtime and notification infrastructure
 
-实现内容：
+Implementation items:
 
-1. JSON-RPC 2.0 stdio 插件协议。
-2. 插件能力声明。
-3. 插件启动、关闭和重启管理。
-4. 超时、取消和输出限制。
-5. 插件崩溃隔离。
-6. NotificationEvent。
-7. 本地日志渠道。
-8. Webhook 内置渠道。
-9. SMTP 内置渠道。
-10. 持久化通知队列。
-11. 通知重试、去重和死信状态。
-12. CLI 通知状态和重试命令。
-13. 插件权限与能力检查。
+1. The JSON-RPC 2.0 stdio plugin protocol.
+2. Plugin capability declarations.
+3. Plugin start, shutdown and restart management.
+4. Timeouts, cancellation and output limits.
+5. Plugin crash isolation.
+6. NotificationEvent.
+7. Local log channel.
+8. Built-in Webhook channel.
+9. Built-in SMTP channel.
+10. Persisted notification queue.
+11. Notification retry, deduplication and dead-letter states.
+12. CLI notification status and retry commands.
+13. Plugin permission and capability checks.
 
-验收标准：
+Acceptance criteria:
 
-- 插件崩溃不会导致核心进程退出。
-- 大量 stderr 输出不会阻塞协议通信。
-- 插件无响应会在规定时间内超时。
-- 断网期间通知保留在本地队列。
-- 网络恢复后通知可以继续发送。
-- 通知发送失败不影响恢复任务。
-- 敏感字段不会进入普通日志。
+- A plugin crash does not exit the core process.
+- Heavy stderr output does not block protocol communication.
+- An unresponsive plugin times out within the configured limit.
+- While the network is down, notifications stay in the local queue.
+- Once the network recovers, queued notifications continue sending.
+- Notification delivery failure does not affect recovery tasks.
+- Sensitive fields never reach ordinary logs.
 
-## P2：平台基础能力
+## P2: Platform base capabilities
 
-优先支持 Linux 和 Windows。
+Prioritize Linux and Windows.
 
-实现内容：
+Implementation items:
 
-- 进程管理。
-- systemd 服务控制。
-- Windows Service 控制。
-- 平台能力探测。
-- 平台权限检查。
-- 系统重启动作。
-- 本机网络基础探测。
-- 平台适配器集成测试。
+- Process management.
+- systemd service control.
+- Windows Service control.
+- Platform capability detection.
+- Platform permission checks.
+- System reboot action.
+- Basic local network probing.
+- Platform adapter integration tests.
 
-验收标准：
+Acceptance criteria:
 
-- Linux 不使用 systemd 时能正确报告能力不支持，而不是误执行。
-- Windows 服务操作具备超时和结果验证。
-- 高风险操作没有明确授权时会被拒绝。
-- 平台特有错误能转换为统一的故障结果。
+- On Linux without systemd, capability-unsupported is reported correctly instead of misexecuting.
+- Windows service operations have timeouts and result verification.
+- High-risk operations without explicit authorization are rejected.
+- Platform-specific errors convert into unified fault results.
 
-## P3：网络、代理与真实自愈场景
+## P3: Network, proxy and real self-healing scenarios
 
-实现内容：
+Implementation items:
 
-- 网络接口探测。
-- 网关和路由探测。
-- DNS 探测。
-- HTTP Probe。
-- 代理连接与认证诊断。
-- Mihomo 插件。
-- cloudflared 插件。
-- Windows Wi-Fi 恢复。
-- OpenWrt 网络适配器。
-- OpenClash 插件。
-- 网络恢复后的端到端验证。
-- 网络操作的互斥与风险控制。
+- Network interface probing.
+- Gateway and route probing.
+- DNS probing.
+- HTTP Probe.
+- Proxy connection and authentication diagnosis.
+- Mihomo plugin.
+- cloudflared plugin.
+- Windows Wi-Fi recovery.
+- OpenWrt network adapter.
+- OpenClash plugin.
+- End-to-end verification after network recovery.
+- Mutexes and risk control for network operations.
 
-验收场景：
+Acceptance scenarios:
 
-1. 向日葵离线，但网络正常：只恢复向日葵相关服务。
-2. Wi-Fi 断开：先恢复网络，再验证远程管理能力。
-3. 代理正常、Tunnel 异常：重启 Tunnel。
-4. 代理异常、Tunnel 异常：先恢复代理，再处理 Tunnel。
-5. 代理返回 407：识别认证问题，不直接认定服务宕机。
-6. 代理恢复后 Tunnel 仍异常：重新诊断 Tunnel。
-7. 所有恢复方案失败：停止自动处理并通知。
-8. 恢复期间网络再次断开：本地引擎继续运行并持久化结果。
+1. Sunlogin offline but the network fine: only Sunlogin-related services are recovered.
+2. Wi-Fi disconnected: restore the network first, then verify remote management capability.
+3. Proxy healthy, Tunnel abnormal: restart the Tunnel.
+4. Proxy broken, Tunnel abnormal: recover the proxy first, then handle the Tunnel.
+5. Proxy returns 407: identify the authentication problem; do not declare the service down.
+6. Proxy recovered but the Tunnel is still abnormal: diagnose the Tunnel again.
+7. Every recovery plan failed: stop automatic handling and notify.
+8. The network drops again during recovery: the local engine keeps running and persists results.
 
-## P4：可选管理界面与扩展
+## P4: Optional management interface and extensions
 
-实现内容：
+Implementation items:
 
-- Web Dashboard，默认关闭。
-- 资源列表与健康状态。
-- 依赖图展示。
-- RecoveryRun 时间线。
-- 通知状态。
-- 配置检查。
-- 更丰富的通知插件。
-- macOS 适配。
-- BSD 适配。
-- OpenWrt 完整能力。
-- 插件签名与分发策略。
-- 更完善的操作授权界面。
+- Web Dashboard, disabled by default.
+- Resource list and health status.
+- Dependency graph display.
+- RecoveryRun timeline.
+- Notification status.
+- Configuration checks.
+- Richer notification plugins.
+- macOS adaptation.
+- BSD adaptation.
+- Full OpenWrt capability.
+- Plugin signing and distribution policy.
+- A more complete operation authorization interface.
 
-验收标准：
+Acceptance criteria:
 
-- Dashboard 默认关闭时无监听端口。
-- Dashboard 不可用时核心功能不受影响。
-- Dashboard 不直接执行绕过 Core Engine 的动作。
-- 高风险操作仍经过统一权限和审计流程。
+- With the Dashboard disabled by default, no port is listened on.
+- When the Dashboard is unavailable, core functionality is unaffected.
+- The Dashboard never directly executes actions that bypass the Core Engine.
+- High-risk operations still go through the unified permission and audit process.
 
 ---
 
-## 落地跟踪
+## Implementation tracking
 
-每个阶段落地后以 commit hash 勾掉；来源与验收口径见上文对应阶段。
+Check off each phase with its commit hash once it lands; for sources and acceptance criteria see the corresponding phase above.
 
-- [ ] P0 核心恢复引擎（commit: __）
-- [ ] P1 插件运行时与通知基础设施（commit: __）
-- [ ] P2 平台基础能力（commit: __）
-- [ ] P3 网络、代理与真实自愈场景（commit: __）
-- [ ] P4 可选管理界面与扩展（commit: __）
+- [ ] P0 core recovery engine (commit: __)
+- [ ] P1 plugin runtime and notification infrastructure (commit: __)
+- [ ] P2 platform base capabilities (commit: __)
+- [ ] P3 network, proxy and real self-healing scenarios (commit: __)
+- [ ] P4 optional management interface and extensions (commit: __)

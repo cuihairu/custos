@@ -1,36 +1,28 @@
-# ADR-0012: 为什么禁止未经授权的高风险网络动作
+# ADR-0012: Why Unauthorized High-risk Network Actions Are Forbidden
 
-- 状态：已接受
-- 日期：2026-10-31
-- 关联：docs/guide/security.md §12.2，platforms.md
+- Status: Accepted
+- Date: 2026-10-31
+- Related: docs/guide/security.md §12.2, platforms.md
 
-## 背景
+## Background
 
-自愈引擎拥有重启服务、重置网络接口、改路由的权限。网络类动作与普通服务重启
-有本质区别：**它可能切断管理通道**——Wi-Fi 重连失败、默认路由被清、防火墙被重置，
-引擎就会与操作者彻底失联，且此刻正是系统最需要人的时候。自愈系统把自己搞失联
-是最坏的失败模式。
+A self-healing engine holds privileges to restart services, reset network interfaces, and change routes. Network actions differ fundamentally from ordinary service restarts: **they can cut the management channel** — Wi-Fi reconnect fails, the default route is cleared, the firewall is reset — the engine loses contact with the operator entirely, and this is exactly when the system most needs a human. A self-healing system losing its own connection is the worst failure mode.
 
-## 决策
+## Decision
 
-高风险动作（`RiskLevel::High`：网络接口重置、系统重启、清防火墙等）默认拒绝，
-必须显式授权（`permissions.default_allow_high_risk` 或每资源
-`recovery_policy.allow_high_risk`）才可执行，且每次执行进授权审计；
-接口重置类动作必须显式标记"可能中断管理通道"；网络操作全局互斥（P3），
-禁止默认清防火墙/重置全部路由这类不可逆操作。
+High-risk actions (`RiskLevel::High`: interface reset, system reboot, firewall clearing) are denied by default; they require explicit authorization (`permissions.default_allow_high_risk` or per-resource `recovery_policy.allow_high_risk`) and every execution enters the authorization audit; interface resets must be explicitly flagged "may interrupt management channel"; network operations have a global mutex (P3), with blanket firewall clears / full route resets forbidden.
 
-## 替代方案
+## Alternatives
 
-- **默认允许、事后审计**：失联发生后审计毫无意义。
-- **按资源粒度默认允许**：一次配置疏忽即全量暴露。
+- **Allow by default, audit after**: once contact is lost, the audit is meaningless.
+- **Per-resource default allow**: one configuration mistake exposes everything.
 
-## 优缺点
+## Pros and Cons
 
-优点：破坏性动作的爆炸半径被配置显式控制；审计链可回答"谁授权的、何时执行"。
-缺点：需要配置才有能力（文档与示例必须讲清楚）；
-"值得开高风险"的判断落在用户身上。
+Pros: the blast radius of destructive actions is explicitly controlled by configuration; the audit chain answers "who authorized it, when it ran."
+Cons: capability requires configuration (documentation and examples must be clear); the "worth enabling high-risk" judgment falls on the user.
 
-## 后续影响
+## Follow-up Impact
 
-- P2 平台适配器的每个危险原语都必须先有权限检查（todo P2 §权限检查）。
-- P4 授权界面与审计同源，不自建权限模型。
+- Every P2 platform adapter's dangerous primitive must have a permission check first (todo P2 §permission checks).
+- The P4 authorization UI shares the audit source, no custom permission model.

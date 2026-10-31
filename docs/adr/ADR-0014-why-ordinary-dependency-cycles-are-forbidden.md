@@ -1,33 +1,28 @@
-# ADR-0014: 为什么禁止普通依赖图循环
+# ADR-0014: Why Ordinary Dependency Cycles Are Forbidden
 
-- 状态：已接受
-- 日期：2026-10-31
-- 关联：resources.md §3.5，ADR-0004
+- Status: Accepted
+- Date: 2026-10-31
+- Related: resources.md §3.5, ADR-0004
 
-## 背景
+## Background
 
-A 依赖 B、B 又依赖 A 时，恢复顺序在逻辑上无解：两边都"等对方先健康"，
-形成互相等待。这种环若在运行期才发现，表现为死锁或随机顺序的乱修；
-配置错误会静默潜伏。
+When A depends on B and B depends on A, the recovery order is logically unsolvable: both sides "wait for the other to become healthy first," forming mutual waiting. A cycle discovered at runtime manifests as deadlock or arbitrary-order random repairs; configuration errors silently fester.
 
-## 决策
+## Decision
 
-普通依赖图必须无环：配置加载期（`DependencyGraph::build`）做环检测，
-检出即拒绝启动并打印具体环路径（`a -> b -> a`）；用户无法通过运行期
-兜底来"打破"环。表达"互为备份"这类合法的对称关系用 `alternative_groups`
-（冗余组，required_count 语义）而不是环。
+Ordinary dependency graphs must be acyclic: cycle detection at configuration load time (`DependencyGraph::build`); a cycle rejects startup and prints the concrete cycle path (`a -> b -> a`); users cannot "break" cycles with runtime fallbacks. Expressing "mutual backup" legitimately uses `alternative_groups` (redundancy groups, required_count semantics) instead of cycles.
 
-## 替代方案
+## Alternatives
 
-- **运行期打破环（超时/仲裁）**：行为不可预测，恢复顺序取决于竞态胜负。
-- **允许环 + 拓扑排序容错**：排序算法对环的输出是任意的，等于随机恢复。
+- **Runtime cycle breaking (timeout/arbitration)**: unpredictable behavior; recovery order depends on which side wins the race.
+- **Allow cycles + tolerant topological sort**: the sort algorithm's output for cycles is arbitrary — equivalent to random recovery.
 
-## 优缺点
+## Pros and Cons
 
-优点：启动期把不可恢复的建模错误一次性拒绝；恢复顺序永远良定义（拓扑序）。
-缺点：互为依赖的建模需求要走 alternative_groups（学习成本）。
+Pros: unrecoverable modeling errors rejected once at startup; recovery order is always well-defined (topological sort).
+Cons: mutual-dependency modeling needs alternative_groups (learning curve).
 
-## 后续影响
+## Follow-up Impact
 
-- 条件依赖（`conditional_on`）是有向无环内的特殊激活边，同样受环检测约束。
-- 配置校验错误必须包含完整环路径（tests: rejects_dependency_cycle_at_startup）。
+- Conditional dependencies (`conditional_on`) are special activation edges inside a DAG, also constrained by cycle detection.
+- Configuration validation errors must include the full cycle path (tests: rejects_dependency_cycle_at_startup).

@@ -1,36 +1,28 @@
-# ADR-0011: 为什么 P0 只实现 Process 和 Exec Probe
+# ADR-0011: Why P0 Ships Only Process and Exec Probes
 
-- 状态：已接受
-- 日期：2026-10-31
-- 关联：docs/guide/probe-survey.md §26.11，roadmap P0
+- Status: Accepted
+- Date: 2026-10-31
+- Related: docs/guide/probe-survey.md §26.11, roadmap P0
 
-## 背景
+## Background
 
-探测类型可以无限多（调研 §26 列了 20+ 种），但 P0 要证明的是架构：探针 → 归一化 →
-诊断 → 依赖检查 → 恢复 → 独立验证 → 持久化 → 审计这条闭环正确。摊开 20 种探针
-只会让每种都缺测试、缺语义打磨。
+Probe types are unlimited (survey §26 lists 20+), but P0 must prove the architecture: probe → normalization → diagnosis → dependency check → recovery → independent verification → persistence → audit, all correct. Spreading across 20 probe types makes each shallow.
 
-## 决策
+## Decision
 
-P0 只实现 Process（pid 文件 + 存活）与 Exec（受控命令 + 超时 + 输出上限）两种探针，
-用它们打通全部闭环与验收；其余探测类型按调研 §26.11 的建议顺序逐个补齐，
-**每个带独立测试、跨平台语义（Linux/Windows）与归一化规则**（连接拒绝≠超时、
-Unreachable≠Unhealthy），补齐一项 tick 一项。
+P0 implements only Process (pid file + liveness) and Exec (controlled command + timeout + output cap), proving the full loop and acceptance with them; other probe types are added in the survey §26.11 recommended order, each with independent tests, cross-platform semantics (Linux/Windows), and normalization rules (connection refused ≠ timeout, Unreachable ≠ Unhealthy), one tick per probe.
 
-## 替代方案
+## Alternatives
 
-- **一次实现全部探测类型**：面铺开、深度不足；归一化规则没有逐类打磨，
-  误报/漏报在真实部署才暴露。
-- **只做 Exec 万能探针**：丢失归一化（命令输出不是结构化健康状态），
-  无法支撑验证与依赖条件。
+- **Implement all probe types at once**: spread too thin; normalization rules never polished per-type — false positives and negatives only surface in real deployments.
+- **Only the Exec universal probe**: loses normalization (command output is not structured health state), cannot support verification and dependency conditions.
 
-## 优缺点
+## Pros and Cons
 
-优点：闭环质量先行；每类探针有独立语义边界与测试（现在 13 项高优全部完成，
-145/145 绿）；后续扩展模板清晰。
-缺点：早期可监控对象少（用户需用 Exec 兜底）。
+Pros: loop quality first; each probe type has independent semantic boundaries and tests (now 13 high-priority items done, 174/174 green); clear extension template.
+Cons: fewer monitorable objects early (users use Exec as fallback).
 
-## 后续影响
+## Follow-up Impact
 
-- probe-survey §26.11 顺序成为补齐路线图；每类探针一个模块（icmp.rs/database.rs…）。
-- 新探针必须同时给出：归一化规则、超时/权限语义、Windows 行为（cfg 或交叉检查）。
+- probe-survey §26.11 order is the roadmap; each probe type is one module (icmp.rs/database.rs…).
+- New probes must provide: normalization rules, timeout/permission semantics, Windows behavior (cfg or cross-check).

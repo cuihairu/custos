@@ -4,91 +4,91 @@ title: Notification Engine
 
 # 8. Notification Engine
 
-## 8.1 设计目标
+## 8.1 Design goals
 
-Notification 是独立子系统。
+Notification is an independent subsystem.
 
-Core Engine 只产生结构化事件，不直接调用 Telegram、SMTP 或其他平台的 API。
+The Core Engine only produces structured events; it never calls the Telegram, SMTP or other platform APIs directly.
 
-通知系统负责：
+The notification system is responsible for:
 
-- 事件筛选。
-- 规则匹配。
-- 通知构建。
-- 通知队列持久化。
-- 渠道选择。
-- 重试与退避。
-- 去重和聚合。
-- 送达状态。
-- 恢复后补发。
+- Event filtering.
+- Rule matching.
+- Notification construction.
+- Persisting the notification queue.
+- Channel selection.
+- Retry and backoff.
+- Deduplication and aggregation.
+- Delivery status.
+- Catch-up delivery after recovery.
 
-通知发送失败不得阻塞 RecoveryRun。
+Notification delivery failure must not block a RecoveryRun.
 
-## 8.2 内置渠道
+## 8.2 Built-in channels
 
-第一版内置：
+The first version ships with:
 
 ### Local Log
 
-本地结构化日志，作为基础审计输出。
+Structured local logs, serving as the baseline audit output.
 
 ### Webhook
 
-向用户配置的 HTTP 或 HTTPS 接口发送 JSON 事件。
+Sends JSON events to a user-configured HTTP or HTTPS endpoint.
 
-要求：
+Requirements:
 
-- 请求超时。
-- 重试与退避。
-- 事件 ID。
-- 可配置认证头。
-- 可选 HMAC 签名。
-- TLS 验证。
-- 受控的目标地址策略。
-- 对私网地址、回环地址和重定向的 SSRF 防护策略。
-- 不记录密钥。
-- 明确区分 HTTP 请求失败和对方业务确认失败。
+- Request timeout.
+- Retry and backoff.
+- Event ID.
+- Configurable authentication headers.
+- Optional HMAC signing.
+- TLS verification.
+- A controlled destination address policy.
+- SSRF protection for private, loopback and redirect targets.
+- Never log secrets.
+- Clearly distinguish an HTTP request failure from the peer's business-level confirmation failure.
 
-Webhook 应当是优先实现的通用外部渠道。
+The Webhook should be the first general-purpose external channel implemented.
 
 ### SMTP Email
 
-支持常规 SMTP 邮件告警。
+Supports conventional SMTP email alerting.
 
-要求：
+Requirements:
 
-- 连接与发送超时。
-- TLS 支持。
-- 凭据安全读取。
-- 可配置发件人和收件人。
-- 发送失败重试。
-- 明确的发送结果。
+- Connection and send timeouts.
+- TLS support.
+- Secure credential reading.
+- Configurable sender and recipients.
+- Retry on send failure.
+- Explicit send results.
 
 ### Console
 
-CLI 实时展示事件，用于本地调试和运行观察。
+The CLI displays events in real time, for local debugging and runtime observation.
 
-Console 不是远程通知渠道。
+Console is not a remote notification channel.
 
-## 8.3 第三方通知插件
+## 8.3 Third-party notification plugins
 
-支持：
+Support for:
 
-- Telegram。
-- Discord。
-- Slack。
-- 企业微信。
-- 钉钉。
-- 飞书。
-- ntfy。
-- Gotify。
-- 用户自定义通知渠道。
+- Telegram.
+- Discord.
+- Slack.
+- WeCom (Enterprise WeChat).
+- DingTalk.
+- Feishu (Lark).
+- ntfy.
+- Gotify.
+- User-defined notification channels.
 
-这些渠道通过统一 NotificationChannel 接口接入，不需要在 Core Engine 中加入各平台专属逻辑。
+These channels plug in through a unified NotificationChannel interface; platform-specific logic must not be added to the Core Engine.
 
-第一版不需要全部内置。优先保证 Webhook 和 SMTP 可用。
+The first version does not need all of them built in. Prioritize making Webhook and SMTP usable.
 
-## 8.4 事件模型
+## 8.4 Event model
 
 ```rust
 struct NotificationEvent {
@@ -104,7 +104,7 @@ struct NotificationEvent {
 }
 ```
 
-主要事件类型：
+Main event types:
 
 ```text
 resource.unhealthy
@@ -120,38 +120,38 @@ notification.delivery_failed
 configuration.invalid
 ```
 
-`notification.delivery_failed` 应受到特殊限制，避免通知系统自身故障产生无限通知循环。至少应允许仅写入本地日志。
+`notification.delivery_failed` should be specially constrained to prevent the notification system's own failures from creating an infinite notification loop. At minimum, falling back to local-log-only writes should be allowed.
 
-## 8.5 通知策略
+## 8.5 Notification policy
 
-通知规则与恢复规则必须独立。
+Notification rules and recovery rules must be independent.
 
-示例：
+Examples:
 
-- 故障首次出现：记录日志。
-- 故障持续超过阈值：发送告警。
-- 自动恢复成功：可配置是否通知。
-- 恢复耗尽：发送高优先级告警。
-- 插件不可用：根据受影响资源的重要性决定是否通知。
-- 同一故障持续发生：聚合并抑制重复通知。
-- 故障恢复：发送恢复通知。
+- A fault appears for the first time: log it.
+- A fault persists beyond a threshold: send an alert.
+- Automatic recovery succeeds: configurable whether to notify.
+- Recovery exhausted: send a high-priority alert.
+- Plugin unavailable: notify or not depending on the importance of affected resources.
+- The same fault keeps recurring: aggregate and suppress duplicates.
+- Fault recovered: send a recovery notification.
 
-## 8.6 断网时的行为
+## 8.6 Behavior while the network is down
 
-网络中断时：
+When the network is interrupted:
 
-1. 生成 NotificationEvent。
-2. 持久化到通知队列。
-3. 标记为 Pending。
-4. 不阻塞恢复任务。
-5. 后台发送器根据退避策略尝试发送。
-6. 网络恢复后继续处理。
-7. 成功后记录 Delivered。
-8. 结果不确定时，依据渠道策略决定是否重试。
+1. Generate the NotificationEvent.
+2. Persist it to the notification queue.
+3. Mark it Pending.
+4. Do not block the recovery task.
+5. A background sender retries with a backoff policy.
+6. Processing continues once the network recovers.
+7. On success, record Delivered.
+8. When the outcome is uncertain, the channel policy decides whether to retry.
 
-不能保证所有外部渠道实现严格的端到端 exactly-once 送达。Custos 应采用稳定事件 ID、尽力去重和可观测的发送状态。
+Strict end-to-end exactly-once delivery cannot be guaranteed for all external channels. Custos should rely on stable event IDs, best-effort deduplication and observable delivery status.
 
-建议状态：
+Suggested states:
 
 ```text
 Pending
@@ -161,16 +161,16 @@ RetryScheduled
 DeadLetter
 ```
 
-`Delivered` 只代表渠道返回了其定义的成功结果；除非对方提供确认机制，否则不能声称最终用户一定看到了通知。
+`Delivered` only means the channel returned whatever it defines as success; unless the peer provides a confirmation mechanism, Custos cannot claim the end user actually saw the notification.
 
-## 8.7 安全要求
+## 8.7 Security requirements
 
-- 不在日志中记录 Token、密码、私钥和完整认证头。
-- 配置文件中支持安全的凭据引用。
-- Webhook 地址必须经过校验。
-- 对插件的网络访问权限进行限制。
-- 不允许第三方通知插件直接修改 RecoveryRun。
-- 通知插件只能读取必要的事件数据。
-- 发送队列不得保存不必要的敏感上下文。
+- Never log tokens, passwords, private keys or full authentication headers.
+- Support secure credential references in configuration files.
+- Webhook URLs must be validated.
+- Restrict plugins' network access permissions.
+- Third-party notification plugins must not modify RecoveryRuns directly.
+- Notification plugins may only read the event data they need.
+- The send queue must not store unnecessary sensitive context.
 
 ---

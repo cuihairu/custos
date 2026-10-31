@@ -1,40 +1,29 @@
-# ADR-0015: 为什么核心维护内部集成工具箱，插件只是规则层
+# ADR-0015: Why the Core Maintains an Internal Toolbox, Plugins Are the Rule Layer
 
-- 状态：已接受
-- 日期：2026-10-31
-- 关联：adr-principles.md §17.15，ADR-0002，ADR-0012
+- Status: Accepted
+- Date: 2026-10-31
+- Related: adr-principles.md §17.15, ADR-0002, ADR-0012
 
-## 背景
+## Background
 
-探测与恢复动作覆盖 HTTP、RPC、SSH、服务控制等传输/协议。若每个插件各自实现
-传输，安全硬化（TLS 校验、SSRF 防护、SSH 主机密钥验证、超时/重试/取消、
-凭据安全读取）会被 N 份实现稀释，无法统一强制。
+Probes and recovery actions cover HTTP, RPC, SSH, service control and other transports/protocols. If every plugin implements its own transport, security hardening (TLS verification, SSRF protection, SSH host-key verification, timeout/retry/cancellation, credential-safe reads) is diluted across N implementations and cannot be uniformly enforced.
 
-## 决策
+## Decision
 
-核心收敛一组"内部集成工具"作为能力执行器（HTTP 客户端、RPC 客户端、SSH 客户端、
-进程/服务/磁盘/网络连通性探测、受控命令执行、重启控制），以 Capability +
-OperationParams 对外声明。插件与内置能力走同一张派发表：内置能力由核心进程内
-执行器执行，插件声明的能力由插件子进程执行。插件不再自实现底层传输，只提供
-能力声明与规则逻辑（目标、参数、决策、验证）。
+The core converges a set of "internal integration tools" as capability executors (HTTP client, RPC client, SSH client, process/service/disk/network-connectivity probes, controlled command execution, reboot control), declared via Capability + OperationParams. Plugins and built-in capabilities share one dispatch table: built-in capabilities execute in-process in the core; plugin-declared capabilities execute in the plugin subprocess. Plugins no longer implement transports themselves — they provide capability declarations and rule logic (targets, parameters, decisions, verification).
 
-## 替代方案
+## Alternatives
 
-- **插件自包含、各自实现传输**：重复实现；安全硬化易被绕过（某个插件关掉
-  TLS 校验即可）；插件体积与攻击面大。
-- **只允许内置能力（无插件）**：场景化逻辑（mihomo/OpenClash 的领域决策）
-  无法由社区贡献。
+- **Self-contained plugins, each implementing its own transport**: duplicated implementations; hardening easily bypassed (one plugin disabling TLS verification); larger plugin footprint and attack surface.
+- **Built-in only (no plugins)**: scenario-specific logic (mihomo/OpenClash domain decisions) cannot be contributed by the community.
 
-## 优缺点
+## Pros and Cons
 
-优点：传输安全集中硬化一次（webhook 的 SSRF 防护就是第一个实例）；
-超时/取消/预算/审计语义统一；插件变薄、可审计。
-缺点：核心的工具面需要持续维护；插件自由度下降（不能任意实现自定义协议）——
-有新协议需求时先在核心加工具，再在插件层写规则。
+Pros: transport hardening happens once in one place (the webhook's SSRF protection is the first instance); timeout/cancel/budget/audit semantics are unified; plugins are thinner and auditable.
+Cons: the core's tool surface must be continuously maintained; plugin freedom shrinks (no arbitrary custom protocols) — new protocol needs mean adding a core tool first, then writing plugin-layer rules.
 
-## 后续影响
+## Follow-up Impact
 
-- P2 平台适配器（systemd/launchd/SCM、网络接口/路由/DNS）作为工具执行器注册进
-  同一注册表。
-- Webhook 通知渠道复用工具箱的 HTTP 客户端语义（含 SSRF 策略，已实现）。
-- Python 出向绑定（todo P1）暴露的是工具调用，不是任意代码执行。
+- P2 platform adapters (systemd/launchd/SCM, network interface/route/DNS) register as tool executors in the same registry.
+- The Webhook notification channel reuses the toolbox's HTTP client semantics (including SSRF policy, implemented).
+- Python outbound bindings expose tool calls, not arbitrary code execution.

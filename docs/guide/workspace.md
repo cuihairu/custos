@@ -2,9 +2,9 @@
 title: Cargo Workspace
 ---
 
-# 13. 建议的 Cargo Workspace
+# 13. Suggested Cargo Workspace
 
-建议初期保持适度模块化，不要过度拆分 crate。
+Keep the initial layout moderately modular; do not over-split into crates.
 
 ```text
 custos/
@@ -58,22 +58,22 @@ custos/
     └── notifications.toml
 ```
 
-这是目标结构，不要求所有目录在第一天都创建。
+This is the target structure; not every directory needs to exist on day one.
 
-初期允许将部分插件和平台适配器放在同一 crate 的模块中，等接口稳定后再拆分。
+Initially it is fine to keep some plugins and platform adapters as modules inside the same crate, and split them out once the interfaces stabilize.
 
-建议各模块职责：
+Suggested responsibilities per module:
 
-- `custos-model`：领域类型、ID、状态和事件模型。
-- `custos-core`：运行时装配和资源注册。
-- `custos-engine`：依赖调度、恢复状态机、预算与互斥。
-- `custos-probe`：探测调度和结果归一化。
-- `custos-plugin-api`：插件协议模型和能力声明。
-- `custos-plugin-host`：插件进程管理、JSON-RPC、超时与取消。
-- `custos-platform`：跨平台能力接口及平台实现。
-- `custos-config`：配置解析、验证和版本兼容。
-- `custos-store`：SQLite、迁移、事务和恢复任务持久化。
-- `custos-notify`：事件规则、通知队列、重试和渠道调度。
-- `custos-cli`：命令行入口。
+- `custos-model`: domain types, IDs, states and event models.
+- `custos-core`: runtime assembly and resource registration.
+- `custos-engine`: dependency scheduling, the recovery state machine, budgets and mutexes.
+- `custos-probe`: probe scheduling and result normalization.
+- `custos-plugin-api`: plugin protocol models and capability declarations.
+- `custos-plugin-host`: plugin process management, JSON-RPC, timeouts and cancellation.
+- `custos-platform`: cross-platform capability interfaces and their platform implementations.
+- `custos-config`: configuration parsing, validation and version compatibility.
+- `custos-store`: SQLite, migrations, transactions and recovery task persistence.
+- `custos-notify`: event rules, the notification queue, retries and channel dispatch.
+- `custos-cli`: the command-line entry point.
 
 ---

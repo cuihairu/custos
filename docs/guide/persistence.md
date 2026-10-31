@@ -1,20 +1,20 @@
 ---
-title: 持久化与崩溃一致性
+title: Persistence and Crash Consistency
 ---
 
-# 7. 持久化与崩溃一致性
+# 7. Persistence and Crash Consistency
 
-## 7.1 数据库
+## 7.1 Database
 
-第一版使用 SQLite。
+The first version uses SQLite.
 
-建议启用 WAL，并根据可靠性要求选择适当的 `synchronous` 策略。不能假设 WAL 自动保证每条记录都已经持久化，也不需要无条件在每个日志写入后手动执行 fsync。
+Enabling WAL is recommended, with an appropriate `synchronous` strategy chosen according to reliability requirements. Do not assume WAL automatically guarantees every record is durable, and there is no need to unconditionally fsync after every log write.
 
-对关键恢复操作，应明确事务边界。
+For critical recovery operations, transaction boundaries should be explicit.
 
-## 7.2 核心表
+## 7.2 Core tables
 
-建议至少包括：
+At least the following are recommended:
 
 ```text
 resources
@@ -34,54 +34,54 @@ plugin_registry
 configuration_versions
 ```
 
-其中：
+Where:
 
-- `resources` 保存资源定义。
-- `resource_dependencies` 保存依赖关系。
-- `resource_health` 保存当前健康快照。
-- `incidents` 保存故障生命周期。
-- `recovery_runs` 保存恢复任务。
-- `recovery_steps` 保存步骤顺序和状态。
-- `probe_results` 保存探测证据。
-- `diagnoses` 保存诊断结果。
-- `action_attempts` 保存每次动作尝试。
-- `verification_results` 保存验证结果。
-- `audit_events` 保存事件审计。
-- `notification_queue` 保存待发送通知。
-- `notification_attempts` 保存发送历史。
-- `plugin_registry` 保存已加载插件及能力信息。
-- `configuration_versions` 保存配置版本或变更摘要。
+- `resources` stores resource definitions.
+- `resource_dependencies` stores dependency relationships.
+- `resource_health` stores the current health snapshot.
+- `incidents` stores fault lifecycles.
+- `recovery_runs` stores recovery tasks.
+- `recovery_steps` stores step order and status.
+- `probe_results` stores probe evidence.
+- `diagnoses` stores diagnosis results.
+- `action_attempts` stores every action attempt.
+- `verification_results` stores verification results.
+- `audit_events` stores event auditing.
+- `notification_queue` stores pending notifications.
+- `notification_attempts` stores delivery history.
+- `plugin_registry` stores loaded plugins and their capabilities.
+- `configuration_versions` stores configuration versions or change summaries.
 
-## 7.3 高风险动作的持久化顺序
+## 7.3 Persistence order for high-risk actions
 
-执行高风险动作前：
+Before executing a high-risk action:
 
-1. 校验资源和依赖条件。
-2. 校验动作权限。
-3. 校验预算和互斥锁。
-4. 创建 ActionAttempt。
-5. 将状态标记为 `Executing`。
-6. 在事务提交成功后执行外部动作。
-7. 记录动作返回结果。
-8. 重新验证资源健康。
-9. 更新 RecoveryRun 状态。
+1. Validate the resource and dependency conditions.
+2. Validate action permissions.
+3. Validate budget and mutexes.
+4. Create the ActionAttempt.
+5. Mark the status as `Executing`.
+6. Execute the external action only after the transaction commits successfully.
+7. Record the action's return result.
+8. Re-verify resource health.
+9. Update the RecoveryRun status.
 
-如果 Custos 在第 6 步期间崩溃，则恢复后必须识别执行结果可能未知。
+If Custos crashes during step 6, then after recovery it must recognize that the execution outcome may be unknown.
 
-不能把“数据库状态写成 Executing”误认为“外部动作一定执行了”，也不能把“外部动作返回 0”误认为“服务一定恢复”。
+"Database status written as Executing" must not be mistaken for "the external action definitely ran", and "the external action returned 0" must not be mistaken for "the service definitely recovered".
 
-## 7.4 数据保留
+## 7.4 Data retention
 
-配置：
+Configuration:
 
-- 审计记录保留周期。
-- 探测明细保留周期。
-- 恢复任务保留周期。
-- 通知发送记录保留周期。
-- 数据库大小限制。
+- Audit record retention period.
+- Probe detail retention period.
+- Recovery task retention period.
+- Notification delivery record retention period.
+- Database size limit.
 
-默认不删除仍处于活动状态的 Incident、RecoveryRun 或尚未送达的通知。
+By default, do not delete Incidents, RecoveryRuns that are still active, or notifications not yet delivered.
 
-日志压缩或清理必须与活动任务状态分离。
+Log compaction or cleanup must be decoupled from active task state.
 
 ---

@@ -1,34 +1,28 @@
-# ADR-0005: 为什么依赖图由 Core Engine 协调
+# ADR-0005: Why the Core Engine Coordinates the Graph
 
-- 状态：已接受
-- 日期：2026-10-31
-- 关联：docs/guide/recovery-engine.md §6，ADR-0004
+- Status: Accepted
+- Date: 2026-10-31
+- Related: docs/guide/recovery-engine.md §6, ADR-0004
 
-## 背景
+## Background
 
-图有了，谁驱动？若各资源/插件自行判断"我的依赖好了没有"并自行恢复，
-并发下必然出现两个资源同时修同一个依赖、恢复顺序竞态、互不知情的重复重启。
+The graph is built — who drives it? If resources or plugins each judge "is my dependency healthy" and self-recover, concurrent execution inevitably produces two resources simultaneously repairing the same dependency, recovery-order races, and unknowing duplicate restarts.
 
-## 决策
+## Decision
 
-恢复编排唯一归属 Core Engine：每个 tick 按拓扑序探测；恢复执行前重查依赖健康
-（§3.6）；每个资源一把恢复互斥（同一资源绝不并发两个恢复任务）；依赖不健康时
-上层资源等待（Waiting + waiter 去重），依赖恢复结果共享给全部等待者；
-预算/冷却/高风险计数也是中心化状态。
+Recovery orchestration belongs exclusively to the Core Engine: each tick probes in topological order; dependency health is re-checked before recovery execution (§3.6); one recovery mutex per resource (the same resource never runs two recovery tasks concurrently); when a dependency is unhealthy, upstream resources wait (Waiting + waiter dedup) and the dependency's recovery result is shared to all waiters; budgets/cooldowns/high-risk counters are centralized state.
 
-## 替代方案
+## Alternatives
 
-- **资源/插件自治恢复**：竞态与顺序错误；重复副作用；无法全局预算控制。
-- **外部编排器（systemd 依赖）**：systemd 只管服务启动序，不懂健康探针与
-  验证语义；且把核心逻辑搬出核心。
+- **Resource/plugin autonomous recovery**: races and ordering errors; duplicated side effects; no global budget control.
+- **External orchestrator (systemd dependencies)**: systemd only manages service start ordering — it does not understand health probes or verification semantics; it moves core logic out of the core.
 
-## 优缺点
+## Pros and Cons
 
-优点：单一事实源；等待/唤醒/去重语义集中一处可测试；per-resource 互斥天然防抖。
-缺点：中心组件复杂（状态机大）；对引擎实现质量要求高——所以恢复路径有
-vertical 集成测试与崩溃恢复测试兜底。
+Pros: single source of truth; wait/wake/dedup semantics centralized in one testable place; per-resource mutex naturally debounces.
+Cons: the central component is complex (large state machine); requires high implementation quality — hence vertical integration tests and crash-recovery tests guard the recovery path.
 
-## 后续影响
+## Follow-up Impact
 
-- engine.rs 的 drive/waiters/redrive/finish_* 是核心中最重的路径，改动需带测试。
-- 插件只能提供能力（动作），不能自作恢复决策（ADR-0015 工具箱模型）。
+- engine.rs drive/waiters/redrive/finish_* are the heaviest core paths — changes require tests.
+- Plugins provide capabilities (actions) only; they must not make recovery decisions themselves (ADR-0015 toolbox model).

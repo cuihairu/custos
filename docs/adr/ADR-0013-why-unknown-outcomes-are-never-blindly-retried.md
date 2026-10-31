@@ -1,35 +1,28 @@
-# ADR-0013: 为什么未知执行结果不能直接重试
+# ADR-0013: Why Unknown Outcomes Are Never Blindly Retried
 
-- 状态：已接受
-- 日期：2026-10-31
-- 关联：recovery-engine.md §6.6，ADR-0008
+- Status: Accepted
+- Date: 2026-10-31
+- Related: recovery-engine.md §6.6, ADR-0008
 
-## 背景
+## Background
 
-恢复动作执行到一半进程崩溃（或超时被杀），attempt 的 outcome 停在 NULL。
-此时动作**可能已生效**（服务已重启）、可能没生效、也可能生效了一半。
-直接重试的后果：双执行副作用——服务被重启两次、网络变更下发两次、
-幂等声明错误时状态被破坏。
+The engine crashes (or is OOM-killed / times out) mid-recovery-action; the attempt's outcome stays NULL. The action **may have taken effect** (service restarted), may not have, or may be half-done. Retrying directly doubles side effects — the service is restarted twice, network changes are issued twice, state is corrupted when idempotency declarations are wrong.
 
-## 决策
+## Decision
 
-`OutcomeUnknown` 是一等状态：崩溃恢复把未终态运行标记为 outcome-unknown，
-**停止自动处理**，以资源现状为唯一事实重新走"探测 → 诊断"路径；
-未知结果的运行绝不沿用旧诊断直接重执行（P0 验收：未知结果的运行不得盲目重试）。
-只有新诊断再次给出故障 + 新计划时才可能有新动作。
+`OutcomeUnknown` is a first-class state: crash recovery marks non-terminal runs outcome-unknown and **stops automatic handling**, re-entering the "probe → diagnose" path with the resource's current state as the sole truth; unknown-outcome runs never re-execute using old diagnoses (P0 acceptance: unknown-outcome runs must not blindly retry). A new action is only possible when a new diagnosis finds the fault again with a new plan.
 
-## 替代方案
+## Alternatives
 
-- **直接重试一次**：副作用翻倍（见背景）；且掩盖了"上一轮到底发生了什么"。
-- **标记失败并放弃**：把可自愈的故障推给人，违背自愈目标。
+- **Retry once directly**: side effects double (see background); it also masks "what actually happened in the last round."
+- **Mark failed and give up**: pushes a self-healable fault to a human, violating the self-healing goal.
 
-## 优缺点
+## Pros and Cons
 
-优点：副作用有界；事实链（执行了什么、结果未知、新诊断是什么）完整可审计。
-缺点：恢复路径多一次诊断周期；对探针质量依赖更高（诊断必须基于当前健康）。
+Pros: side effects are bounded; the fact chain (what ran, result unknown, what the new diagnosis found) is complete and auditable.
+Cons: the recovery path has one extra diagnosis cycle; probe quality matters more (diagnosis must be based on current health).
 
-## 后续影响
+## Follow-up Impact
 
-- `resume_unfinished` + `RecoveryRunStatus::OutcomeUnknown` + 引擎事件
-  `recovery.outcome_unknown`（通知事件同名）共同实现。
-- 幂等声明（`idempotent = true`）是优化不是豁免：未知结果一律重诊断。
+- `resume_unfinished` + `RecoveryRunStatus::OutcomeUnknown` + the engine event `recovery.outcome_unknown` (same-name notification event) implement this together.
+- Idempotency declaration (`idempotent = true`) is an optimization, not an exemption: unknown results always re-diagnose.

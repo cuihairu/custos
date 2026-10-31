@@ -1,36 +1,29 @@
-# ADR-0003: 为什么选择 JSON-RPC over stdio
+# ADR-0003: Why JSON-RPC over stdio
 
-- 状态：已接受
-- 日期：2026-10-31
-- 关联：docs/guide/agent-protocol.md，ADR-0002
+- Status: Accepted
+- Date: 2026-10-31
+- Related: docs/guide/agent-protocol.md, ADR-0002
 
-## 背景
+## Background
 
-核心与插件子进程之间需要一条请求/响应通道，承载握手、能力声明、探测调用与恢复动作；
-它必须对插件作者零门槛，且不能扩大攻击面。
+The core and plugin subprocesses need a request/response channel for handshake, capability declaration, probe calls, and recovery actions. It must be zero-barrier for plugin authors and must not widen the attack surface.
 
-## 决策
+## Decision
 
-JSON-RPC 2.0 over stdio，行分隔（每行一个 JSON 消息）：
-stdout **只**承载协议，stderr **只**承载诊断日志（永不作协议解析）；
-请求带 id 与超时；不完整行、异常 JSON、未知方法返回明确错误而非崩溃；
-stdout 行有长度上限，超限跳过而非致命；stderr 独立线程持续排空并截断保留尾部。
+JSON-RPC 2.0 over stdio, newline-delimited (one JSON message per line): stdout carries **only** protocol messages; stderr carries **only** diagnostic logging (never parsed as protocol); requests carry an id and timeout; incomplete lines, malformed JSON, and unknown methods return a clear error instead of crashing; stdout lines have a size cap — over-limit lines are skipped, never fatal; stderr has a dedicated continuously-draining thread with capped tail retention.
 
-## 替代方案
+## Alternatives
 
-- **gRPC/protobuf**：强类型与流式好，但需要代码生成工具链，插件作者门槛高；
-  引入 HTTP/2 网络栈，复杂度与攻击面都大。
-- **HTTP on localhost**：暴露端口（本机其他进程可访问）；生命周期绑定复杂。
-- **自定义二进制协议**：解析器要自己维护，崩溃面大，调试困难。
+- **gRPC/protobuf**: strong typing and streaming are good, but code generation toolchains raise the plugin author's barrier; introduces an HTTP/2 stack — both complexity and attack surface grow.
+- **HTTP on localhost**: exposes a port (other local processes can access it); lifecycle binding is complex.
+- **Custom binary protocol**: self-maintained parser, large crash surface, hard to debug.
 
-## 优缺点
+## Pros and Cons
 
-优点：任何语言三行代码即可说话；无端口、无网络面；stdout/stderr 语义分界让
-"协议被日志污染"类故障可观测、可防（上限 + 跳过策略）。
-缺点：吞吐低于二进制协议（对告警量级完全够用）；行协议要求插件严格保证
-stdout 纪律——所以宿主侧还要防御性处理不守纪律的插件。
+Pros: any language can speak it in three lines; no ports, no network surface; the stdout/stderr semantic boundary makes "protocol polluted by logs" observable and preventable (cap + skip policy).
+Cons: throughput lower than binary protocols (more than enough for alerting volume); the line protocol requires strict stdout discipline from plugins — so the host must also defensively handle undisciplined plugins.
 
-## 后续影响
+## Follow-up Impact
 
-- session.rs：读循环、deadline、取消、输出上限、dying-words（崩溃时 stderr 尾部）。
-- 出站请求（宿主→插件方向）有大小上限，防止宿主被诱导写满管道。
+- session.rs: read loop, deadline, cancellation, output cap, dying-words (crashed session's stderr tail).
+- Outbound requests (host → plugin direction) have a size cap to prevent the host from being tricked into filling a pipe.

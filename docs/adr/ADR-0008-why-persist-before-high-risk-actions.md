@@ -1,32 +1,28 @@
-# ADR-0008: 为什么高风险动作前必须持久化关键状态
+# ADR-0008: Why Persist Critical State Before High-risk Actions
 
-- 状态：已接受
-- 日期：2026-10-31
-- 关联：docs/guide/persistence.md §7.3，recovery-engine.md §6.6
+- Status: Accepted
+- Date: 2026-10-31
+- Related: docs/guide/persistence.md §7.3, recovery-engine.md §6.6
 
-## 背景
+## Background
 
-引擎在执行恢复动作期间崩溃是必然场景（断电、OOM、升级）。若动作已发生但
-记录没落盘，重启后核心不知道动作执行过——重试意味着第二次重启服务/第二次
-下发网络变更，副作用翻倍且不可审计。
+The engine crashing while executing a recovery action is an expected scenario (power loss, OOM, upgrade). If the action already ran but the record was not persisted, after restart the core does not know the action executed — retrying means a second service restart / second network change, doubling side effects and making it unauditable.
 
-## 决策
+## Decision
 
-写序保证：attempt 先以 `outcome = NULL`（Executing 态）持久化，**然后**才执行
-外部动作；执行完成回写 outcome。崩溃恢复时：NULL outcome 语义为"结果可能未知"，
-绝不当作"未执行"而盲目重试，也不当作"成功"——重诊断（ADR-0013）。
+Write-ordering guarantee: the attempt is persisted with `outcome = NULL` (Executing state) **before** the external action runs; the outcome is written back after execution completes. On crash recovery: NULL outcome means "result may be unknown" — never treated as "not executed" (blind retry) nor as "success" — always re-diagnose (ADR-0013).
 
-## 替代方案
+## Alternatives
 
-- **执行后补写**：执行与写库之间的崩溃窗口丢失事实，重试副作用翻倍。
-- **全部写内存、定期刷盘**：窗口更大；审计不完整。
+- **Write after execution**: the crash window between execution and write loses facts, doubling retry side effects.
+- **Write everything in memory, flush periodically**: larger window; incomplete audit trail.
 
-## 优缺点
+## Pros and Cons
 
-优点：任意时刻崩溃后系统状态可推导；审计链完整（谁在何时执行了什么）。
-缺点：每次动作多一次同步写（SQLite WAL 下代价小）；代码路径要严格保持写序。
+Pros: system state is derivable at any crash point; the audit chain is complete (what ran, when).
+Cons: one extra synchronous write per action (cheap under SQLite WAL); code paths must strictly maintain write ordering.
 
-## 后续影响
+## Follow-up Impact
 
-- `resume_unfinished` 把未终态运行标记 OutcomeUnknown 并停止自动重试。
-- 高风险动作（RiskLevel::High）额外走预算与授权（ADR-0012），持久化是前提。
+- `resume_unfinished` marks non-terminal runs OutcomeUnknown and stops automatic retry.
+- High-risk actions (RiskLevel::High) additionally go through budget and authorization (ADR-0012); persistence is the prerequisite.

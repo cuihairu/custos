@@ -1,32 +1,28 @@
-# ADR-0006: 为什么动作结果必须经过独立验证
+# ADR-0006: Why Independent Verification
 
-- 状态：已接受
-- 日期：2026-10-31
-- 关联：docs/guide/recovery-engine.md §6，probe-diagnosis.md §5
+- Status: Accepted
+- Date: 2026-10-31
+- Related: docs/guide/recovery-engine.md §6, probe-diagnosis.md §5
 
-## 背景
+## Background
 
-恢复动作最方便的"成功"信号是退出码 0——但它只说明命令跑完了：进程可能起了又立刻死，
-服务可能起了但不监听，配置可能改了但没生效。信任退出码会把"假成功"写回系统，
-掩盖真实故障并触发冷却，直到下次探测才被动发现。
+The most convenient "success" signal for a recovery action is exit code 0 — but that only means the command ran: the process may have started and immediately died, the service may be up but not listening, the config may have been written but not applied. Trusting exit codes writes a false success back into the system, masks the real failure, triggers cooldown, and the failure is only passively discovered on the next probe.
 
-## 决策
+## Decision
 
-每个恢复计划的验证字段（默认 `status_is = "healthy"`）以**资源健康探针**复检判定：
-动作执行后转入 Verifying，探针达条件才 Recovered；验证失败则重诊断（故障可能已变化），
-进入下一计划/下一尝试。P0 验收明文：命令成功但资源仍异常时不得报告恢复成功。
+Each recovery plan's verification field (default `status_is = "healthy"`) judges the result via the **resource health probe**: after the action runs, the run enters Verifying; only when the probe meets the condition does it transition to Recovered. Verification failure re-enters diagnosis (the fault may have changed) and proceeds to the next plan or attempt. P0 acceptance is explicit: when the command succeeds but the resource is still abnormal, recovery must not be reported as successful.
 
-## 替代方案
+## Alternatives
 
-- **信任退出码**：假成功（见背景）。
-- **信任动作自身的自检输出**：动作与验证同源，无法发现动作实现本身的错误。
+- **Trust exit code**: false success (see background).
+- **Trust the action's own self-check output**: action and verification share a source — it cannot detect errors in the action's own implementation.
 
-## 优缺点
+## Pros and Cons
 
-优点：恢复成功 = 可观测的健康，不是命令的回声；验证失败自然衔接重诊断。
-缺点：验证要等下一个探针周期（可配置收敛）；探针质量成为恢复正确性的下限。
+Pros: recovery success = observable health, not a command's echo; verification failure naturally links into re-diagnosis.
+Cons: verification waits for the next probe cycle (configurable convergence); probe quality becomes the floor for recovery correctness.
 
-## 后续影响
+## Follow-up Impact
 
-- VerificationResult 持久化，审计可追溯"为什么判定恢复"。
-- 引擎事件 `recovery.verification` 与通知事件 `recovery.succeeded` 都建立在验证通过之上。
+- VerificationResult is persisted — the audit chain answers "why was recovery judged successful."
+- Both the engine event `recovery.verification` and the notification event `recovery.succeeded` are built on verification passing.

@@ -1,12 +1,12 @@
 ---
-title: 跨平台架构
+title: Cross-Platform Architecture
 ---
 
-# 11. 跨平台架构
+# 11. Cross-Platform Architecture
 
-## 11.1 统一平台接口
+## 11.1 Unified platform interfaces
 
-建议抽象：
+The following abstractions are suggested:
 
 ```text
 ProcessController
@@ -17,77 +17,77 @@ CredentialProvider
 SystemRebootController
 ```
 
-每个接口只定义跨平台共同语义。平台专属能力通过 Capability 描述，不得为了统一接口而伪造平台支持。
+Each interface only defines cross-platform common semantics. Platform-specific capabilities are described through Capabilities; platform support must never be faked for the sake of a unified interface.
 
 ## 11.2 Windows
 
-需要支持的能力逐步包括：
+Capabilities to support progressively include:
 
-- 进程检测。
-- Windows Service 控制。
-- Wi-Fi 状态检测。
-- Wi-Fi 重连。
-- 网络接口重置。
-- DNS 刷新。
-- IP 配置检查。
-- 默认网关检查。
-- 网络连通性检查。
-- 向日葵进程或服务检查。
-- 有授权的系统重启。
+- Process detection.
+- Windows Service control.
+- Wi-Fi state detection.
+- Wi-Fi reconnection.
+- Network interface reset.
+- DNS flush.
+- IP configuration checks.
+- Default gateway checks.
+- Network connectivity checks.
+- Sunlogin process or service checks.
+- Authorized system reboot.
 
-Wi-Fi 重连涉及凭据、网卡和系统权限，应使用系统支持的 API 或受控命令。
+Wi-Fi reconnection involves credentials, network adapters and system privileges; use system-supported APIs or controlled commands.
 
-如果重置网卡可能导致管理连接中断，必须在策略中明确标记风险。
+If resetting a network adapter could interrupt the management connection, the risk must be explicitly marked in policy.
 
 ## 11.3 Linux
 
-需要支持：
+Needs to support:
 
-- 进程检测。
-- systemd 服务控制。
-- OpenRC 后续适配。
-- 网络接口状态。
-- IP 和路由检查。
-- DNS 检查。
-- 受控命令执行。
-- 系统重启。
+- Process detection.
+- systemd service control.
+- OpenRC adaptation later.
+- Network interface state.
+- IP and route checks.
+- DNS checks.
+- Controlled command execution.
+- System reboot.
 
-不能假设所有 Linux 系统都使用 systemd。
+Do not assume every Linux system uses systemd.
 
 ## 11.4 macOS
 
-后续支持：
+Later support:
 
-- 进程检测。
-- launchd 服务管理。
-- 网络接口状态。
-- Wi-Fi 重连。
-- 网络连通性检查。
-- 系统重启。
+- Process detection.
+- launchd service management.
+- Network interface state.
+- Wi-Fi reconnection.
+- Network connectivity checks.
+- System reboot.
 
 ## 11.5 BSD
 
-后续支持：
+Later support:
 
-- 进程检测。
-- rc.d 服务管理。
-- 网络接口与路由状态。
-- 系统重启。
+- Process detection.
+- rc.d service management.
+- Network interface and route state.
+- System reboot.
 
 ## 11.6 OpenWrt
 
-后续支持：
+Later support:
 
-- procd 服务管理。
-- UCI 配置读取和受控修改。
-- ubus 调用。
-- 网络接口和路由检查。
-- OpenClash 状态检测。
-- 代理节点切换。
-- 服务重启。
+- procd service management.
+- UCI configuration reading and controlled modification.
+- ubus calls.
+- Network interface and route checks.
+- OpenClash state detection.
+- Proxy node switching.
+- Service restart.
 
-所有网络和防火墙变更必须有明确作用范围、前置条件、风险等级和验证步骤。
+Every network and firewall change must have a clear scope of effect, preconditions, risk level and verification steps.
 
-禁止默认清空防火墙规则、重置所有路由或无条件覆盖现有网络配置。
+Clearing firewall rules by default, resetting all routes, or unconditionally overwriting the existing network configuration is forbidden.
 
 ---

@@ -1,29 +1,29 @@
 ---
-title: 探测、诊断与故障判定
+title: Probing, Diagnosis and Failure Verdicts
 ---
 
-# 5. 探测、诊断与故障判定
+# 5. Probing, Diagnosis and Failure Verdicts
 
-## 5.1 Probe 与 Diagnosis 分离
+## 5.1 Separation of Probe and Diagnosis
 
-Probe 负责收集事实。
+The Probe collects facts.
 
-Diagnosis 根据多个事实判断故障原因。
+The Diagnosis judges the cause of failure from multiple facts.
 
-例如：
+For example:
 
 ```text
-Probe A: Wi-Fi 已连接
-Probe B: 已取得 IP 地址
-Probe C: 默认网关可达
-Probe D: 公网 IP 不可达
-Probe E: 代理本地端口可连接
-Probe F: 代理认证失败
+Probe A: Wi-Fi connected
+Probe B: IP address obtained
+Probe C: default gateway reachable
+Probe D: public IP unreachable
+Probe E: proxy local port connectable
+Probe F: proxy authentication failed
 ```
 
-这些证据不能简单合并成“网络故障”。
+This evidence must not be naively merged into "network failure".
 
-诊断结果应包括：
+A diagnosis result should include:
 
 ```text
 Diagnosis
@@ -36,11 +36,11 @@ Diagnosis
 └── limitations[]
 ```
 
-`confidence` 是可选的规则置信度，不应伪装成统计学概率。
+`confidence` is an optional rule-based confidence level and must not pretend to be a statistical probability.
 
-## 5.2 故障类型
+## 5.2 Failure types
 
-第一版至少区分：
+The first version should distinguish at least:
 
 - `process_exited`
 - `service_stopped`
@@ -57,22 +57,22 @@ Diagnosis
 - `verification_failed`
 - `unknown_failure`
 
-未知故障不得直接触发所有可能的恢复动作。
+Unknown failures must not directly trigger every possible recovery action.
 
-## 5.3 连续失败与抖动抑制
+## 5.3 Consecutive failures and flapping suppression
 
-不能因为一次超时就立即重启服务。
+A single timeout must not immediately restart a service.
 
-健康策略需要支持：
+Health policies need to support:
 
-- 连续失败阈值。
-- 连续成功阈值。
-- 探测超时。
-- 失败窗口。
-- 恢复确认窗口。
-- 故障冷却时间。
+- Consecutive failure threshold.
+- Consecutive success threshold.
+- Probe timeout.
+- Failure window.
+- Recovery confirmation window.
+- Fault cooldown.
 
-例如：
+For example:
 
 ```yaml
 health_policy:
@@ -82,32 +82,32 @@ health_policy:
   success_threshold: 2
 ```
 
-此处为示例值，实际值应按资源类型设置。
+These are example values; actual values should be set per resource type.
 
-阈值只负责决定是否进入故障状态，不应被用来掩盖持续异常。
+Thresholds only decide whether a fault state is entered; they must not be used to paper over persistent anomalies.
 
-## 5.4 P0 的探测范围
+## 5.4 P0 probe scope
 
-P0 只实现：
+P0 implements only:
 
-- Process Probe。
-- Exec Probe。
+- Process Probe.
+- Exec Probe.
 
-P0 暂不实现 HTTP Probe。
+P0 does not implement an HTTP Probe yet.
 
-Process Probe 用于检查进程是否存在以及必要的进程属性。
+The Process Probe checks whether a process exists plus any required process attributes.
 
-Exec Probe 用于执行受控的检查命令，并解析：
+The Exec Probe executes a controlled check command and parses:
 
-- 退出码。
-- 标准输出。
-- 标准错误。
-- 超时。
-- 启动失败。
-- 输出是否被截断。
+- The exit code.
+- Standard output.
+- Standard error.
+- Timeout.
+- Startup failure.
+- Whether output was truncated.
 
-Exec Probe 必须限制运行时间和输出大小，并在超时时清理进程树。Windows 上不能只终止父进程而留下孤儿子进程。
+The Exec Probe must limit runtime and output size, and clean up the process tree on timeout. On Windows it must not kill only the parent process and leave orphaned children behind.
 
-后续版本再加入网络、HTTP、服务管理和代理专用探测器。
+Network, HTTP, service management and proxy-specific probes come in later versions.
 
 ---

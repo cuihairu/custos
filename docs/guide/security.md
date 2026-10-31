@@ -1,57 +1,57 @@
 ---
-title: 安全与权限
+title: Security and Permissions
 ---
 
-# 12. 安全与权限
+# 12. Security and Permissions
 
-## 12.1 最小权限
+## 12.1 Least privilege
 
-Custos 可能需要管理服务、网络和系统进程，因此必须明确区分：
+Custos may need to manage services, the network and system processes, so the following must be clearly distinguished:
 
-- 只读探测权限。
-- 普通恢复权限。
-- 网络配置权限。
-- 服务管理权限。
-- 系统重启权限。
-- 通知发送权限。
+- Read-only probe permissions.
+- Ordinary recovery permissions.
+- Network configuration permissions.
+- Service management permissions.
+- System reboot permissions.
+- Notification sending permissions.
 
-不能为了方便而让所有插件默认拥有完整系统权限。
+It is never acceptable to hand every plugin full system permissions by default just for convenience.
 
-## 12.2 高风险动作
+## 12.2 High-risk actions
 
-高风险动作包括：
+High-risk actions include:
 
-- 重置网络接口。
-- 修改路由表。
-- 修改防火墙。
-- 切换代理配置。
-- 重启整台设备。
-- 修改认证信息。
+- Resetting network interfaces.
+- Modifying the routing table.
+- Modifying the firewall.
+- Switching proxy configuration.
+- Rebooting the entire device.
+- Modifying authentication information.
 
-每个动作必须具有：
+Every action must have:
 
-- 风险声明。
-- 权限要求。
-- 作用范围。
-- 超时。
-- 并发控制。
-- 结果验证。
-- 失败处理。
-- 可选回滚或补偿。
+- A risk declaration.
+- Permission requirements.
+- A scope of effect.
+- A timeout.
+- Concurrency control.
+- Result verification.
+- Failure handling.
+- Optional rollback or compensation.
 
-第一版可以由管理员在配置中显式允许高风险动作。
+In the first version, the administrator may explicitly allow high-risk actions in configuration.
 
-## 12.3 网络中断恢复安全
+## 12.3 Safety when recovering from network interruption
 
-恢复网络时必须特别谨慎：
+Recovering the network requires special caution:
 
-- 不因代理故障直接认定底层网络故障。
-- 不因 HTTP 407 认定代理宕机。
-- 不将所有连接超时归因于 DNS。
-- 不在依赖状态未知时盲目重置网络。
-- 不连续重复重启网络接口。
-- 不把远程管理通道中断当作无限重试的理由。
+- Do not conclude the underlying network failed just because the proxy failed.
+- Do not conclude the proxy is down from an HTTP 407.
+- Do not attribute every connection timeout to DNS.
+- Do not blindly reset the network while dependency state is unknown.
+- Do not repeatedly restart network interfaces back to back.
+- Do not treat a broken remote management channel as justification for unlimited retries.
 
-当证据不足时，应记录原因并升级告警，而不是尝试所有恢复动作。
+When evidence is insufficient, record the reason and escalate the alert instead of trying every recovery action.
 
 ---

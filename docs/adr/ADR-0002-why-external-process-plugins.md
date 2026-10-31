@@ -1,36 +1,30 @@
-# ADR-0002: 为什么第一版采用外部进程插件
+# ADR-0002: Why External-process Plugins in v1
 
-- 状态：已接受
-- 日期：2026-10-31
-- 关联：docs/guide/plugins.md §4，ADR-0003
+- Status: Accepted
+- Date: 2026-10-31
+- Related: docs/guide/plugins.md §4, ADR-0003
 
-## 背景
+## Background
 
-插件要承载任意探测与恢复逻辑（mihomo、cloudflared、OpenClash、自定义脚本），
-作者语言不可预知，且插件代码质量不可控：会崩溃、会卡死、会写坏输出。
+Plugins carry arbitrary probe and recovery logic (mihomo, cloudflared, OpenClash, custom scripts); author languages are unpredictable and plugin code quality is uncontrolled: they will crash, hang, or write malformed output.
 
-## 决策
+## Decision
 
-插件是独立子进程，经 stdio 与核心对话（custos-plugin-host）：
-`PluginSupervisor` 负责启动/握手/能力校验/崩溃重启（滚动窗口 + 放弃标记），
-核心进程永不因插件死亡而退出；插件崩溃后其资源按 §4.5 标记不可探测并通知。
+Plugins are independent child processes talking to the core via stdio (custos-plugin-host): `PluginSupervisor` handles spawn/handshake/capability validation/crash restart (rolling window + give-up marker); the core process never exits because a plugin died; after a crash the plugin's resources are marked unprobeable per §4.5 and a notification is raised.
 
-## 替代方案
+## Alternatives
 
-- **进程内动态库（dlopen/cdylib）**：一次崩溃即核心崩溃，隔离为零；ABI 脆弱；
-  与"插件崩溃不退出核心"的 P1 验收门直接冲突。
-- **纯内置（不开放插件）**：扩展只能改核心发版；社区无法贡献场景化能力。
-- **WASM**：沙箱好但宿主接口（文件/进程/网络）都要自建 ABI，第一版成本过高。
+- **In-process dynamic library (dlopen/cdylib)**: one crash kills the core — isolation is zero; fragile ABI; directly conflicts with the P1 gate "plugin crash must not exit core."
+- **Built-in only (no plugins)**: extensions require a core release; the community cannot contribute scenario-specific capabilities.
+- **WASM**: good sandbox but host interfaces (file/process/network) all need a custom ABI — too costly for v1.
 
-## 优缺点
+## Pros and Cons
 
-优点：故障域物理隔离；语言自由（任何能写 stdout 的语言）；崩溃重启策略可独立演化；
-权限边界清晰（插件不持有核心内存与凭据）。
-缺点：IPC 序列化开销（JSON 行协议）；进程生命周期管理复杂（僵尸、stderr 背压）；
-握手/版本/能力校验需要协议纪律。
+Pros: physical fault isolation; any language that writes to stdout works; crash-restart policy evolves independently; clean permission boundary (plugins hold no core memory or credentials).
+Cons: IPC serialization overhead (JSON line protocol); process lifecycle management is complex (zombies, stderr backpressure); handshake/version/capability validation requires protocol discipline.
 
-## 后续影响
+## Follow-up Impact
 
-- ADR-0003（JSON-RPC over stdio）实现协议层。
-- stderr 持续读取线程防止管道写满阻塞（tests: chatty_stderr_is_drained_and_capped）。
-- Python 入向脚本加载器（todo P1）复用同一契约：超时/权限/预算同口径。
+- ADR-0003 (JSON-RPC over stdio) implements the protocol layer.
+- Continuous stderr reader thread prevents pipe-full blocking (tests: chatty_stderr_is_drained_and_capped).
+- The Python inbound script loader (todo P1) reuses the same contract: timeout/permission/budget identical.
