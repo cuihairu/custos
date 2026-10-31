@@ -12,8 +12,8 @@ use crate::clock::Clock;
 use crate::events::{EngineEvent, RunStore};
 use crate::executor::ActionExecutor;
 use custos_config::ValidatedConfig;
-use custos_model::AlternativeGroup;
 use custos_model::ids::{ActionId, IncidentId, RecoveryRunId};
+use custos_model::AlternativeGroup;
 use custos_model::{
     ActionAttempt, ActionOutcome, Diagnosis, FaultCode, HealthStatus, RecoveryPlan, RecoveryRun,
     RecoveryRunStatus, Resource, ResourceHealthSnapshot, ResourceId, VerificationResult,
@@ -987,58 +987,58 @@ impl Engine {
         target: &ResourceId,
         step: &mut u32,
     ) -> bool {
-            // Re-probe: state must be fresh, not assumed (§2.3 rules 4/5).
+        // Re-probe: state must be fresh, not assumed (§2.3 rules 4/5).
+        self.probe_one(target, self.clock.now_unix_ms());
+        if self.managed[target].snapshot.status != HealthStatus::Healthy {
+            // Recover the dependency first (its own policy and budgets),
+            // unless a recovery is already in flight or its next attempt
+            // is scheduled behind a cooldown — then wait on that result.
+            if self.active_runs.contains(target)
+                || now_lt(
+                    self.clock.now_unix_ms(),
+                    self.managed[target].cooldown_until_ms,
+                )
+            {
+                self.suspend_on(run, target, step);
+                return false;
+            }
+            let _ = self.try_recover(target);
+            // Re-verify after dependency recovery.
             self.probe_one(target, self.clock.now_unix_ms());
             if self.managed[target].snapshot.status != HealthStatus::Healthy {
-                // Recover the dependency first (its own policy and budgets),
-                // unless a recovery is already in flight or its next attempt
-                // is scheduled behind a cooldown — then wait on that result.
-                if self.active_runs.contains(target)
-                    || now_lt(
-                        self.clock.now_unix_ms(),
-                        self.managed[target].cooldown_until_ms,
-                    )
-                {
+                if now_lt(
+                    self.clock.now_unix_ms(),
+                    self.managed[target].cooldown_until_ms,
+                ) {
+                    // The dependency just failed an attempt and is cooling
+                    // down towards its next one: wait for that result.
                     self.suspend_on(run, target, step);
                     return false;
                 }
-                let _ = self.try_recover(target);
-                // Re-verify after dependency recovery.
-                self.probe_one(target, self.clock.now_unix_ms());
-                if self.managed[target].snapshot.status != HealthStatus::Healthy {
-                    if now_lt(
-                        self.clock.now_unix_ms(),
-                        self.managed[target].cooldown_until_ms,
-                    ) {
-                        // The dependency just failed an attempt and is cooling
-                        // down towards its next one: wait for that result.
-                        self.suspend_on(run, target, step);
-                        return false;
-                    }
-                    self.store.emit(EngineEvent::DependencyUnsatisfied {
-                        run_id: run.id.clone(),
-                        resource_id: id.clone(),
-                        dependency_id: target.clone(),
-                        at_unix_ms: self.clock.now_unix_ms(),
-                    });
-                    self.store.save_step(
-                        &run.id,
-                        bump(step),
-                        "resolving_dependencies",
-                        &format!("dependency `{}` unsatisfied", target.as_str()),
-                        self.clock.now_unix_ms(),
-                    );
-                    tracing::warn!(
-                        target: "custos::engine",
-                        run = run.id.as_str(),
-                        resource = id.as_str(),
-                        dependency = target.as_str(),
-                        "dependency unsatisfied after recovery: upstream action blocked"
-                    );
-                    self.finish_escalated(run, id);
-                    return false;
-                }
+                self.store.emit(EngineEvent::DependencyUnsatisfied {
+                    run_id: run.id.clone(),
+                    resource_id: id.clone(),
+                    dependency_id: target.clone(),
+                    at_unix_ms: self.clock.now_unix_ms(),
+                });
+                self.store.save_step(
+                    &run.id,
+                    bump(step),
+                    "resolving_dependencies",
+                    &format!("dependency `{}` unsatisfied", target.as_str()),
+                    self.clock.now_unix_ms(),
+                );
+                tracing::warn!(
+                    target: "custos::engine",
+                    run = run.id.as_str(),
+                    resource = id.as_str(),
+                    dependency = target.as_str(),
+                    "dependency unsatisfied after recovery: upstream action blocked"
+                );
+                self.finish_escalated(run, id);
+                return false;
             }
+        }
         true
     }
 
@@ -1069,9 +1069,7 @@ impl Engine {
         for member in &members {
             self.probe_one(member, self.clock.now_unix_ms());
         }
-        if group.satisfied_by(&|m| {
-            self.managed[m].snapshot.status == HealthStatus::Healthy
-        }) {
+        if group.satisfied_by(&|m| self.managed[m].snapshot.status == HealthStatus::Healthy) {
             return true;
         }
         // Recover each unhealthy member (respecting in-flight/cooldown), then
@@ -1091,9 +1089,7 @@ impl Engine {
             let _ = self.try_recover(member);
             self.probe_one(member, self.clock.now_unix_ms());
         }
-        if group.satisfied_by(&|m| {
-            self.managed[m].snapshot.status == HealthStatus::Healthy
-        }) {
+        if group.satisfied_by(&|m| self.managed[m].snapshot.status == HealthStatus::Healthy) {
             return true;
         }
         self.store.emit(EngineEvent::DependencyUnsatisfied {
@@ -1966,9 +1962,15 @@ mod tests {
             .iter()
             .filter(|e| e.event_type.as_str() == "plugin.unavailable")
             .collect();
-        assert_eq!(plugin_faults.len(), 1, "one fault on the transition, got {received:?}");
+        assert_eq!(
+            plugin_faults.len(),
+            1,
+            "one fault on the transition, got {received:?}"
+        );
         assert_eq!(plugin_faults[0].severity, Severity::Critical);
-        assert!(plugin_faults[0].summary.contains("plugin degraded (unprobeable)"));
+        assert!(plugin_faults[0]
+            .summary
+            .contains("plugin degraded (unprobeable)"));
         // The resource itself is marked Unreachable, never Unhealthy/Unusable.
         assert_eq!(
             engine

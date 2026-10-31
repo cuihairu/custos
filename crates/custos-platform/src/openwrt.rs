@@ -56,12 +56,20 @@ impl ServiceController for ProcdServiceController {
         // `ubus call service list '{"name":"<unit>"}'` answers with the
         // procd view; a stopped service answers without instances.
         let script = Self::script(unit)?;
-        let argv = vec!["ubus".into(), "call".into(), "service".into(), "list".into(),
-            serde_json::json!({"name": unit}).to_string()];
+        let argv = vec![
+            "ubus".into(),
+            "call".into(),
+            "service".into(),
+            "list".into(),
+            serde_json::json!({"name": unit}).to_string(),
+        ];
         match run(&argv) {
             ExecResult::Succeeded { stdout, .. } => {
                 let has_instances = serde_json::from_str::<serde_json::Value>(&stdout)
-                    .map(|v| v.get(unit).is_some_and(|svc| svc.get("instances").is_some()))
+                    .map(|v| {
+                        v.get(unit)
+                            .is_some_and(|svc| svc.get("instances").is_some())
+                    })
                     .unwrap_or(false);
                 if has_instances {
                     Ok(ServiceState::Running)
@@ -119,15 +127,20 @@ pub fn uci_get(path: &str) -> PlatformResult<String> {
     require_openwrt()?;
     match run(&["uci".into(), "get".into(), path.into()]) {
         ExecResult::Succeeded { stdout, .. } => Ok(stdout.trim().to_owned()),
-        ExecResult::Failed { stderr, .. } => Err(PlatformError::NotFound(
-            format!("uci option {path} unset or missing ({})", stderr.trim()),
-        )),
+        ExecResult::Failed { stderr, .. } => Err(PlatformError::NotFound(format!(
+            "uci option {path} unset or missing ({})",
+            stderr.trim()
+        ))),
         other => Err(other.into()),
     }
 }
 
 /// One `ubus call <object> <method> [json]` round trip; the parsed reply.
-pub fn ubus_call(object: &str, method: &str, params: Option<serde_json::Value>) -> PlatformResult<serde_json::Value> {
+pub fn ubus_call(
+    object: &str,
+    method: &str,
+    params: Option<serde_json::Value>,
+) -> PlatformResult<serde_json::Value> {
     require_openwrt()?;
     let mut argv = vec!["ubus".into(), "call".into(), object.into(), method.into()];
     if let Some(params) = params {
@@ -145,10 +158,7 @@ pub fn ubus_call(object: &str, method: &str, params: Option<serde_json::Value>) 
 pub fn parse_wan_status(status: &serde_json::Value) -> (bool, Vec<String>) {
     let up = status.get("up").and_then(|v| v.as_bool()).unwrap_or(false);
     let mut facts = Vec::new();
-    if let Some(addresses) = status
-        .get("ipv4-address")
-        .and_then(|v| v.as_array())
-    {
+    if let Some(addresses) = status.get("ipv4-address").and_then(|v| v.as_array()) {
         for address in addresses {
             if let Some(addr) = address.get("address").and_then(|v| v.as_str()) {
                 facts.push(format!("address {addr}"));
@@ -198,8 +208,14 @@ mod tests {
         });
         let (up, facts) = parse_wan_status(&status);
         assert!(up);
-        assert!(facts.contains(&"address 192.168.8.42".to_owned()), "{facts:?}");
-        assert!(facts.contains(&"1 default route(s)".to_owned()), "{facts:?}");
+        assert!(
+            facts.contains(&"address 192.168.8.42".to_owned()),
+            "{facts:?}"
+        );
+        assert!(
+            facts.contains(&"1 default route(s)".to_owned()),
+            "{facts:?}"
+        );
 
         let (down, _) = parse_wan_status(&serde_json::json!({ "up": false }));
         assert!(!down);

@@ -234,10 +234,7 @@ mod tests {
                 args: [("interface".into(), serde_json::json!("eth0"))].into(),
             })
             .unwrap_err();
-        assert!(
-            err.message.contains("already running"),
-            "{err}"
-        );
+        assert!(err.message.contains("already running"), "{err}");
         drop(guard);
         // With the mutex free the same call succeeds.
         let outcome = tool
@@ -248,7 +245,13 @@ mod tests {
                 args: [("interface".into(), serde_json::json!("eth0"))].into(),
             })
             .unwrap();
-        assert!(matches!(outcome, ToolOutcome::Action { succeeded: true, .. }));
+        assert!(matches!(
+            outcome,
+            ToolOutcome::Action {
+                succeeded: true,
+                ..
+            }
+        ));
     }
 
     #[test]

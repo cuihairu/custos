@@ -162,9 +162,7 @@ fn exec_probe(
         .filter(|argv| !argv.is_empty())
         .ok_or_else(|| err("`probe.command` is required for exec-probed resources"))?;
     let timeout_ms = config["timeout_ms"].as_u64().unwrap_or(3_000);
-    let max_output_bytes = config["max_output_bytes"]
-        .as_u64()
-        .unwrap_or(64 * 1024) as usize;
+    let max_output_bytes = config["max_output_bytes"].as_u64().unwrap_or(64 * 1024) as usize;
     Ok(ExecProbe::from_argv(
         command,
         Duration::from_millis(timeout_ms),

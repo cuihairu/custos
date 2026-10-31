@@ -457,11 +457,7 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
                             format!("unknown alternative group `{group}`"),
                         )
                     })?;
-                if !group_def
-                    .members
-                    .iter()
-                    .any(|m| m.as_str() == dep.resource)
-                {
+                if !group_def.members.iter().any(|m| m.as_str() == dep.resource) {
                     return Err(ConfigError::validation(
                         format!("{path}.resource"),
                         format!(
@@ -1224,10 +1220,7 @@ port = 53
 hostt = "typo"
 "#;
         let err = load(config).unwrap_err();
-        assert!(
-            err.to_string().contains("unknown field"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("unknown field"), "got: {err}");
     }
 
     #[test]
@@ -1319,7 +1312,8 @@ dependencies = [
 "#;
         let err = load(config).unwrap_err();
         assert!(
-            err.to_string().contains("not a member of alternative group"),
+            err.to_string()
+                .contains("not a member of alternative group"),
             "got: {err}"
         );
     }
