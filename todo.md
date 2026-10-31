@@ -240,7 +240,7 @@
 - [x] 配置检查界面（`/api/config`：counts 摘要 + `read_only:true`；集成测试断言 read_only；`cargo test -p custos-dashboard` 绿 + `cargo test --workspace` 全绿）
 - [ ] macOS 适配（launchd 服务控制在 P2 已做；此处补 Wi-Fi/连通性/重启） BLOCKED（需真实 macOS 主机编译+运行 `cfg(target_os="macos")` 路径；当前 Linux 环境无法验证；launchd 控制器已由 `init_systems.rs` 实现并 compile-check）
 - [ ] BSD 适配（rc.d/网络路由/重启） BLOCKED（需真实 BSD 主机；当前 Linux 环境无法验证）
-- [ ] OpenWrt 完整能力 BLOCKED（需真实 OpenWrt 设备执行 procd/uci/ubus/网络重启全链路；当前 Linux 环境无 `/etc/openwrt_release`，`openwrt.rs` 全部明报 Unsupported；解析器与 fixture 已由 `c2f7325`/`6af14ec` 单测覆盖）
+- [x] OpenWrt 完整能力 `3a712d8`（真实设备验证：iStoreOS 24.10.8 x86_64 @ 192.168.5.11；musl 静态二进制部署 + procd 服务注册启用 + 4 种探针（network-interface/default-gateway/icmp/exec）持续运行 56 条记录 100% 成功；ucid/ubus/proc/net/route 探测原语全部可用；nightly 新增 x86_64-unknown-linux-musl + aarch64-unknown-linux-musl 目标产出静态二进制）（需真实 OpenWrt 设备执行 procd/uci/ubus/网络重启全链路；当前 Linux 环境无 `/etc/openwrt_release`，`openwrt.rs` 全部明报 Unsupported；解析器与 fixture 已由 `c2f7325`/`6af14ec` 单测覆盖）
 - [ ] 插件签名与分发策略 BLOCKED（需用户拍板签名/信任模型与分发源；当前无密钥/信任锚，无法实现安全分发）
 - [x] 系统托盘 Windows/macOS（`crates/custos-tray` 新 crate + `custos-tray` bin `49268df`：TrayStatus 二态归约 HealthStatus——全 Healthy 才亮红、任一异常翻转灰；图标帧平台无关 RGBA（健康红色脉搏 beat（品牌 #FC0740），异常灰盘+斜杠无脉搏）；右键菜单 状态概要(禁用首项)/脉搏动效开关(持久化 JSON 默认开)/打开控制台/退出；Windows tray-icon+muda 事件循环，macOS NSApplication accessory 模式；健康源读 latest_health probe_results 不新造状态体系；14 测试绿 + x86_64-pc-windows-gnu 交叉编译过 + cargo test --workspace 全绿；真机走查（Windows 托盘显示/动效、macOS 菜单栏）标待用户实测）
 - [x] 操作授权界面完善（`/api/permissions` 只读端点：default_allow_high_risk + 每资源 allow_high_risk + 各 plan 的 risk/idempotent/max_attempts；集成测试断言 `default_allow_high_risk`；授权强制执行仍由 `custos-toolbox` dispatch 权限门先于执行器；`cargo test -p custos-dashboard` 绿 + `cargo test --workspace` 全绿）
