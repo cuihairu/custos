@@ -270,7 +270,7 @@
 - [x] dashboard-cli-config.md 英文侧同步清理 `694adad`（与中文侧同构重写）
 - [x] adr-principles.md 尾部错乱清理（§18 后混入 10.3 片段，中文侧） `694adad`（删除混入的 Code Agent 指令残段/YAML 片段/10.3 重复，保留 §17 十五条与 §18 正文）
 - [x] adr-principles.md 英文侧同步清理 `694adad`（同构清理，并补齐英文侧缺失的第 15 条工具箱模型原则）
-- [ ] vitepress 2.0 正式版发布后去 alpha 跟进（2.0 仍为 alpha.21，npm latest=1.6.4；发布后升级并跑 docs:build）
+- [ ] vitepress 2.0 正式版发布后去 alpha 跟进（2.0 仍为 alpha.21，npm latest=1.6.4；发布后升级并跑 docs:build） BLOCKED（vitepress 2.0 尚未正式发布，npm latest 仍为 1.6.4；需等待上游发布，当前无法升级）
 - [x] rust-toolchain.toml 补充（stable 通道声明） `694adad`
 - [x] CI：cargo fmt/clippy/test 工作流 `694adad`（ci.yml：push/PR 触发 fmt --check + clippy -D warnings + workspace test + mingw 交叉检查（apt 装 mingw-w64 编 bundled sqlite）；与 nightly 分离、永不发布版本）
 - [x] CI：docs:build 工作流（PR 校验） `694adad`（docs.yml：pnpm frozen-lockfile + vitepress build，路径过滤；本地验证含新 ADR 页构建通过）
