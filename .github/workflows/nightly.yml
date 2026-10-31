@@ -149,13 +149,19 @@ jobs:
         shell: pwsh
         run: |
           cargo install cargo-wix
-          # Stage binaries at the fixed asset path the .wxs references.
-          Copy-Item "target/${{ matrix.target }}/release/custos.exe" -Destination "target/release/custos.exe" -Force
-          Copy-Item "target/${{ matrix.target }}/release/custos-tray.exe" -Destination "target/release/custos-tray.exe" -Force
-          New-Item -ItemType Directory -Force -Path target/release | Out-Null
+          # cargo-wix resolves the .wxs Source paths relative to the package
+          # directory (crates/custos-cli), so stage the built binaries into
+          # crates/custos-cli/target/release (not the workspace target).
+          $stage = "crates/custos-cli/target/release"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/custos.exe" -Destination "$stage/custos.exe" -Force
+          Copy-Item "target/${{ matrix.target }}/release/custos-tray.exe" -Destination "$stage/custos-tray.exe" -Force
+          # Replace the Product Version attribute whatever its current value
+          # (the old literal '0.1.0' replacement silently no-ops if the wxs
+          # ever carries another version string).
           $ver = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           $wxs = Get-Content crates/custos-cli/wix/main.wxs -Raw
-          $wxs = $wxs -replace 'Version="0.1.0"', ('Version="' + $ver + '"')
+          $wxs = $wxs -replace '(<Product\b[^>]*\bVersion=")[^"]*(")', ('${1}' + $ver + '${2}')
           Set-Content crates/custos-cli/wix/main.wxs $wxs
           cargo wix --package custos-cli --nocapture
           New-Item -ItemType Directory -Force -Path dist | Out-Null
