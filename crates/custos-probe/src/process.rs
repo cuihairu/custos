@@ -94,8 +94,10 @@ enum RssReading {
     Unsupported,
 }
 
-/// Resident set size via `/proc/<pid>/statm` (Linux).
-#[cfg(unix)]
+/// Resident set size via `/proc/<pid>/statm`. `/proc` is Linux-only;
+/// macOS/BSD/Windows declare the threshold unsupported (§11.1 不伪造支持)
+/// rather than reading a non-existent procfs and misreporting "exited".
+#[cfg(target_os = "linux")]
 fn resident_kb(pid: u32) -> RssReading {
     let Ok(statm) = std::fs::read_to_string(format!("/proc/{pid}/statm")) else {
         // The pid directory is gone: the process exited.
@@ -113,7 +115,7 @@ fn resident_kb(pid: u32) -> RssReading {
 }
 
 /// Kernel page size in KiB (Linux), falling back to the common 4 KiB.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn page_size_kb() -> u64 {
     // libc::sysconf(_SC_PAGESIZE) is exact; 4096 covers every supported
     // deployment kernel, and the threshold comparison tolerates a 4 KiB
@@ -127,17 +129,29 @@ fn page_size_kb() -> u64 {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 fn resident_kb(_pid: u32) -> RssReading {
     RssReading::Unsupported
 }
 
 fn is_alive(pid: u32) -> bool {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
         std::path::Path::new(&format!("/proc/{pid}")).exists()
     }
-    #[cfg(not(unix))]
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        // macOS/BSD have no /proc. `kill(pid, 0)` sends no signal: returns 0
+        // if the process exists, -1 with EPERM if it exists but belongs to
+        // another user (still alive), -1 with ESRCH if it is gone.
+        unsafe {
+            let ret = libc::kill(pid as libc::pid_t, 0);
+            ret == 0
+                || std::io::Error::last_os_error().raw_os_error()
+                    == Some(libc::EPERM)
+        }
+    }
+    #[cfg(windows)]
     {
         // Windows: tasklist exits 0 when the pid exists.
         std::process::Command::new("tasklist")
