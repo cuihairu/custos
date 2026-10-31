@@ -40,8 +40,14 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
             let pid_file = config["pid_file"]
                 .as_str()
                 .ok_or_else(|| err("`probe.pid_file` is required for process resources"))?;
+            let rss_threshold_kb = match config["rss_threshold_kb"].as_u64() {
+                Some(kb) if kb > 0 => Some(kb),
+                Some(_) => return Err(err("`probe.rss_threshold_kb` must be > 0")),
+                None => None,
+            };
             Ok(Box::new(ProcessProbe {
                 pid_file: pid_file.into(),
+                rss_threshold_kb,
             }))
         }
         "http-endpoint" => http::from_config(config)
