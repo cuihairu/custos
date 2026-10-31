@@ -146,9 +146,7 @@ fn is_alive(pid: u32) -> bool {
         // another user (still alive), -1 with ESRCH if it is gone.
         unsafe {
             let ret = libc::kill(pid as libc::pid_t, 0);
-            ret == 0
-                || std::io::Error::last_os_error().raw_os_error()
-                    == Some(libc::EPERM)
+            ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
         }
     }
     #[cfg(windows)]
