@@ -173,6 +173,7 @@ fn start(path: &str, args: &[String]) -> ExitCode {
     let Assembled {
         mut engine,
         notification,
+        store,
         ..
     } = match custos_core::assemble(&config, &options.db_path) {
         Ok(assembled) => assembled,
@@ -181,6 +182,24 @@ fn start(path: &str, args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    // Optional web dashboard: binds only when `[dashboard].enabled = true`;
+    // disabled means zero listeners and no HTTP code path (ADR-0010).
+    if config.dashboard.is_enabled() {
+        match custos_dashboard::DashboardServer::bind(&config.dashboard, store.clone()) {
+            Ok(server) => {
+                let addr = server
+                    .local_addr()
+                    .unwrap_or_else(|_| config.dashboard.listen_addr());
+                println!("custos: dashboard listening on {addr}");
+                std::thread::spawn(move || server.serve());
+            }
+            Err(err) => {
+                eprintln!("error: dashboard bind failed: {err}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
 
     // Crash recovery first (§6.6): mid-execution attempts become
     // OutcomeUnknown; they are never blindly re-executed.

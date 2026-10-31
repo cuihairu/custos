@@ -14,6 +14,7 @@ members = [
     "crates/custos-notify",
     "crates/custos-python",
     "crates/custos-cli",
+    "crates/custos-dashboard",
     "plugins/mihomo",
     "plugins/openclash",
     "plugins/cloudflared",

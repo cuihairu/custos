@@ -19,6 +19,9 @@ pub use notification::{
     SmtpConfig, SsrfPolicy, WebhookConfig,
 };
 
+mod dashboard;
+pub use dashboard::{DashboardConfig, ListenConfig};
+
 /// Supported configuration schema version.
 pub const SUPPORTED_VERSION: u32 = 1;
 
@@ -298,6 +301,9 @@ struct RawConfig {
     /// Independent notification section (docs/guide/notification.md §8.5).
     #[serde(default)]
     notification: Option<notification::RawNotification>,
+    /// Optional web dashboard, disabled by default (docs/guide/dashboard-cli-config.md §9.1).
+    #[serde(default)]
+    dashboard: Option<dashboard::RawDashboard>,
 }
 
 /// Global authorization defaults (docs/guide/security.md §12.2). Per-resource
@@ -319,6 +325,8 @@ pub struct ValidatedConfig {
     pub permissions: Permissions,
     /// Independent notification section (docs/guide/notification.md §8.5).
     pub notification: NotificationConfig,
+    /// Optional web dashboard (docs/guide/dashboard-cli-config.md §9.1).
+    pub dashboard: DashboardConfig,
 }
 
 /// Global authorization defaults carried into the runtime.
@@ -680,12 +688,16 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
         other => ConfigError::validation("notification", other.to_string()),
     })?;
 
+    // Optional dashboard; a missing section means disabled.
+    let dashboard = dashboard::parse(raw.dashboard)?;
+
     Ok(ValidatedConfig {
         resources,
         alternative_groups,
         graph,
         permissions,
         notification,
+        dashboard,
     })
 }
 
@@ -1316,5 +1328,49 @@ dependencies = [
                 .contains("not a member of alternative group"),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn dashboard_defaults_to_disabled() {
+        let config = load("version = 1\n").unwrap();
+        assert!(!config.dashboard.is_enabled());
+        assert_eq!(
+            config.dashboard.listen_addr(),
+            "127.0.0.1:8080".parse().unwrap()
+        );
+    }
+
+    #[test]
+    fn dashboard_parses_enabled_with_listen() {
+        let config = load(
+            r#"
+version = 1
+
+[dashboard]
+enabled = true
+listen = "127.0.0.1:9090"
+"#,
+        )
+        .unwrap();
+        assert!(config.dashboard.is_enabled());
+        assert_eq!(
+            config.dashboard.listen_addr(),
+            "127.0.0.1:9090".parse().unwrap()
+        );
+    }
+
+    #[test]
+    fn dashboard_rejects_invalid_listen() {
+        let err = load(
+            r#"
+version = 1
+
+[dashboard]
+enabled = true
+listen = "not-an-address"
+"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("dashboard.listen"), "got: {err}");
     }
 }

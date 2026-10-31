@@ -312,6 +312,7 @@ version = "0.1.0"
 dependencies = [
  "custos-config",
  "custos-core",
+ "custos-dashboard",
  "custos-engine",
  "custos-model",
  "custos-notify",
@@ -354,6 +355,19 @@ dependencies = [
  "custos-store",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "custos-dashboard"
+version = "0.1.0"
+dependencies = [
+ "custos-config",
+ "custos-model",
+ "custos-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

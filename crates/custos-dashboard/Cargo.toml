@@ -1,0 +1,17 @@
+[package]
+name = "custos-dashboard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Optional read-only web dashboard for Custos (disabled by default)"
+
+[dependencies]
+custos-store = { path = "../custos-store" }
+custos-config = { path = "../custos-config" }
+custos-model = { path = "../custos-model" }
+serde_json = { workspace = true }
+serde = { workspace = true }
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
