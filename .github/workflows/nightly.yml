@@ -147,6 +147,10 @@ jobs:
         shell: pwsh
         run: |
           cargo install cargo-wix
+          # Stage binaries at the fixed asset path the .wxs references.
+          Copy-Item "target/${{ matrix.target }}/release/custos.exe" -Destination "target/release/custos.exe" -Force
+          Copy-Item "target/${{ matrix.target }}/release/custos-tray.exe" -Destination "target/release/custos-tray.exe" -Force
+          New-Item -ItemType Directory -Force -Path target/release | Out-Null
           $ver = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           $wxs = Get-Content crates/custos-cli/wix/main.wxs -Raw
           $wxs = $wxs -replace 'Version="0.1.0"', ('Version="' + $ver + '"')
