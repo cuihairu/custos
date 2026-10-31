@@ -136,20 +136,34 @@ fn default_console_command(db_path: &str) -> Vec<String> {
             .collect()
     } else if cfg!(target_os = "macos") {
         // Terminal.app opens a window and runs the command via AppleScript
-        // (a plain `open -a Terminal` would discard the command). The
-        // command is shell-quoted so paths with spaces survive.
-        let script = shell_quote(&status_args.join(" "));
+        // (a plain `open -a Terminal` would discard the command). Each
+        // argument is shell-quoted independently, then joined with spaces:
+        // quoting the whole joined string would make the shell treat the
+        // entire line as a single program name and fail to exec it.
         vec![
             "osascript".into(),
             "-e".into(),
-            format!(
-                "tell application \"Terminal\" to do script {}",
-                apple_quote(&script)
-            ),
+            macos_console_script(&status_args),
         ]
     } else {
         status_args
     }
+}
+
+/// Builds the `do script` payload for Terminal.app: each command argument is
+/// shell-quoted independently, then joined with single spaces (a path with
+/// spaces stays one shell word).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn macos_console_script(status_args: &[String]) -> String {
+    let script = status_args
+        .iter()
+        .map(|a| shell_quote(a))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "tell application \"Terminal\" to do script {}",
+        apple_quote(&script)
+    )
 }
 
 fn tracing_subscriber_fmt() {
@@ -157,4 +171,26 @@ fn tracing_subscriber_fmt() {
         .with_target(true)
         .with_max_level(tracing::Level::INFO)
         .init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macos_console_command_quotes_each_argument_independently() {
+        // A path with spaces must be a single quoted shell word, not a
+        // single quoted string for the entire command line.
+        let args = vec![
+            "custos".to_owned(),
+            "status".to_owned(),
+            "--db".to_owned(),
+            "/etc/custos/my db/custos.db".to_owned(),
+        ];
+        let script = macos_console_script(&args);
+        // The do-script payload contains each argument in its own single
+        // quotes, and the program name is not merged with its arguments.
+        assert!(script.contains("'custos' 'status' '--db' '/etc/custos/my db/custos.db'"));
+        assert!(!script.contains("'custos status --db /etc/custos/my db/custos.db'"));
+    }
 }

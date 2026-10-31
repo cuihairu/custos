@@ -61,9 +61,23 @@ download() {
   fi
 }
 
-asset=$(fetch "https://api.github.com/repos/${REPO}/releases/tags/${CHANNEL}" \
-  | grep -o "\"browser_download_url\": *\"[^\"]*custos-${asset_arch}[^\"]*\\.tar\\.gz\"" \
-  | head -1 | grep -o 'https://[^"]*')
+# Assets are named custos-linux-<arch>.tar.gz (glibc) and, for x86_64,
+# custos-linux-musl-<arch>.tar.gz (fully static). Match the exact asset
+# suffix so a glibc build is never conflated with the static musl build.
+# OpenWrt/iStoreOS prefer the static musl tarball when one exists for this
+# architecture; otherwise (e.g. aarch64) fall back to the glibc build.
+find_asset() {
+  fetch "https://api.github.com/repos/${REPO}/releases/tags/${CHANNEL}" \
+    | grep -o "\"browser_download_url\": *\"[^\"]*$1\\.tar\\.gz\"" \
+    | head -1 | grep -o 'https://[^"]*'
+}
+
+if [ "$PLATFORM" = "openwrt" ]; then
+  asset=$(find_asset "custos-linux-musl-${asset_arch}")
+  [ -z "$asset" ] && asset=$(find_asset "custos-linux-${asset_arch}")
+else
+  asset=$(find_asset "custos-linux-${asset_arch}")
+fi
 
 [ -n "$asset" ] || die "no nightly ${asset_arch} tarball found in ${REPO}/${CHANNEL}"
 
@@ -74,7 +88,10 @@ trap 'rm -rf "$tmpdir"' EXIT
 say "downloading: $asset"
 download "$asset" "$tmpdir/custos.tar.gz" || die "download failed"
 
-tar -xzf "$tmpdir/custos.tar.gz" -C "$tmpdir" custos || die "extract failed (binary not in tarball)"
+# Extract both the engine and the desktop tray binary (present since the
+# nightly rolling build bundles `custos-tray` next to `custos`).
+tar -xzf "$tmpdir/custos.tar.gz" -C "$tmpdir" custos custos-tray \
+  || die "extract failed (binary not in tarball)"
 
 # ── install ────────────────────────────────────────────────────────────
 if [ "$PLATFORM" = "openwrt" ] && [ -n "${IPKG_INSTROOT:-}" ]; then
@@ -87,6 +104,15 @@ mv "$tmpdir/custos" "$install_bin"
 chmod 755 "$install_bin"
 say "installed: $install_bin"
 
+# Tray binary: installed alongside the engine when present (never fatal;
+# the engine is the primary artifact and tray is a desktop nicety).
+if [ -f "$tmpdir/custos-tray" ]; then
+  tray_bin="$PREFIX/custos-tray"
+  mv "$tmpdir/custos-tray" "$tray_bin"
+  chmod 755 "$tray_bin"
+  say "installed: $tray_bin"
+fi
+
 # ── service registration ──────────────────────────────────────────────
 register_service() {
   if [ "$PLATFORM" = "openwrt" ]; then
@@ -95,15 +121,33 @@ register_service() {
 START=99
 USE_PROCD=1
 PROG=/usr/bin/custos
+CONF_TOML=/etc/custos/custos.toml
+CONF_DB=/etc/custos/custos.db
 
 start_service() {
-  mkdir -p /etc/custos
+  local enabled
+  config_load custos
+  config_get enabled main enabled '0'
+  [ "$enabled" = "1" ] || return 0
+  [ -f "$CONF_TOML" ] || {
+    logger -t custos "no config at $CONF_TOML; not starting"
+    return 1
+  }
   procd_open_instance
-  procd_set_param command "$PROG" start /etc/custos/custos.toml --db /etc/custos/custos.db
+  procd_set_param command "$PROG" start "$CONF_TOML" --db "$CONF_DB"
   procd_set_param respawn 3600 5 0
   procd_set_param stdout 1
   procd_set_param stderr 1
   procd_close_instance
+}
+
+stop_service() {
+  service_stop "$PROG"
+}
+
+reload_service() {
+  stop
+  start
 }
 INIT
     chmod +x /etc/init.d/custos
