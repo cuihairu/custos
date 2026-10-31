@@ -173,11 +173,7 @@ def main():
                 if hasattr(module, "verify"):
                     _reply(rid, _call("verify", params))
                 else:
-                    _reply(
-                        None,
-                        rid,
-                        {"healthy": None, "observation": "script defines no verify()"},
-                    )
+                    _reply(rid, {"healthy": None, "observation": "script defines no verify()"})
             except Exception as exc:  # noqa: BLE001
                 _reply_error(rid, -32000, f"script error: {exc}")
         elif method == METHOD_PREFIX + "list_recovery_actions":

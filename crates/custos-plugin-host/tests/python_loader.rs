@@ -38,6 +38,29 @@ def recover(params):
 "#;
 
 #[test]
+fn python_verify_falls_back_when_undefined() {
+    if !python3_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let script = write_script(dir.path(), HEALTHY_SCRIPT);
+    let config = script_plugin_config(&script).unwrap();
+    let session = PluginSession::start(&config).unwrap();
+    session.initialize().unwrap();
+
+    let result = session
+        .call_with_timeout(
+            custos_plugin_api::Method::Verify,
+            serde_json::json!({"resource_id": "r", "args": {}}),
+            Duration::from_secs(5),
+        )
+        .expect("verify fallback");
+    assert_eq!(result["healthy"], serde_json::json!(null));
+    assert_eq!(result["observation"], "script defines no verify()");
+    session.shutdown().ok();
+}
+
+#[test]
 fn python_probe_roundtrip_healthy() {
     if !python3_available() {
         return; // no interpreter on this machine; skip

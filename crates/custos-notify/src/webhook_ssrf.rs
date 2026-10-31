@@ -41,9 +41,20 @@ impl SsrfBlock {
 pub fn validate_target(url: &str, policy: &SsrfPolicy) -> Result<Vec<IpAddr>, SsrfBlock> {
     let parsed = url::Url::parse(url).map_err(|_| SsrfBlock::Unspecified)?;
     let host = parsed.host_str().ok_or(SsrfBlock::Unspecified)?.to_owned();
-    // An explicit allowlist entry exempts the host entirely.
+    // An explicit allowlist entry exempts the host from block rules, but the
+    // address must still resolve so callers can pin the connection.
     if policy.allowlist.iter().any(|allowed| allowed == &host) {
-        return Ok(Vec::new());
+        let port = parsed.port_or_known_default().unwrap_or(80);
+        let addrs: Vec<IpAddr> = (host.as_str(), port)
+            .to_socket_addrs()
+            .map_err(|_| SsrfBlock::Unspecified)?
+            .map(|sock| sock.ip())
+            .collect();
+        return if addrs.is_empty() {
+            Err(SsrfBlock::Unspecified)
+        } else {
+            Ok(addrs)
+        };
     }
     let port = parsed.port_or_known_default().unwrap_or(80);
     let addrs: Vec<IpAddr> = (host.as_str(), port)
@@ -228,10 +239,8 @@ mod tests {
         let mut p = policy();
         p.allowlist = vec!["internal.example.com".to_owned()];
         // A loopback host named on the allowlist is accepted.
-        assert_eq!(
-            validate_target("http://internal.example.com/", &p),
-            Ok(vec![])
-        );
+        let addrs = validate_target("http://internal.example.com/", &p).unwrap();
+        assert!(!addrs.is_empty());
         // Non-allowlisted loopback still blocked.
         assert_eq!(
             validate_target("http://127.0.0.1:8080/", &p),

@@ -73,13 +73,21 @@ pub enum DispatchedOutcome {
     ToPlugin { plugin: String },
 }
 
+/// A plugin-declared operation and the capability metadata needed to apply
+/// the same permission gate as built-ins before the host forwards the call.
+#[derive(Debug, Clone)]
+struct PluginOperation {
+    plugin: String,
+    required_permission: String,
+}
+
 /// The one dispatch table. Built-in tools and plugin-declared operations
 /// register here; lookups answer with the executor (or the plugin to call).
 #[derive(Default)]
 pub struct ToolRegistry {
     builtins: BTreeMap<String, Box<dyn BuiltinTool>>,
-    /// operation id → owning plugin name.
-    delegated: BTreeMap<String, String>,
+    /// operation id → owning plugin and declared capability.
+    delegated: BTreeMap<String, PluginOperation>,
 }
 
 impl ToolRegistry {
@@ -117,6 +125,7 @@ impl ToolRegistry {
         &mut self,
         operation_id: impl Into<String>,
         plugin: impl Into<String>,
+        required_permission: impl Into<String>,
     ) -> Result<(), String> {
         let operation_id = operation_id.into();
         if self.builtins.contains_key(&operation_id) || self.delegated.contains_key(&operation_id) {
@@ -124,7 +133,13 @@ impl ToolRegistry {
                 "operation `{operation_id}` is already registered; operation ids must be unique across builtins and plugins"
             ));
         }
-        self.delegated.insert(operation_id, plugin.into());
+        self.delegated.insert(
+            operation_id,
+            PluginOperation {
+                plugin: plugin.into(),
+                required_permission: required_permission.into(),
+            },
+        );
         Ok(())
     }
 
@@ -149,9 +164,18 @@ impl ToolRegistry {
         granted: &dyn Fn(&str) -> bool,
         params: &OperationParams,
     ) -> Result<DispatchedOutcome, ToolboxError> {
-        if let Some(plugin) = self.delegated.get(&params.operation_id) {
+        if let Some(operation) = self.delegated.get(&params.operation_id) {
+            if !granted(&operation.required_permission) {
+                return Err(ToolboxError::new(
+                    ToolboxErrorKind::Denied,
+                    format!(
+                        "operation `{}` requires permission `{}` which is not granted",
+                        params.operation_id, operation.required_permission
+                    ),
+                ));
+            }
             return Ok(DispatchedOutcome::ToPlugin {
-                plugin: plugin.clone(),
+                plugin: operation.plugin.clone(),
             });
         }
         let Some(tool) = self.builtins.get(&params.operation_id) else {
@@ -258,13 +282,25 @@ mod tests {
     }
 
     #[test]
-    fn plugin_operations_dispatch_to_the_plugin() {
+    fn plugin_operations_require_permission_before_dispatch() {
         let mut registry = ToolRegistry::new();
         registry
-            .register_plugin_operation("mihomo.switch_node", "mihomo")
+            .register_plugin_operation("mihomo.switch_node", "mihomo", "proxy.switch")
             .unwrap();
+        let err = registry
+            .dispatch(
+                &|perm| perm != "proxy.switch",
+                &params("mihomo.switch_node"),
+            )
+            .unwrap_err();
+        assert_eq!(err.kind, ToolboxErrorKind::Denied);
+        assert!(err.message.contains("proxy.switch"), "{err}");
+
         let outcome = registry
-            .dispatch(&|_| true, &params("mihomo.switch_node"))
+            .dispatch(
+                &|perm| perm == "proxy.switch",
+                &params("mihomo.switch_node"),
+            )
             .unwrap();
         assert_eq!(
             outcome,
@@ -284,7 +320,7 @@ mod tests {
             }))
             .unwrap();
         assert!(registry
-            .register_plugin_operation("test.count", "other")
+            .register_plugin_operation("test.count", "other", "permission")
             .is_err());
     }
 
