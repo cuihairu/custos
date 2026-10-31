@@ -1,6 +1,7 @@
 //! Dashboard integration: binds only when enabled, serves read-only JSON,
 //! and never touches the engine's recovery path.
 
+use custos_config::load as load_config;
 use custos_config::DashboardConfig;
 use custos_dashboard::DashboardServer;
 use custos_store::Store;
@@ -27,7 +28,9 @@ fn get(addr: std::net::SocketAddr, path: &str) -> (String, String) {
         }
     }
     let mut stream = stream.expect("connect");
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(20));
     write!(
         stream,
@@ -62,13 +65,26 @@ fn enabled_server_serves_read_only_json() {
     let mut config = DashboardConfig::default();
     config.enabled = true;
     config.listen.addr = "127.0.0.1:0".parse().unwrap();
-    let server = DashboardServer::bind(&config, store).unwrap();
+    let validated = load_config("version = 1\n").unwrap();
+    let server = DashboardServer::bind(&config, store, validated).unwrap();
     let addr = server.local_addr().unwrap();
     std::thread::spawn(move || server.serve());
 
     let (status, body) = get(addr, "/api/health");
     assert!(status.contains("200 OK"), "{status}");
     assert!(body.contains("resources"), "body was: {body:?}");
+
+    let (status, body) = get(addr, "/api/resources");
+    assert!(status.contains("200 OK"), "{status}");
+    assert!(body.contains("resources"), "{body}");
+
+    let (status, body) = get(addr, "/api/graph");
+    assert!(status.contains("200 OK"), "{status}");
+    assert!(body.contains("nodes"), "{body}");
+
+    let (status, body) = get(addr, "/api/timeline");
+    assert!(status.contains("200 OK"), "{status}");
+    assert!(body.contains("runs"), "{body}");
 
     let (status, body) = get(addr, "/api/runs");
     assert!(status.contains("200 OK"), "{status}");

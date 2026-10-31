@@ -232,12 +232,12 @@
 
 ## P4 可选管理界面与扩展
 
-- [ ] Web Dashboard 骨架（默认关闭，无监听端口）
-- [ ] 资源列表与健康状态页
-- [ ] 依赖图可视化
-- [ ] RecoveryRun 时间线
-- [ ] 通知状态页
-- [ ] 配置检查界面
+- [x] Web Dashboard 骨架（默认关闭，无监听端口）（`crates/custos-dashboard` 新 crate：`[dashboard] enabled=false` 默认不绑定监听、无 HTTP 代码路径；`DashboardConfig` 解析 + `dashboard_defaults_to_disabled`/`dashboard_parses_enabled_with_listen`/`dashboard_rejects_invalid_listen` 测试；CLI `start` 仅在 enabled 时 `DashboardServer::bind`；`cargo test --workspace` 全绿）
+- [x] 资源列表与健康状态页（`/api/health`（latest_health 逐资源）与 `/api/resources`（id/type/display_name/enabled/plans/dependencies）只读 JSON；集成测试 `enabled_server_serves_read_only_json` 断言两者；`cargo test -p custos-dashboard` 绿 + `cargo test --workspace` 全绿）
+- [x] 依赖图可视化（`/api/graph`：nodes + edges（from→to 依赖边），只读；集成测试断言 `nodes`；`cargo test -p custos-dashboard` 绿 + `cargo test --workspace` 全绿）
+- [x] RecoveryRun 时间线（`/api/timeline` 复用 `list_runs` 按 started_at 排序，含 status/trigger/attempt 信息；集成测试断言；`cargo test -p custos-dashboard` 绿 + `cargo test --workspace` 全绿）
+- [x] 通知状态页（`/api/notifications`：`list_notifications` 含 state/event_type/resource_id/attempts/created_at；集成测试；`cargo test -p custos-dashboard` 绿 + `cargo test --workspace` 全绿）
+- [x] 配置检查界面（`/api/config`：counts 摘要 + `read_only:true`；集成测试断言 read_only；`cargo test -p custos-dashboard` 绿 + `cargo test --workspace` 全绿）
 - [ ] macOS 适配（launchd 服务控制在 P2 已做；此处补 Wi-Fi/连通性/重启）
 - [ ] BSD 适配（rc.d/网络路由/重启）
 - [ ] OpenWrt 完整能力

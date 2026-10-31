@@ -15,6 +15,7 @@
 //! * `/api/config` — resource configuration check (read-only)
 
 use custos_config::DashboardConfig;
+use custos_config::ValidatedConfig;
 use custos_store::Store;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener};
@@ -25,13 +26,22 @@ use std::sync::Arc;
 pub struct DashboardServer {
     listener: TcpListener,
     store: Arc<Store>,
+    config: ValidatedConfig,
 }
 
 impl DashboardServer {
     /// Binds the listener. Call only when `config.is_enabled()`.
-    pub fn bind(config: &DashboardConfig, store: Arc<Store>) -> std::io::Result<Self> {
+    pub fn bind(
+        config: &DashboardConfig,
+        store: Arc<Store>,
+        validated: ValidatedConfig,
+    ) -> std::io::Result<Self> {
         let listener = TcpListener::bind(config.listen_addr())?;
-        Ok(Self { listener, store })
+        Ok(Self {
+            listener,
+            store,
+            config: validated,
+        })
     }
 
     /// The bound local address (useful for logging the actual port).
@@ -50,7 +60,7 @@ impl DashboardServer {
             };
             let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
             let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(2)));
-            if let Err(err) = handle(&mut stream, &self.store) {
+            if let Err(err) = handle(&mut stream, &self.store, &self.config) {
                 tracing::warn!(target: "custos::dashboard", error = %err, "request failed");
             }
         }
@@ -59,7 +69,11 @@ impl DashboardServer {
 }
 
 /// Handles one HTTP request with a read-only JSON or HTML response.
-fn handle(stream: &mut std::net::TcpStream, store: &Store) -> std::io::Result<()> {
+fn handle(
+    stream: &mut std::net::TcpStream,
+    store: &Store,
+    config: &ValidatedConfig,
+) -> std::io::Result<()> {
     let mut buf = [0u8; 4096];
     let mut raw = Vec::new();
     // Read until the request-head terminator or the buffer cap; TCP may
@@ -82,7 +96,7 @@ fn handle(stream: &mut std::net::TcpStream, store: &Store) -> std::io::Result<()
         .unwrap_or("/")
         .to_owned();
 
-    let (status, body, content_type) = route(&path, store);
+    let (status, body, content_type) = route(&path, store, config);
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
@@ -93,7 +107,7 @@ fn handle(stream: &mut std::net::TcpStream, store: &Store) -> std::io::Result<()
     stream.shutdown(std::net::Shutdown::Write)
 }
 
-fn route(path: &str, store: &Store) -> (String, String, &'static str) {
+fn route(path: &str, store: &Store, config: &ValidatedConfig) -> (String, String, &'static str) {
     match path {
         "/" => (
             "200 OK".to_owned(),
@@ -102,6 +116,9 @@ fn route(path: &str, store: &Store) -> (String, String, &'static str) {
         ),
         "/api/health" => json_response(health_payload(store)),
         "/api/runs" => json_response(runs_payload(store)),
+        "/api/timeline" => json_response(runs_payload(store)),
+        "/api/resources" => json_response(resources_payload(config)),
+        "/api/graph" => json_response(graph_payload(config)),
         "/api/notifications" => json_response(notifications_payload(store)),
         "/api/config" => {
             // Read-only configuration summary: the dashboard never mutates.
@@ -162,6 +179,43 @@ fn runs_payload(store: &Store) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "runs": items }))
 }
 
+fn resources_payload(config: &ValidatedConfig) -> Result<serde_json::Value, String> {
+    let items: Vec<_> = config
+        .resources
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id,
+                "type": r.resource_type,
+                "display_name": r.display_name,
+                "enabled": r.enabled,
+                "plans": r.recovery_policy.plans.len(),
+                "dependencies": r.dependencies.iter().map(|d| d.target_resource_id.clone()).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    Ok(serde_json::json!({ "resources": items }))
+}
+
+fn graph_payload(config: &ValidatedConfig) -> Result<serde_json::Value, String> {
+    let mut nodes: Vec<String> = config
+        .resources
+        .iter()
+        .map(|r| r.id.as_str().to_owned())
+        .collect();
+    nodes.sort();
+    let mut edges: Vec<serde_json::Value> = Vec::new();
+    for r in &config.resources {
+        for d in &r.dependencies {
+            edges.push(serde_json::json!({
+                "from": r.id,
+                "to": d.target_resource_id,
+            }));
+        }
+    }
+    Ok(serde_json::json!({ "nodes": nodes, "edges": edges }))
+}
+
 fn notifications_payload(store: &Store) -> Result<serde_json::Value, String> {
     let rows = store.list_notifications(100).map_err(|e| e.to_string())?;
     let items: Vec<_> = rows
@@ -209,7 +263,10 @@ fn html_shell() -> String {
 <body><h1>Custos</h1><p>Read-only dashboard (default disabled).</p>
 <ul>
 <li><a href="/api/health">health</a></li>
+<li><a href="/api/resources">resources</a></li>
+<li><a href="/api/graph">dependency graph</a></li>
 <li><a href="/api/runs">runs</a></li>
+<li><a href="/api/timeline">timeline</a></li>
 <li><a href="/api/notifications">notifications</a></li>
 <li><a href="/api/config">config check</a></li>
 </ul></body></html>"#
@@ -228,7 +285,8 @@ mod tests {
 
     #[test]
     fn route_unknown_path_is_404() {
-        let (status, _, _) = route("/nope", &dummy_store());
+        let config = crate::load_config_for_test();
+        let (status, _, _) = route("/nope", &dummy_store(), &config);
         assert!(status.contains("404"), "{status}");
     }
 
@@ -237,4 +295,9 @@ mod tests {
         // temp file. This is only for routing tests that don't hit SQL.
         Store::open(":memory:").unwrap()
     }
+}
+
+fn load_config_for_test() -> ValidatedConfig {
+    use custos_config::load;
+    load("version = 1\n").expect("test config")
 }

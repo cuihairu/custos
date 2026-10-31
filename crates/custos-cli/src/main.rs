@@ -186,7 +186,11 @@ fn start(path: &str, args: &[String]) -> ExitCode {
     // Optional web dashboard: binds only when `[dashboard].enabled = true`;
     // disabled means zero listeners and no HTTP code path (ADR-0010).
     if config.dashboard.is_enabled() {
-        match custos_dashboard::DashboardServer::bind(&config.dashboard, store.clone()) {
+        match custos_dashboard::DashboardServer::bind(
+            &config.dashboard,
+            store.clone(),
+            config.clone(),
+        ) {
             Ok(server) => {
                 let addr = server
                     .local_addr()
