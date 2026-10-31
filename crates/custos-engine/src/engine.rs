@@ -1353,6 +1353,7 @@ mod tests {
             graph: DependencyGraph::build(edges).expect("test graph"),
             permissions: Default::default(),
             notification: Default::default(),
+            dashboard: Default::default(),
         };
         let clock = Arc::new(crate::clock::FakeClock::new(1_000));
         let engine = Engine::new(&config, probes, executor, store.clone(), clock.clone());
@@ -1405,6 +1406,7 @@ mod tests {
                 graph: DependencyGraph::build(edges).expect("test graph"),
                 permissions: Default::default(),
                 notification: Default::default(),
+                dashboard: Default::default(),
             };
             let clock = Arc::new(crate::clock::FakeClock::new(1_000));
             let engine = Engine::new(&config, probes, executor, store.clone(), clock.clone());
@@ -1653,6 +1655,7 @@ mod tests {
             graph: DependencyGraph::build(vec![(svc.id.clone(), vec![])]).expect("graph"),
             permissions: Default::default(),
             notification: Default::default(),
+            dashboard: Default::default(),
         };
         let mut engine = Engine::new(
             &config,
