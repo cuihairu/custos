@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 mod notification;
 pub use notification::{
     ChannelConfig, HeraldAuth, HeraldConfig, NotificationConfig, NotificationRule, SecretString,
-    SmtpConfig, SsrfPolicy, WebhookConfig,
+    SmtpConfig, SsrfPolicy, TelegramConfig, WebhookConfig,
 };
 
 mod dashboard;

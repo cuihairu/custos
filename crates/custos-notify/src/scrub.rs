@@ -61,6 +61,9 @@ impl Scrubber {
                     }
                     collect_url_credentials(&cfg.base_url, &mut needles);
                 }
+                ChannelConfig::Telegram(cfg) => {
+                    needles.push(cfg.bot_token.expose().to_owned());
+                }
                 ChannelConfig::LocalLog { .. } => {}
             }
         }

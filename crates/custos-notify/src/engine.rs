@@ -95,6 +95,14 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
                     crate::herald::HeraldChannel::new(id.clone(), cfg.clone())
                         .map(|c| Box::new(c) as Box<dyn Channel>)
                 }
+                ChannelConfig::Telegram(cfg) => Ok(Box::new(crate::telegram::TelegramChannel::new(
+                    id.clone(),
+                    cfg.bot_token.expose(),
+                    cfg.chat_id.clone(),
+                    cfg.retries,
+                    cfg.backoff_ms,
+                    cfg.timeout_ms,
+                )) as Box<dyn Channel>),
             };
             match built {
                 Ok(channel) => {

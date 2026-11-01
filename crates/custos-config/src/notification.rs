@@ -57,6 +57,7 @@ pub enum ChannelConfig {
     Webhook(WebhookConfig),
     Smtp(SmtpConfig),
     Herald(HeraldConfig),
+    Telegram(TelegramConfig),
 }
 
 impl std::fmt::Debug for ChannelConfig {
@@ -69,6 +70,7 @@ impl std::fmt::Debug for ChannelConfig {
             ChannelConfig::Webhook(cfg) => write!(f, "Webhook({cfg:?})"),
             ChannelConfig::Smtp(cfg) => write!(f, "Smtp({cfg:?})"),
             ChannelConfig::Herald(cfg) => write!(f, "Herald({cfg:?})"),
+            ChannelConfig::Telegram(cfg) => write!(f, "Telegram({cfg:?})"),
         }
     }
 }
@@ -194,6 +196,30 @@ impl std::fmt::Debug for HeraldConfig {
             .field("auth", &self.auth)
             .field("category", &self.category)
             .field("audiences", &self.audiences)
+            .field("timeout_ms", &self.timeout_ms)
+            .field("retries", &self.retries)
+            .field("backoff_ms", &self.backoff_ms)
+            .finish()
+    }
+}
+
+/// Telegram channel settings: a bot token + chat id via the bot API.
+#[derive(Clone, PartialEq)]
+pub struct TelegramConfig {
+    pub bot_token: SecretString,
+    /// The target chat: a numeric ID, @channelname, or channel username.
+    pub chat_id: String,
+    pub timeout_ms: u64,
+    pub retries: u32,
+    pub backoff_ms: u64,
+}
+
+impl std::fmt::Debug for TelegramConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Never echo the bot token (notification.md 8.7).
+        f.debug_struct("TelegramConfig")
+            .field("bot_token", &self.bot_token)
+            .field("chat_id", &self.chat_id)
             .field("timeout_ms", &self.timeout_ms)
             .field("retries", &self.retries)
             .field("backoff_ms", &self.backoff_ms)
@@ -368,6 +394,19 @@ struct RawHerald {
 
 fn default_herald_category() -> String {
     "alerts".to_owned()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawTelegram {
+    bot_token: SecretString,
+    chat_id: String,
+    #[serde(default = "default_webhook_timeout_ms")]
+    timeout_ms: u64,
+    #[serde(default = "default_webhook_retries")]
+    retries: u32,
+    #[serde(default = "default_backoff_ms")]
+    backoff_ms: u64,
 }
 
 fn default_herald_audiences() -> Vec<String> {
@@ -603,8 +642,21 @@ fn build_channel(id: &str, mut table: toml::Table) -> Result<ChannelConfig, Stri
                 backoff_ms: raw.backoff_ms,
             }))
         }
+        "telegram" => {
+            let raw: RawTelegram = rest.try_into().map_err(|e| err_unknown_fields(&kind, &e))?;
+            if raw.chat_id.trim().is_empty() {
+                return Err("telegram `chat_id` must not be empty".to_owned());
+            }
+            Ok(ChannelConfig::Telegram(TelegramConfig {
+                bot_token: raw.bot_token,
+                chat_id: raw.chat_id,
+                timeout_ms: raw.timeout_ms,
+                retries: raw.retries,
+                backoff_ms: raw.backoff_ms,
+            }))
+        }
         other => Err(format!(
-            "channel `{id}` has unknown type `{other}` (expected local-log|webhook|smtp|herald)"
+            "channel `{id}` has unknown type `{other}` (expected local-log|webhook|smtp|herald|telegram)"
         )),
     }
 }
