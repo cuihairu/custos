@@ -8,13 +8,13 @@ hero:
   actions:
     - theme: brand
       text: Start reading
-      link: /en/guide/overview
+      link: /guide/overview
     - theme: alt
       text: Phased implementation plan
-      link: /en/guide/roadmap
+      link: /guide/roadmap
     - theme: alt
       text: Implementation brief
-      link: /en/guide/agent-brief
+      link: /guide/agent-brief
 
 features:
   - title: Dependency-graph-driven recovery

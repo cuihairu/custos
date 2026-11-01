@@ -14,7 +14,7 @@ VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 # Derive the package architecture from the binary itself (not a hardcoded
 # x86_64): `file` reports the ELF machine, mapped to opkg's architecture
 # names. Only architectures we actually ship (x86_64, aarch64) are accepted.
-ARCH=$(file -b "$BINARY" | sed -n 's/.*, \(x86-64\|aarch64\).*/\1/p' | head -1)
+ARCH=$(file -b "$BINARY" | sed -n 's/.*[, ]\(x86-64\|aarch64\).*/\1/p' | head -1)
 case "$ARCH" in
   x86-64) ARCH=x86_64 ;;
   aarch64) ARCH=aarch64 ;;

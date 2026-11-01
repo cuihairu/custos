@@ -8,13 +8,13 @@ hero:
   actions:
     - theme: brand
       text: 开始阅读
-      link: /guide/overview
+      link: /zh/guide/overview
     - theme: alt
       text: 分阶段实施计划
-      link: /guide/roadmap
+      link: /zh/guide/roadmap
     - theme: alt
       text: 实施任务书
-      link: /guide/agent-brief
+      link: /zh/guide/agent-brief
 
 features:
   - title: 依赖图驱动恢复

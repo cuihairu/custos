@@ -17,8 +17,7 @@ function index()
 		_("运行状态"), 10).leaf = true
 
 	entry({"admin", "services", "custos", "api", "status"},
-		call("api_status"),
-		_("状态 API"), 90).leaf = true
+		call("api_status")).leaf = true
 end
 
 function api_status()

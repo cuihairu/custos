@@ -66,10 +66,13 @@ download() {
 # suffix so a glibc build is never conflated with the static musl build.
 # OpenWrt/iStoreOS prefer the static musl tarball when one exists for this
 # architecture; otherwise (e.g. aarch64) fall back to the glibc build.
+release_json=$(fetch "https://api.github.com/repos/${REPO}/releases/tags/${CHANNEL}") \
+  || die "could not fetch release metadata for ${REPO}/${CHANNEL}"
+
 find_asset() {
-  fetch "https://api.github.com/repos/${REPO}/releases/tags/${CHANNEL}" \
+  printf '%s\n' "$release_json" \
     | grep -o "\"browser_download_url\": *\"[^\"]*$1\\.tar\\.gz\"" \
-    | head -1 | grep -o 'https://[^"]*'
+    | head -1 | grep -o 'https://[^"]*' || true
 }
 
 if [ "$PLATFORM" = "openwrt" ]; then
@@ -88,10 +91,15 @@ trap 'rm -rf "$tmpdir"' EXIT
 say "downloading: $asset"
 download "$asset" "$tmpdir/custos.tar.gz" || die "download failed"
 
-# Extract both the engine and the desktop tray binary (present since the
-# nightly rolling build bundles `custos-tray` next to `custos`).
-tar -xzf "$tmpdir/custos.tar.gz" -C "$tmpdir" custos custos-tray \
-  || die "extract failed (binary not in tarball)"
+# Extract the engine first. Older tarballs may not bundle the desktop tray;
+# keep that optional so the engine remains installable.
+tar -xzf "$tmpdir/custos.tar.gz" -C "$tmpdir" custos \
+  || die "extract failed (custos binary not in tarball)"
+if tar -xzf "$tmpdir/custos.tar.gz" -C "$tmpdir" custos-tray; then
+  :
+else
+  say "note: custos-tray not bundled; skipping desktop tray"
+fi
 
 # ── install ────────────────────────────────────────────────────────────
 if [ "$PLATFORM" = "openwrt" ] && [ -n "${IPKG_INSTROOT:-}" ]; then
@@ -122,23 +130,27 @@ START=99
 USE_PROCD=1
 PROG=/usr/bin/custos
 CONF_TOML=/etc/custos/custos.toml
-CONF_DB=/etc/custos/custos.db
+CONF_DB_DEFAULT=/etc/custos/custos.db
+CONF_INTERVAL_DEFAULT=5000
 
 start_service() {
-  local enabled
-  config_load custos
-  config_get enabled main enabled '0'
-  [ "$enabled" = "1" ] || return 0
-  [ -f "$CONF_TOML" ] || {
-    logger -t custos "no config at $CONF_TOML; not starting"
-    return 1
-  }
-  procd_open_instance
-  procd_set_param command "$PROG" start "$CONF_TOML" --db "$CONF_DB"
-  procd_set_param respawn 3600 5 0
-  procd_set_param stdout 1
-  procd_set_param stderr 1
-  procd_close_instance
+	local enabled
+	local db interval
+	config_load custos
+	config_get enabled main enabled '0'
+	config_get db main db "$CONF_DB_DEFAULT"
+	config_get interval main interval "$CONF_INTERVAL_DEFAULT"
+	[ "$enabled" = "1" ] || return 0
+	[ -f "$CONF_TOML" ] || {
+		logger -t custos "no config at $CONF_TOML; not starting"
+		return 1
+	}
+	procd_open_instance
+	procd_set_param command "$PROG" start "$CONF_TOML" --db "$db" --interval "$interval"
+	procd_set_param respawn 3600 5 0
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
 }
 
 stop_service() {
