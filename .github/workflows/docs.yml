@@ -43,7 +43,7 @@ jobs:
       - name: upload-artifact
         uses: actions/upload-pages-artifact@v5.0.0
         with:
-          path: docs/.vitepress/dist
+          path: .vitepress/dist
 
   deploy:
     if: github.ref == 'refs/heads/main'
