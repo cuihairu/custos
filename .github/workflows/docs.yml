@@ -18,9 +18,14 @@ on:
       - "pnpm-lock.yaml"
       - ".github/workflows/docs.yml"
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 concurrency:
   group: docs-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
