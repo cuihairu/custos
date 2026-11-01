@@ -129,6 +129,7 @@ export default defineConfig({
   ],
   srcDir: '.',
   outDir: '../.vitepress/dist',
+  base: "/custos/",
   cleanUrls: true,
   lastUpdated: true,
 })
