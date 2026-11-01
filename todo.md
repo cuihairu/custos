@@ -320,3 +320,9 @@
 - [x] 审核发现：install.sh 解包 `tar -xzf ... custos custos-tray || die`（scripts/install.sh:93-94）在 tar 不含 `custos-tray` 时退出码 2（实测），会触发 `die` 使整脚本失败，与注释「tray 缺失不致命」（scripts/install.sh:106-108）及「engine 为主产物」的意图不符；旧/缺 tray 的 tarball 会导致一键安装完全中止 `e778772`（`scripts/install.sh:94-102`：先解 `custos`，`custos-tray` 用 `if` 判定可选，缺失不致命）
 - [x] 审核发现：LuCI CBI 暴露 `db`/`interval` 选项（packaging/openwrt/usr/lib/lua/luci/model/cbi/custos.lua:19-25），但 `/etc/init.d/custos` 仅 `config_get enabled`（packaging/openwrt/etc/init.d/custos:12），`CONF_DB`/`CONF_TOML` 为硬编码（init.d/custos:6-7），新增 `on_commit` 重启（model/cbi/custos.lua:9-11）声称「db/interval 改动立即生效」实际不生效——`db` UCI 值被忽略、`interval` 根本不参与 `custos start`，CBI 中这两项为误导性死选项 `e778772`（`packaging/openwrt/etc/init.d/custos:8,12-16,23` 与 `scripts/install.sh:133-149`：init 脚本读取 UCI `db`/`interval` 并传入 `custos start`，CBI 选项生效）
 - [x] 审核发现：LuCI controller 将 `api_status` 注册为 `entry(..., call("api_status"), _("状态 API"), 90).leaf = true`（packaging/openwrt/usr/lib/lua/luci/controller/custos.lua:20-22），会在 LuCI 菜单出现「状态 API」用户可见项，点击直接展示原始 JSON，而非作为内部路由（低严重度） `e778772`（`packaging/openwrt/usr/lib/lua/luci/controller/custos.lua:19-20`：移除菜单标题与优先级，`api/status` 改为纯内部路由）
+
+- [ ] **DOC-GIF · P2 · 文档 · 配置开关效果动态图(每个开关 off→on 对比+GIF)**
+  - 交付:枚举本仓全部「开启后有效果」的开关/配置项;自动流水线生成证据——GUI 类用 @vscode/test-electron 或应用截图(off 一张/on 一张+切换过程录屏),CLI 类用终端录屏(asciinema→GIF 或 ffmpeg);ffmpeg 缝合动态 GIF。
+  - 文档:docs「配置效果」页(双语)逐开关嵌入:说明+off 图+on 图+GIF。
+  - 验收:清单内每个开关都有 off/on+GIF;流水线可重跑(配置变更随时再生成);兼作配置效果回归测试。
+  - 参考:kode todo C-24 同款流水线模式(2026-11-01 用户令全舰队推广)。
