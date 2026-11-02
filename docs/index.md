@@ -26,3 +26,8 @@ features:
   - title: Health verification rule
     details: A recovery only counts as successful when it passes health verification — never based on a command exit code alone.
 ---
+
+## System architecture
+
+<ArchitectureDiagram />
+

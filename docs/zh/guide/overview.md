@@ -102,9 +102,15 @@ flowchart TB
     Dashboard[Optional Web Dashboard]
     Config[Configuration Loader]
 
-    subgraph Core[\
-
-Host[Plugin Host]
+    subgraph Core[Core Engine]
+        Registry[Resource Registry]
+        Graph[Dependency Graph]
+        Scheduler[Recovery Scheduler]
+        Engine[Recovery Engine]
+        Policy[Policy Enforcement]
+        Verify[Health Verification]
+        Events[Event / Audit Stream]
+        Host[Plugin Host]
         Probe[Probe Capabilities]
         Diagnose[Diagnosis Capabilities]
         Actions[Recovery Actions]

@@ -26,3 +26,8 @@ features:
   - title: 健康验证口径
     details: 恢复成功必须通过健康验证，不能仅根据命令退出码判定。
 ---
+
+## 系统架构
+
+<ArchitectureDiagram />
+

@@ -1,0 +1,188 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1400" viewBox="0 0 1280 1400" role="img" aria-labelledby="title desc" xml:lang="en-US">
+<title id="title">Custos · System Architecture</title>
+<desc id="desc">Custos system architecture: CLI, dashboard, tray and Python binding drive a core engine maintaining the resource registry and dependency graph; the recovery engine schedules, executes under policy and budget, and verifies health before declaring recovery; plugin capabilities come from external processes over JSON-RPC stdio; platform adapters carry out OS actions; events persist to the SQLite recovery store and feed the notification engine.</desc>
+<defs><marker id="arrow-087f5b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="#087f5b"/></marker><marker id="arrow-2563eb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="#2563eb"/></marker><marker id="arrow-475569" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="#475569"/></marker><marker id="arrow-6366f1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="#6366f1"/></marker><marker id="arrow-7c3aed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="#7c3aed"/></marker><marker id="arrow-c2410c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="#c2410c"/></marker></defs>
+<style>text{font-family:Arial,'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#172b4d}.title{font-size:30px;font-weight:700}.name{font-size:19px;font-weight:700}.body{font-size:14px;fill:#435570}.label{font-size:14px;fill:#435570}.edge{fill:none;stroke-linejoin:round}.control{stroke-dasharray:7 5}</style>
+<rect width="1280" height="1400" rx="20" fill="#f8fafc"/>
+<text x="40" y="48" class="title" text-anchor="start">Custos · System Architecture</text>
+<text x="40" y="80" class="body" font-size="17" text-anchor="start">Cross-platform local self-healing engine · dependency-graph-driven · local autonomy first</text>
+<path d="M180 230 V290" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="cli-config" data-from="cli" data-to="config" d="M180 230 V290" class="edge" style="stroke:#2563eb;stroke-width:2" marker-end="url(#arrow-2563eb)"/>
+<path d="M100 230 V480 H280" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="cli-core" data-from="cli" data-to="core" d="M100 230 V480 H280" class="edge" style="stroke:#2563eb;stroke-width:2" marker-end="url(#arrow-2563eb)"/>
+<path d="M490 230 V430" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="dash-core" data-from="dash" data-to="core" d="M490 230 V430" class="edge" style="stroke:#2563eb;stroke-width:2" marker-end="url(#arrow-2563eb)"/>
+<path d="M800 230 V430" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="tray-core" data-from="tray" data-to="core" d="M800 230 V430" class="edge" style="stroke:#2563eb;stroke-width:2" marker-end="url(#arrow-2563eb)"/>
+<path d="M1110 230 V395 H940 V430" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="python-core" data-from="python" data-to="core" d="M1110 230 V395 H940 V430" class="edge" style="stroke:#2563eb;stroke-width:2" marker-end="url(#arrow-2563eb)"/>
+<path d="M140 380 V525 H320" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="config-reg" data-from="config" data-to="reg" d="M140 380 V525 H320" class="edge" style="stroke:#087f5b;stroke-width:2" marker-end="url(#arrow-087f5b)"/>
+<path d="M620 525 H660" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="reg-graph" data-from="reg" data-to="graph" d="M620 525 H660" class="edge" style="stroke:#475569;stroke-width:2" marker-start="url(#arrow-475569)" marker-end="url(#arrow-475569)"/>
+<path d="M810 570 V590 H470 V610" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="graph-sched" data-from="graph" data-to="sched" d="M810 570 V590 H470 V610" class="edge" style="stroke:#6366f1;stroke-width:2" marker-end="url(#arrow-6366f1)"/>
+<path d="M620 650 H660" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="sched-exec" data-from="sched" data-to="exec" d="M620 650 H660" class="edge" style="stroke:#6366f1;stroke-width:2" marker-end="url(#arrow-6366f1)"/>
+<path d="M810 690 V770 H620" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="exec-policy" data-from="exec" data-to="policy" d="M810 690 V770 H620" class="edge" style="stroke:#6366f1;stroke-width:2" marker-end="url(#arrow-6366f1)"/>
+<path d="M470 810 V850 H810 V870" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="policy-verify" data-from="policy" data-to="verify" d="M470 810 V850 H810 V870" class="edge" style="stroke:#6366f1;stroke-width:2" marker-end="url(#arrow-6366f1)"/>
+<path d="M320 650 H240" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="sched-host" data-from="sched" data-to="host" d="M320 650 H240" class="edge" style="stroke:#087f5b;stroke-width:2" marker-end="url(#arrow-087f5b)"/>
+<path d="M140 700 V740" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="host-plugins" data-from="host" data-to="plugins" d="M140 700 V740" class="edge control" style="stroke:#c2410c;stroke-width:2" marker-end="url(#arrow-c2410c)"/>
+<path d="M960 650 H1040" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="exec-platform" data-from="exec" data-to="platform" d="M960 650 H1040" class="edge" style="stroke:#2563eb;stroke-width:2" marker-end="url(#arrow-2563eb)"/>
+<path d="M400 950 V1030 H330 V1110" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="events-store" data-from="events" data-to="store" d="M400 950 V1030 H330 V1110" class="edge" style="stroke:#7c3aed;stroke-width:2" marker-end="url(#arrow-7c3aed)"/>
+<path d="M880 950 V1030 H710 V1110" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="events-notify" data-from="events" data-to="notify" d="M880 950 V1030 H710 V1110" class="edge" style="stroke:#7c3aed;stroke-width:2" marker-end="url(#arrow-7c3aed)"/>
+<path d="M860 1165 H940" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="notify-channels" data-from="notify" data-to="channels" d="M860 1165 H940" class="edge" style="stroke:#2563eb;stroke-width:2" marker-end="url(#arrow-2563eb)"/>
+<path d="M1090 1220 V1290" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="channels-ext" data-from="channels" data-to="ext" d="M1090 1220 V1290" class="edge" style="stroke:#2563eb;stroke-width:2" marker-end="url(#arrow-2563eb)"/>
+<g id="core" data-node="core">
+<rect x="280" y="430" width="720" height="560" rx="16" fill="#eef2f7" stroke="#64748b" stroke-width="1.5"/>
+<text x="300" y="464" class="name" font-size="17" text-anchor="start">Core Engine — custos-core · custos-model · custos-engine</text>
+</g>
+<g id="plugins" data-node="plugins">
+<rect x="40" y="740" width="200" height="330" rx="16" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="60" y="774" class="name" font-size="17" text-anchor="start">External plugins</text>
+<text x="60" y="800" class="body" font-size="13" text-anchor="start">own process · stdio</text>
+</g>
+<g id="platform" data-node="platform">
+<rect x="1040" y="530" width="200" height="500" rx="16" fill="#eef2f7" stroke="#64748b" stroke-width="1.5"/>
+<text x="1060" y="564" class="name" font-size="17" text-anchor="start">Platform Adapters</text>
+<text x="1060" y="590" class="body" font-size="13" text-anchor="start">custos-platform</text>
+</g>
+<g id="cli" data-node="cli">
+<rect x="40" y="130" width="280" height="100" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="56" y="168" class="name" font-size="20" text-anchor="start">Custos CLI</text>
+<text x="56" y="196" class="body" font-size="14" text-anchor="start">custos-cli · commands</text>
+</g>
+<g id="dashboard" data-node="dashboard">
+<rect x="350" y="130" width="280" height="100" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="366" y="168" class="name" font-size="20" text-anchor="start">Web Dashboard</text>
+<text x="366" y="196" class="body" font-size="14" text-anchor="start">optional · off by default · custos-dashboard</text>
+</g>
+<g id="tray" data-node="tray">
+<rect x="660" y="130" width="280" height="100" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="676" y="168" class="name" font-size="20" text-anchor="start">System Tray</text>
+<text x="676" y="196" class="body" font-size="14" text-anchor="start">custos-tray</text>
+</g>
+<g id="python" data-node="python">
+<rect x="970" y="130" width="280" height="100" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="986" y="168" class="name" font-size="20" text-anchor="start">Python Binding</text>
+<text x="986" y="196" class="body" font-size="14" text-anchor="start">custos-python</text>
+</g>
+<g id="config" data-node="config">
+<rect x="40" y="290" width="200" height="90" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="56" y="328" class="name" font-size="18" text-anchor="start">Configuration Loader</text>
+<text x="56" y="356" class="body" font-size="14" text-anchor="start">custos-config · TOML</text>
+</g>
+<g id="registry" data-node="registry">
+<rect x="320" y="480" width="300" height="90" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="336" y="518" class="name" font-size="20" text-anchor="start">Resource Registry</text>
+<text x="336" y="546" class="body" font-size="14" text-anchor="start">managed resources</text>
+</g>
+<g id="graph" data-node="graph">
+<rect x="660" y="480" width="300" height="90" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="676" y="518" class="name" font-size="20" text-anchor="start">Dependency Graph</text>
+<text x="676" y="546" class="body" font-size="14" text-anchor="start">dependencies · conditions</text>
+</g>
+<g id="scheduler" data-node="scheduler">
+<rect x="320" y="610" width="300" height="80" rx="14" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+<text x="336" y="648" class="name" font-size="20" text-anchor="start">Recovery Scheduler</text>
+<text x="336" y="676" class="body" font-size="14" text-anchor="start">failure detection</text>
+</g>
+<g id="executor" data-node="executor">
+<rect x="660" y="610" width="300" height="80" rx="14" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+<text x="676" y="648" class="name" font-size="20" text-anchor="start">Recovery Executor</text>
+<text x="676" y="676" class="body" font-size="14" text-anchor="start">actions · budget</text>
+</g>
+<g id="policy" data-node="policy">
+<rect x="320" y="730" width="300" height="80" rx="14" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+<text x="336" y="768" class="name" font-size="20" text-anchor="start">Policy &amp; Permissions</text>
+<text x="336" y="796" class="body" font-size="14" text-anchor="start">what may run</text>
+</g>
+<g id="verify" data-node="verify">
+<rect x="660" y="730" width="300" height="80" rx="14" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+<text x="676" y="768" class="name" font-size="20" text-anchor="start">Health Verification</text>
+<text x="676" y="796" class="body" font-size="14" text-anchor="start">success = verified</text>
+</g>
+<g id="events" data-node="events">
+<rect x="320" y="870" width="640" height="80" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="336" y="908" class="name" font-size="20" text-anchor="start">Event / Audit Stream</text>
+<text x="336" y="936" class="body" font-size="14" text-anchor="start">every step is traceable</text>
+</g>
+<g id="host" data-node="host">
+<rect x="40" y="560" width="200" height="140" rx="14" fill="#ffffff" stroke="#087f5b" stroke-width="1.5"/>
+<text x="56" y="598" class="name" font-size="18" text-anchor="start">Plugin Host</text>
+<text x="56" y="626" class="body" font-size="14" text-anchor="start">custos-plugin-host</text>
+</g>
+<g id="p_mihomo" data-node="p_mihomo">
+<rect x="60" y="810" width="160" height="60" rx="14" fill="#ffffff" stroke="#fdba74" stroke-width="1.5"/>
+<text x="140.0" y="847.0" class="name" font-size="18" text-anchor="middle">mihomo</text>
+</g>
+<g id="p_openclash" data-node="p_openclash">
+<rect x="60" y="885" width="160" height="60" rx="14" fill="#ffffff" stroke="#fdba74" stroke-width="1.5"/>
+<text x="140.0" y="922.0" class="name" font-size="18" text-anchor="middle">openclash</text>
+</g>
+<g id="p_cloudflared" data-node="p_cloudflared">
+<rect x="60" y="960" width="160" height="60" rx="14" fill="#ffffff" stroke="#fdba74" stroke-width="1.5"/>
+<text x="140.0" y="997.0" class="name" font-size="18" text-anchor="middle">cloudflared</text>
+</g>
+<g id="pl_linux" data-node="pl_linux">
+<rect x="1060" y="600" width="160" height="70" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="1076" y="638" class="name" font-size="18" text-anchor="start">Linux</text>
+<text x="1076" y="666" class="body" font-size="14" text-anchor="start">systemd</text>
+</g>
+<g id="pl_openwrt" data-node="pl_openwrt">
+<rect x="1060" y="685" width="160" height="70" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="1076" y="723" class="name" font-size="18" text-anchor="start">OpenWrt</text>
+<text x="1076" y="751" class="body" font-size="14" text-anchor="start">procd</text>
+</g>
+<g id="pl_macos" data-node="pl_macos">
+<rect x="1060" y="770" width="160" height="70" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="1076" y="808" class="name" font-size="18" text-anchor="start">macOS</text>
+<text x="1076" y="836" class="body" font-size="14" text-anchor="start">launchd</text>
+</g>
+<g id="pl_windows" data-node="pl_windows">
+<rect x="1060" y="855" width="160" height="70" rx="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="1076" y="893" class="name" font-size="18" text-anchor="start">Windows</text>
+<text x="1076" y="921" class="body" font-size="14" text-anchor="start">services</text>
+</g>
+<g id="store" data-node="store">
+<rect x="180" y="1110" width="300" height="110" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+<rect x="180" y="1110" width="300" height="18" rx="9" fill="#7c3aed" opacity="0.25"/>
+<text x="196" y="1148" class="name" font-size="20" text-anchor="start">SQLite Recovery Store</text>
+<text x="196" y="1176" class="body" font-size="14" text-anchor="start">state · evidence · audit</text>
+</g>
+<g id="notify" data-node="notify">
+<rect x="560" y="1110" width="300" height="110" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+<rect x="560" y="1110" width="300" height="18" rx="9" fill="#7c3aed" opacity="0.25"/>
+<text x="576" y="1148" class="name" font-size="20" text-anchor="start">Notification Engine</text>
+<text x="576" y="1176" class="body" font-size="14" text-anchor="start">queue · retry after recovery</text>
+</g>
+<g id="channels" data-node="channels">
+<rect x="940" y="1110" width="300" height="110" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+<rect x="940" y="1110" width="300" height="18" rx="9" fill="#7c3aed" opacity="0.25"/>
+<text x="956" y="1148" class="name" font-size="20" text-anchor="start">Channels</text>
+<text x="956" y="1176" class="body" font-size="14" text-anchor="start">Telegram · SMTP · Webhook · local log</text>
+</g>
+<text x="196" y="268" class="label" font-size="14" text-anchor="start">load</text>
+<text x="150" y="468" class="label" font-size="14" text-anchor="start">commands</text>
+<text x="150" y="512" class="label" font-size="14" text-anchor="start">validated config</text>
+<text x="852" y="598" class="label" font-size="14" text-anchor="start">evaluate</text>
+<text x="242" y="672" class="label" font-size="14" text-anchor="start">action exec</text>
+<text x="36" y="726" class="label" font-size="14" text-anchor="start">spawn · JSON-RPC stdio</text>
+<text x="964" y="676" class="label" font-size="14" text-anchor="start">OS actions</text>
+<text x="412" y="1012" class="label" font-size="14" text-anchor="start">persist</text>
+<text x="890" y="1012" class="label" font-size="14" text-anchor="start">notify</text>
+<text x="1114" y="1262" class="label" text-anchor="start">External systems</text>
+<path d="M60 1345 H140" fill="none" class="edge" style="stroke:#2563eb;stroke-width:2"/>
+<text x="152" y="1350" class="label" text-anchor="start">solid: data / business requests</text>
+<path d="M480 1345 H560" fill="none" class="edge control" style="stroke:#c2410c;stroke-width:2"/>
+<text x="572" y="1350" class="label" text-anchor="start">dashed: control / supervision</text>
+</svg>
