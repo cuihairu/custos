@@ -98,6 +98,20 @@ jobs:
 
       # Binary location: target/<target>/release/custos (workspace root).
 
+      # Docs + examples snapshot shared by every package format (zip/tar/dmg
+      # embed it directly; the msi installs the same files from the repo via
+      # the .wxs). Markdown snapshot rather than the built docs site: tiny,
+      # no node/pnpm toolchain needed on the packaging runners, exact version
+      # match, readable offline — the rendered site lives on GitHub Pages.
+      - name: stage docs + examples snapshot
+        shell: bash
+        run: |
+          mkdir -p packaging-stage/docs/guide packaging-stage/docs/zh/guide packaging-stage/examples
+          cp examples/*.toml packaging-stage/examples/
+          cp README.md README.zh.md LICENSE docs/index.md packaging-stage/docs/
+          cp docs/guide/*.md packaging-stage/docs/guide/
+          cp docs/zh/guide/*.md packaging-stage/docs/zh/guide/
+
       # Linux: deb + rpm + binary tarball.
       - name: package deb
         if: runner.os == 'Linux' && !matrix.static
@@ -124,7 +138,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p dist
-          tar -C "target/${{ matrix.target }}/release" -czf "dist/${{ matrix.artifact }}.tar.gz" custos custos-tray
+          STAGE="packaging-stage/${{ matrix.artifact }}"
+          mkdir -p "$STAGE"
+          cp "target/${{ matrix.target }}/release/custos" \
+             "target/${{ matrix.target }}/release/custos-tray" "$STAGE/"
+          cp -r packaging-stage/examples packaging-stage/docs "$STAGE/"
+          tar -C "$STAGE" -czf "dist/${{ matrix.artifact }}.tar.gz" .
 
       # OpenWrt .ipk: musl static binary + procd init + LuCI interface
       # (packaging/openwrt/build-ipk.sh; the tar.gz wrapper format
@@ -143,19 +162,23 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path "target/${{ matrix.target }}/release/custos.exe","target/${{ matrix.target }}/release/custos-tray.exe" -DestinationPath "dist/${{ matrix.artifact }}.zip"
+          # Stage exes + examples/ + docs/ so the zip is a self-contained
+          # bundle (mirrors the Linux tar.gz layout).
+          $stage = "packaging-stage/${{ matrix.artifact }}"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/custos.exe","target/${{ matrix.target }}/release/custos-tray.exe" $stage
+          Copy-Item -Recurse -Force packaging-stage/examples,packaging-stage/docs $stage
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/${{ matrix.artifact }}.zip"
       - name: package msi
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           cargo install cargo-wix
-          # cargo-wix resolves the .wxs Source paths relative to the package
-          # directory (crates/custos-cli), so stage the built binaries into
-          # crates/custos-cli/target/release (not the workspace target).
-          $stage = "crates/custos-cli/target/release"
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/custos.exe" -Destination "$stage/custos.exe" -Force
-          Copy-Item "target/${{ matrix.target }}/release/custos-tray.exe" -Destination "$stage/custos-tray.exe" -Force
+          # cargo wix only builds custos-cli itself (bin `custos`); the wxs
+          # also packages custos-tray, so pre-build BOTH bins without --target
+          # into target/release — that dir is what $(var.CargoTargetBinDir)
+          # resolves to (target_directory/profile), so light finds both exes.
+          cargo build --release --bin custos --bin custos-tray
           # Replace the Product Version attribute whatever its current value
           # (the old literal '0.1.0' replacement silently no-ops if the wxs
           # ever carries another version string).
@@ -165,7 +188,11 @@ jobs:
           Set-Content crates/custos-cli/wix/main.wxs $wxs
           cargo wix --package custos-cli --nocapture
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item -Path "target/wix/*.msi" -Destination dist/
+          # cargo-wix writes the msi to the workspace target/wix (manifest
+          # target_directory). Previous --target layout failures were light
+          # missing custos-tray.exe (fixed by the pre-build above), not the glob.
+          Copy-Item -Path "target/wix/*.msi" -Destination dist/ -Force
+          Get-ChildItem dist
 
       # macOS: dmg (ad-hoc signed .app) + binary tarball.
       - name: package dmg
@@ -176,6 +203,8 @@ jobs:
           mkdir -p "staging/Custos.app/Contents/MacOS" dist
           cp "$BINDIR/custos" "staging/Custos.app/Contents/MacOS/custos"
           cp "$BINDIR/custos-tray" "staging/Custos.app/Contents/MacOS/custos-tray"
+          # Docs + examples ride alongside the .app (and inside the tar.gz).
+          cp -r packaging-stage/examples packaging-stage/docs staging/
           cat > "staging/Custos.app/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -187,8 +216,13 @@ jobs:
           </dict></plist>
           EOF
           codesign --force --deep -s - "staging/Custos.app"
+          # tar.gz bundle: binaries + docs + examples (not the .app bundle).
+          BUNDLE="packaging-stage/${{ matrix.artifact }}"
+          mkdir -p "$BUNDLE"
+          cp "$BINDIR/custos" "$BINDIR/custos-tray" "$BUNDLE/"
+          cp -r packaging-stage/examples packaging-stage/docs "$BUNDLE/"
+          tar -C "$BUNDLE" -czf "dist/${{ matrix.artifact }}.tar.gz" .
           hdiutil create -volname Custos -srcfolder staging -ov -format UDZO "dist/${{ matrix.artifact }}.dmg"
-          tar -C "target/${{ matrix.target }}/release" -czf "dist/${{ matrix.artifact }}.tar.gz" custos custos-tray
 
       - uses: actions/upload-artifact@v4
         with:

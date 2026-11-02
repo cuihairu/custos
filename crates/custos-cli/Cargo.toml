@@ -10,6 +10,12 @@ license.workspace = true
 name = "custos"
 path = "src/main.rs"
 
+[build-dependencies]
+# Embeds assets/icons/custos.ico into the exe resource section (see build.rs).
+# Unconditional (build.rs compiles for the host on every target); the code is
+# host-gated so non-Windows hosts never reference the crate.
+winresource = "0.1"
+
 # RPM packaging (cargo-generate-rpm): the built binary at /usr/bin/custos.
 # cargo-generate-rpm requires this section; the asset source is resolved
 # against the cargo target directory (which honors --target for the matrix).

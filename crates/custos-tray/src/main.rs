@@ -8,48 +8,83 @@
 //! ```text
 //! custos-tray --db custos.db [--config tray.json] [--console "cmd" args...]
 //! ```
+//!
+//! Windows note: release builds carry `#![windows_subsystem = "windows"]`
+//! so launching custos-tray.exe does NOT pop a terminal window. Console
+//! output therefore goes nowhere on Windows releases — all tracing output
+//! is written to a log file (`custos-tray.log` next to the config file)
+//! instead of stdout (see `init_tracing_file`).
+
+// GUI subsystem only in release: the shipped exe must not open a terminal
+// window; debug/dev builds keep the console for immediate feedback.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(any(windows, target_os = "macos"))]
 use custos_tray::driver::TrayOptions;
 
 fn main() {
-    tracing_subscriber_fmt();
-
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut db_path = String::from("custos.db");
     let mut config_path = String::from("custos-tray.json");
     let mut console: Vec<String> = Vec::new();
+    // Parse errors are deferred (not eprintln+exit inside the loop) so the
+    // file logger below is up before the diagnostic is emitted: in the
+    // windowed (no-console) Windows release eprintln is invisible.
+    let mut parse_error: Option<String> = None;
+    let mut wants_help = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--db" => {
-                db_path = args.get(i + 1).cloned().unwrap_or_else(|| {
-                    eprintln!("error: --db requires a path");
-                    std::process::exit(2);
-                });
-                i += 2;
-            }
-            "--config" => {
-                config_path = args.get(i + 1).cloned().unwrap_or_else(|| {
-                    eprintln!("error: --config requires a path");
-                    std::process::exit(2);
-                });
-                i += 2;
-            }
+            "--db" => match args.get(i + 1) {
+                Some(v) => {
+                    db_path = v.clone();
+                    i += 2;
+                }
+                None => {
+                    parse_error = Some("--db requires a path".to_string());
+                    i = args.len();
+                }
+            },
+            "--config" => match args.get(i + 1) {
+                Some(v) => {
+                    config_path = v.clone();
+                    i += 2;
+                }
+                None => {
+                    parse_error = Some("--config requires a path".to_string());
+                    i = args.len();
+                }
+            },
             "--console" => {
                 // Everything after --console is the command (run in a new window).
                 console = args[i + 1..].to_vec();
                 i = args.len();
             }
             "--help" | "-h" => {
-                println!("custos-tray [--db PATH] [--config PATH] [--console CMD ARGS...]");
-                return;
+                wants_help = true;
+                i = args.len();
             }
             other => {
-                eprintln!("error: unknown argument `{other}` (see --help)");
-                std::process::exit(2);
+                parse_error = Some(format!("unknown argument `{other}` (see --help)"));
+                i = args.len();
             }
         }
+    }
+
+    // Logs go to a file, not stdout: the windowed Windows release has no
+    // console to write to (§ windows_subsystem above).
+    let _log_guard = init_tracing_file(&config_path);
+
+    if let Some(err) = parse_error {
+        tracing::error!(target: "custos::tray", "argument error: {err}");
+        eprintln!("error: {err}");
+        std::process::exit(2);
+    }
+    if wants_help {
+        let usage = "custos-tray [--db PATH] [--config PATH] [--console CMD ARGS...]";
+        tracing::info!(target: "custos::tray", "{usage}");
+        println!("{usage}");
+        return;
     }
 
     // Only Windows and macOS carry a desktop tray (§9.3 scope); Linux
@@ -81,6 +116,7 @@ fn shell_quote(value: &str) -> String {
 #[cfg(any(windows, target_os = "macos"))]
 fn run(db_path: String, config_path: String, console: Vec<String>) {
     let store = custos_store::Store::open(&db_path).unwrap_or_else(|e| {
+        tracing::error!(target: "custos::tray", error = %e, "cannot open database");
         eprintln!("error: cannot open database {db_path}: {e}");
         std::process::exit(1);
     });
@@ -109,6 +145,7 @@ fn run(db_path: String, config_path: String, console: Vec<String>) {
 
     let options = TrayOptions::new(health_source, &config_path, console_command, &db_path);
     if let Err(err) = custos_tray::driver::run(options) {
+        tracing::error!(target: "custos::tray", error = %err, "tray exited with an error");
         eprintln!("custos-tray: {err}");
         std::process::exit(1);
     }
@@ -166,11 +203,49 @@ fn macos_console_script(status_args: &[String]) -> String {
     )
 }
 
-fn tracing_subscriber_fmt() {
+/// File-based tracing: writes `custos-tray.log` next to the config file.
+/// Required because the windowed Windows release has no console — stdout
+/// logging would silently vanish (see the `windows_subsystem` attribute).
+/// Returns the non-blocking writer guard; the caller must keep it alive for
+/// the process lifetime or buffered log lines are dropped on flush.
+fn init_tracing_file(config_path: &str) -> tracing_appender::non_blocking::WorkerGuard {
+    use tracing_appender::non_blocking;
+
+    // The tray's state lives beside its config (§9.3 设置持久化), so the
+    // log does too: one directory holds config + log.
+    let log_dir = std::path::Path::new(config_path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let (writer, guard) = match tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::NEVER)
+        .filename_prefix("custos-tray")
+        .filename_suffix("log")
+        .build(&log_dir)
+    {
+        Ok(appender) => non_blocking(appender),
+        // Unwritable directory (e.g. read-only install dir): still run the
+        // tray, but keep the no-console Windows release from losing the
+        // session entirely — discard instead of panic.
+        Err(err) => {
+            eprintln!(
+                "warning: cannot open log file in {}: {err}",
+                log_dir.display()
+            );
+            non_blocking(std::io::sink())
+        }
+    };
+
     tracing_subscriber::fmt()
+        .with_writer(writer)
         .with_target(true)
         .with_max_level(tracing::Level::INFO)
         .init();
+    // The guard flushes the background worker on drop, so it must outlive
+    // every logging call (bound to `main`'s scope by the caller).
+    guard
 }
 
 #[cfg(test)]
