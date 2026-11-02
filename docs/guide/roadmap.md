@@ -160,8 +160,8 @@ Acceptance criteria:
 
 Check off each phase with its commit hash once it lands; for sources and acceptance criteria see the corresponding phase above.
 
-- [ ] P0 core recovery engine (commit: __)
-- [ ] P1 plugin runtime and notification infrastructure (commit: __)
-- [ ] P2 platform base capabilities (commit: __)
-- [ ] P3 network, proxy and real self-healing scenarios (commit: __)
-- [ ] P4 optional management interface and extensions (commit: __)
+- [x] P0 core recovery engine (commit: `21cde62`)
+- [x] P1 plugin runtime and notification infrastructure (commit: `d30f8cb`)
+- [x] P2 platform base capabilities (commit: `c2f7325`)
+- [x] P3 network, proxy and real self-healing scenarios (commit: `52ea755`) — acceptance scenarios 1 (Sunlogin) and 2 (Wi-Fi) plus the full Windows Wi-Fi recovery path still await verification on real hardware.
+- [ ] P4 optional management interface and extensions — the web dashboard and desktop tray have landed; macOS/BSD adaptation and plugin signing policy are pending.

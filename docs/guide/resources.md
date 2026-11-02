@@ -8,32 +8,43 @@ title: Resource and Dependency Model
 
 A Resource is the basic object that Custos monitors and recovers.
 
-Example resource types:
+Example resource types (the factory-wired set, `crates/custos-probe/src/factory.rs:38-148`):
 
 - `process`
-- `system-service`
-- `network-interface`
-- `network-connectivity`
-- `proxy`
-- `tunnel`
-- `http-endpoint`
+- `exec`
 - `custom-command`
+- `http-endpoint`
+- `network-connectivity`
+- `tcp`
+- `dns`
+- `tls-certificate`
+- `disk`
+- `memory`
+- `cpu`
+- `log`
+- `systemd`
+- `windows-service`
+- `docker-container`
+- `icmp`
+- `network-interface`
+- `default-gateway`
+- `proxy`
 - `database`
-- `application`
+- `service` (systemd / windows-service native, exec fallback)
+- `tunnel`
 
-Every resource should have:
+Every resource has:
 
 ```text
 Resource
 ├── id
-├── type
+├── resource_type
 ├── display_name
 ├── plugin_ref
 ├── config
 ├── health_policy
 ├── recovery_policy
 ├── dependencies[]
-├── permissions
 └── enabled
 ```
 
@@ -86,21 +97,21 @@ Resource state should also record:
 - The time of the last valid probe.
 - The currently active fault identifier.
 - The RecoveryRun currently being executed.
-- A summary of the current evidence.
 
 ## 3.3 Dependency definition
 
 A dependency describes the conditions a resource needs satisfied in order to run normally.
 
-Suggested definition:
+Current definition (`crates/custos-model/src/dependency.rs:56-69`):
 
 ```rust
 struct Dependency {
     target_resource_id: ResourceId,
     requirement: DependencyRequirement,
     condition: HealthCondition,
-    resolution_policy: DependencyResolutionPolicy,
-    timeout: Duration,
+    alternative_group_id: Option<String>,
+    conditional_on: Option<String>,
+    timeout: Option<Duration>,
 }
 ```
 

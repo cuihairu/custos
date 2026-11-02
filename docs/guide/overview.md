@@ -46,7 +46,7 @@ Custos should provide:
 - Built-in implementations of common notification channels.
 - Extension points for third-party notification channels.
 - An optional Web Dashboard, disabled by default.
-- Platform adaptation for Windows, Linux and macOS, with BSD and OpenWrt to follow.
+- Platform adaptation for Windows, Linux, macOS and OpenWrt; BSD support to follow.
 
 ## 1.3 What is explicitly out of scope
 

@@ -86,14 +86,9 @@ These are example values; actual values should be set per resource type.
 
 Thresholds only decide whether a fault state is entered; they must not be used to paper over persistent anomalies.
 
-## 5.4 P0 probe scope
+## 5.4 Probe scope
 
-P0 implements only:
-
-- Process Probe.
-- Exec Probe.
-
-P0 does not implement an HTTP Probe yet.
+P0 landed the Process Probe and the Exec Probe; the later phases added the native HTTP, TCP, DNS, TLS-certificate, disk, memory, CPU, log, systemd, Windows-service, Docker, ICMP, network-interface, default-gateway, proxy and database probes (see the factory dispatch `crates/custos-probe/src/factory.rs:38-148`).
 
 The Process Probe checks whether a process exists plus any required process attributes.
 

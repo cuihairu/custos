@@ -88,7 +88,7 @@ resources:
 notification:
   rules:
     - event: recovery.exhausted
-      severity: critical
+      severity_min: critical
       channels:
         - primary-webhook
 ```

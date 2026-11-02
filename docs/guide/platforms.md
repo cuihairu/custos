@@ -14,7 +14,7 @@ ServiceController
 NetworkInterfaceController
 NetworkConnectivityProbe
 CredentialProvider
-SystemRebootController
+RebootController
 ```
 
 Each interface only defines cross-platform common semantics. Platform-specific capabilities are described through Capabilities; platform support must never be faked for the sake of a unified interface.
@@ -76,10 +76,10 @@ Later support:
 
 ## 11.6 OpenWrt
 
-Later support:
+Support (implemented in `crates/custos-platform/src/openwrt.rs`):
 
 - procd service management.
-- UCI configuration reading and controlled modification.
+- UCI configuration reading (`uci_get`); controlled modification is not yet exposed.
 - ubus calls.
 - Network interface and route checks.
 - OpenClash state detection.

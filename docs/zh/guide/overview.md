@@ -46,7 +46,7 @@ Custos 应当提供：
 - 常见通知渠道的内置实现。
 - 第三方通知渠道扩展。
 - 默认关闭的可选 Web Dashboard。
-- Windows、Linux、macOS，以及后续 BSD、OpenWrt 的平台适配能力。
+- Windows、Linux、macOS、OpenWrt 的平台适配能力；BSD 后续跟进。
 
 ## 1.3 明确不做的事情
 

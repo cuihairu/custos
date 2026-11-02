@@ -68,7 +68,7 @@ Report Results
 
 ### Task 001：领域模型
 
-实现 Resource、Dependency、HealthStatus、Evidence、Diagnosis、RecoveryPolicy、RecoveryRun、RecoveryAction、VerificationResult 和 AuditEvent。
+实现 Resource、Dependency、HealthStatus、Evidence、Diagnosis、RecoveryPolicy、RecoveryRun、ActionSpec（恢复动作）、VerificationResult 和 AuditEvent。
 
 交付：
 

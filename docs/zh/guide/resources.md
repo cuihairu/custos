@@ -8,45 +8,55 @@ title: Resource 与 Dependency 模型
 
 Resource 是 Custos 监控和恢复的基本对象。
 
-资源类型示例：
+资源类型示例（工厂已接线的类型，`crates/custos-probe/src/factory.rs:38-148`）：
 
 - `process`
-- `system-service`
-- `network-interface`
-- `network-connectivity`
-- `proxy`
-- `tunnel`
-- `http-endpoint`
+- `exec`
 - `custom-command`
+- `http-endpoint`
+- `network-connectivity`
+- `tcp`
+- `dns`
+- `tls-certificate`
+- `disk`
+- `memory`
+- `cpu`
+- `log`
+- `systemd`
+- `windows-service`
+- `docker-container`
+- `icmp`
+- `network-interface`
+- `default-gateway`
+- `proxy`
 - `database`
-- `application`
+- `service`（systemd / windows-service 原生，exec 兜底）
+- `tunnel`
 
-每个资源应具有：
+每个资源具有：
 
 ```text
 Resource
 ├── id
-├── type
+├── resource_type
 ├── display_name
 ├── plugin_ref
 ├── config
 ├── health_policy
 ├── recovery_policy
 ├── dependencies[]
-├── permissions
 └── enabled
 ```
 
 字段语义：
 
 - `id`：配置范围内稳定且唯一的标识。
-- `type`：资源类型。
+- `resource_type`：资源类型。
 - `plugin_ref`：实现资源能力的插件。
 - `config`：资源类型专属配置。
 - `health_policy`：健康判定、连续失败阈值和恢复确认要求。
 - `recovery_policy`：恢复候选方案和恢复限制。
 - `dependencies`：资源的前置依赖。
-- `permissions`：该资源允许的操作范围。
 - `enabled`：是否启用监控和自动恢复。
 
 资源 ID 不应因进程重启、插件重启或机器重启而变化。
@@ -86,21 +96,21 @@ enum HealthStatus {
 - 最近一次有效探测时间。
 - 当前生效的故障标识。
 - 正在执行的 RecoveryRun。
-- 当前证据摘要。
 
 ## 3.3 Dependency 定义
 
 依赖关系描述资源正常运行所需要满足的条件。
 
-建议定义：
+当前定义（`crates/custos-model/src/dependency.rs:56-69`）：
 
 ```rust
 struct Dependency {
     target_resource_id: ResourceId,
     requirement: DependencyRequirement,
     condition: HealthCondition,
-    resolution_policy: DependencyResolutionPolicy,
-    timeout: Duration,
+    alternative_group_id: Option<String>,
+    conditional_on: Option<String>,
+    timeout: Option<Duration>,
 }
 ```
 

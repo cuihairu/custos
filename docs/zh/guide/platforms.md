@@ -14,7 +14,7 @@ ServiceController
 NetworkInterfaceController
 NetworkConnectivityProbe
 CredentialProvider
-SystemRebootController
+RebootController
 ```
 
 每个接口只定义跨平台共同语义。平台专属能力通过 Capability 描述，不得为了统一接口而伪造平台支持。
@@ -76,10 +76,10 @@ Wi-Fi 重连涉及凭据、网卡和系统权限，应使用系统支持的 API 
 
 ## 11.6 OpenWrt
 
-后续支持：
+支持（实现在 `crates/custos-platform/src/openwrt.rs`）：
 
 - procd 服务管理。
-- UCI 配置读取和受控修改。
+- UCI 配置读取（`uci_get`）；受控修改暂未开放。
 - ubus 调用。
 - 网络接口和路由检查。
 - OpenClash 状态检测。

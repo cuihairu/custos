@@ -21,12 +21,12 @@ It is never acceptable to hand every plugin full system permissions by default j
 
 High-risk actions include:
 
-- Resetting network interfaces.
-- Modifying the routing table.
-- Modifying the firewall.
-- Switching proxy configuration.
-- Rebooting the entire device.
-- Modifying authentication information.
+- Resetting network interfaces (implemented, gated by `host.network`).
+- Modifying the routing table (policy intent; no such capability exists yet).
+- Modifying the firewall (policy intent; no such capability exists yet).
+- Switching proxy configuration (implemented, gated).
+- Rebooting the entire device (implemented, gated by `host.reboot`).
+- Modifying authentication information (policy intent; no such capability exists yet).
 
 Every action must have:
 

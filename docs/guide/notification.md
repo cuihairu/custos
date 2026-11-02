@@ -98,7 +98,7 @@ struct NotificationEvent {
     resource_id: Option<ResourceId>,
     incident_id: Option<IncidentId>,
     recovery_run_id: Option<RecoveryRunId>,
-    occurred_at: DateTime,
+    occurred_at_unix_ms: u64,
     summary: String,
     details: SanitizedDetails,
 }

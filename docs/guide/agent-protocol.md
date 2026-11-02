@@ -68,7 +68,7 @@ Each phase must only move to the next one after its tests pass.
 
 ### Task 001: Domain model
 
-Implement Resource, Dependency, HealthStatus, Evidence, Diagnosis, RecoveryPolicy, RecoveryRun, RecoveryAction, VerificationResult and AuditEvent.
+Implement Resource, Dependency, HealthStatus, Evidence, Diagnosis, RecoveryPolicy, RecoveryRun, ActionSpec (recovery action), VerificationResult and AuditEvent.
 
 Deliverables:
 
