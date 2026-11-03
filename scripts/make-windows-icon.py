@@ -68,9 +68,13 @@ def main() -> int:
         )
         print(identify.stdout)
     except subprocess.CalledProcessError as exc:
+        # The rsvg-convert / magick conversion calls do NOT set
+        # capture_output, so on failure exc.stdout and exc.stderr are None
+        # (only the `identify` call captures). Guard both before stripping.
+        captured = (exc.stderr or "").strip() or (exc.stdout or "").strip()
         print(
-            f"error: {exc.cmd[0] if exc.cmd else 'tool'} failed (exit {exc.returncode}); "
-            f"output: {exc.stderr.strip() or exc.stdout.strip() or exc}",
+            f"error: {exc.cmd[0] if exc.cmd else 'tool'} failed "
+            f"(exit {exc.returncode}); output: {captured or exc}",
             file=sys.stderr,
         )
         return 1
