@@ -300,12 +300,19 @@ fn select_log_writer(
                     Box::new(fallback_appender)
                 }
                 Err(temp_err) => {
-                    eprintln!(
-                        "warning: cannot open log file in {} ({config_err}) \
-                         or in the temp directory ({temp_err}); \
-                         log output will be discarded",
+                    let msg = format!(
+                        "cannot open log file in {} ({config_err}) or in the \
+                         temp directory ({temp_err}); log output will be discarded",
                         config_dir.display()
                     );
+                    // The windowed Windows release has no console, so a bare
+                    // eprintln! would be invisible and the io::sink leaves no
+                    // file to inspect: surface the warning through tracing
+                    // (the subscriber may still have an alternate writer) and,
+                    // on Windows, through a native message box so the user
+                    // sees that logging is disabled.
+                    tracing::warn!(target: "custos::tray", "{msg}");
+                    warn_log_discarded(&msg);
                     outcome.discarded = true;
                     outcome.log_dir = None;
                     Box::new(std::io::sink())
@@ -315,6 +322,42 @@ fn select_log_writer(
     };
     let (writer, guard) = non_blocking(writer);
     (writer, guard, outcome)
+}
+
+/// Surfaces the "log output will be discarded" warning. On windowed Windows
+/// there is no console and no log file to read, so a native message box is
+/// the only user-visible signal; elsewhere the tracing subscriber's writer
+/// (e.g. stderr) is the signal.
+#[cfg(not(windows))]
+fn warn_log_discarded(msg: &str) {
+    // On non-Windows the tracing::warn! already reaches a console/terminal;
+    // the message is emitted again to stderr as a belt-and-braces fallback
+    // for when no subscriber is installed yet.
+    eprintln!("warning: {msg}");
+}
+
+#[cfg(windows)]
+fn warn_log_discarded(msg: &str) {
+    use std::os::windows::ffi::OsStrExt;
+    let wide = |s: &str| -> Vec<u16> {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    };
+    let caption = wide("custos-tray");
+    let text = wide(&format!("{msg}\n\nLogging is disabled; events are not persisted."));
+    // SAFETY: all pointers point to NUL-terminated UTF-16 buffers that stay
+    // alive for the call; hwnd is NULL (no owner) and the style is OK+WARNING.
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
+                | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONWARNING,
+        );
+    }
 }
 
 /// File-based tracing: writes `custos-tray.log` next to the config file.
@@ -453,10 +496,17 @@ mod tests {
     static UNIQUE_DIR: AtomicU64 = AtomicU64::new(0);
 
     fn unique_dir(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
         std::env::temp_dir().join(format!(
-            "custos-tray-test-log-{tag}-{}",
-            // The counter keeps the name unique within a process; the
-            // timestamp across processes.
+            "custos-tray-test-log-{tag}-{}-{}-{}",
+            // The process id and a nanosecond timestamp make the name unique
+            // across processes (pid reuse is separated by the timestamp), and
+            // the counter keeps it unique within a process.
+            std::process::id(),
+            nanos,
             UNIQUE_DIR.fetch_add(1, Ordering::Relaxed),
         ))
     }

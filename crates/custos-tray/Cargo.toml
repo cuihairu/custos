@@ -22,6 +22,13 @@ tracing-appender = "0.2"
 [target.'cfg(target_os = "windows")'.dependencies]
 tray-icon = "0.26"
 muda = "0.21"
+# MessageBoxW for the "both log dirs unwritable" user-visible signal (the
+# windowed release has no console; a silent io::sink would be undiagnosable).
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+] }
 
 [build-dependencies]
 # Embeds assets/icons/custos.ico into the exe resource section (see build.rs).

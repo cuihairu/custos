@@ -626,6 +626,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "tray-icon",
+ "windows-sys 0.61.2",
  "winresource",
 ]
 
