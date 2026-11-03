@@ -228,6 +228,8 @@ fn macos_console_script(status_args: &[String]) -> String {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LogOutcome {
     log_dir: Option<std::path::PathBuf>,
+    /// Warning to emit through tracing after the subscriber is installed.
+    warning: Option<String>,
     /// The log file was moved out of the config directory (e.g. because the
     /// config dir is read-only) and a relocation warning was emitted.
     relocated: bool,
@@ -279,6 +281,7 @@ fn select_log_writer(
 
     let mut outcome = LogOutcome {
         log_dir: Some(config_dir.clone()),
+        warning: None,
         relocated: false,
         discarded: false,
     };
@@ -289,12 +292,13 @@ fn select_log_writer(
             // temp directory before giving up on a file entirely.
             match build_log_appender(temp_dir) {
                 Ok(fallback_appender) => {
-                    eprintln!(
+                    let msg = format!(
                         "warning: cannot open log file in {} ({config_err}); \
                          falling back to {}",
                         config_dir.display(),
                         temp_dir.display()
                     );
+                    outcome.warning = Some(msg);
                     outcome.relocated = true;
                     outcome.log_dir = Some(temp_dir.to_path_buf());
                     Box::new(fallback_appender)
@@ -305,14 +309,13 @@ fn select_log_writer(
                          temp directory ({temp_err}); log output will be discarded",
                         config_dir.display()
                     );
-                    // The windowed Windows release has no console, so a bare
-                    // eprintln! would be invisible and the io::sink leaves no
-                    // file to inspect: surface the warning through tracing
-                    // (the subscriber may still have an alternate writer) and,
-                    // on Windows, through a native message box so the user
-                    // sees that logging is disabled.
-                    tracing::warn!(target: "custos::tray", "{msg}");
+                    // The windowed Windows release has no console, so the
+                    // native message box is the immediate user-visible
+                    // signal. The tracing event is deferred to
+                    // `init_tracing_file`, which emits it after the
+                    // subscriber is installed.
                     warn_log_discarded(&msg);
+                    outcome.warning = Some(msg);
                     outcome.discarded = true;
                     outcome.log_dir = None;
                     Box::new(std::io::sink())
@@ -383,8 +386,11 @@ fn init_tracing_file(config_path: &str) -> tracing_appender::non_blocking::Worke
         .try_init();
     // Surface the chosen location through tracing (now that the subscriber is
     // installed): the windowed Windows release has no console, so the stderr
-    // warning above may be invisible and the log file itself is the only
+    // warning may be invisible and the log file itself is the only
     // user-visible signal.
+    if let Some(msg) = &outcome.warning {
+        tracing::warn!(target: "custos::tray", "{msg}");
+    }
     if outcome.relocated {
         let relocated_dir = outcome.log_dir.as_deref().unwrap_or(config_dir);
         tracing::warn!(
