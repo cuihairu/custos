@@ -4,7 +4,7 @@ title: Configuration Switch Effects
 
 # Configuration Switch Effects
 
-This page documents every user-facing configuration switch that has an observable off→on effect, with generated evidence. The evidence is produced by `scripts/generate-config-effects.sh`, which drives the real `custos` binary, captures terminal output of the OFF state and the ON state, and stitches a looping GIF. It is re-runnable: any config change re-generates the evidence in place, so it doubles as a configuration-effect regression check.
+This page documents the four user-facing configuration switches that currently have an observable off→on effect, with generated evidence. The evidence is produced by `scripts/generate-config-effects.sh`, which drives the real `custos` binary, captures terminal output of the OFF state and the ON state, and stitches a looping GIF. It is re-runnable: any config change re-generates the evidence in place, so it doubles as a configuration-effect regression check.
 
 The generator covers the four switches below. Each entry shows the OFF frame, the ON frame, and a looping GIF of the off→on transition.
 
