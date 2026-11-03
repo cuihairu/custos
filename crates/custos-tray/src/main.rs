@@ -331,38 +331,43 @@ fn select_log_writer(
 /// there is no console and no log file to read, so a native message box is
 /// the only user-visible signal; elsewhere the tracing subscriber's writer
 /// (e.g. stderr) is the signal.
-#[cfg(not(windows))]
-fn warn_log_discarded(msg: &str) {
-    // On non-Windows the tracing::warn! already reaches a console/terminal;
-    // the message is emitted again to stderr as a belt-and-braces fallback
-    // for when no subscriber is installed yet.
-    eprintln!("warning: {msg}");
-}
-
 #[cfg(windows)]
 fn warn_log_discarded(msg: &str) {
-    use std::os::windows::ffi::OsStrExt;
-    let wide = |s: &str| -> Vec<u16> {
-        std::ffi::OsStr::new(s)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect()
-    };
-    let caption = wide("custos-tray");
-    let text = wide(&format!(
-        "{msg}\n\nLogging is disabled; events are not persisted."
-    ));
-    // SAFETY: all pointers point to NUL-terminated UTF-16 buffers that stay
-    // alive for the call; hwnd is NULL (no owner) and the style is OK+WARNING.
-    unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
-            std::ptr::null_mut(),
-            text.as_ptr(),
-            caption.as_ptr(),
-            windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
-                | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONWARNING,
-        );
+    #[cfg(not(test))]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let wide = |s: &str| -> Vec<u16> {
+            std::ffi::OsStr::new(s)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect()
+        };
+        let caption = wide("custos-tray");
+        let text = wide(&format!(
+            "{msg}\n\nLogging is disabled; events are not persisted."
+        ));
+        // SAFETY: all pointers point to NUL-terminated UTF-16 buffers that stay
+        // alive for the call; hwnd is NULL (no owner) and the style is OK+WARNING.
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+                std::ptr::null_mut(),
+                text.as_ptr(),
+                caption.as_ptr(),
+                windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
+                    | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONWARNING,
+            );
+        }
     }
+    #[cfg(test)]
+    {
+        // Tests must not open a blocking modal dialog; write to stderr.
+        eprintln!("warning: {msg}");
+    }
+}
+
+#[cfg(not(windows))]
+fn warn_log_discarded(msg: &str) {
+    eprintln!("warning: {msg}");
 }
 
 /// File-based tracing: writes `custos-tray.log` next to the config file.
