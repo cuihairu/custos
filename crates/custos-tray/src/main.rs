@@ -223,12 +223,50 @@ fn macos_console_script(status_args: &[String]) -> String {
     )
 }
 
-/// File-based tracing: writes `custos-tray.log` next to the config file.
-/// Required because the windowed Windows release has no console — stdout
-/// logging would silently vanish (see the `windows_subsystem` attribute).
-/// Returns the non-blocking writer guard; the caller must keep it alive for
-/// the process lifetime or buffered log lines are dropped on flush.
-fn init_tracing_file(config_path: &str) -> tracing_appender::non_blocking::WorkerGuard {
+/// Where the file-based tracing writer ended up after writer selection.
+/// `log_dir` is `None` only when the writer fell back to `io::sink`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LogOutcome {
+    log_dir: Option<std::path::PathBuf>,
+    /// The log file was moved out of the config directory (e.g. because the
+    /// config dir is read-only) and a relocation warning was emitted.
+    relocated: bool,
+    /// No file could be created in either directory; output was discarded.
+    discarded: bool,
+}
+
+/// Builds a `RollingFileAppender` in `dir`, or `Err` if the directory is not
+/// usable (read-only, missing, or a regular file standing in for a directory).
+fn build_log_appender(
+    dir: &std::path::Path,
+) -> Result<tracing_appender::rolling::RollingFileAppender, tracing_appender::rolling::InitError> {
+    tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::NEVER)
+        .filename_prefix("custos-tray")
+        .filename_suffix("log")
+        .build(dir)
+}
+
+/// Selects the log writer for `config_path`, trying the config directory
+/// first and the temp directory as fallback. The writer must be `Write`;
+/// `RollingFileAppender` and `io::sink` are both, so picking the first
+/// directory that accepts the log file keeps the no-console Windows release
+/// diagnosable.
+///
+/// The temp directory is a parameter so tests can force the fallback /
+/// discard branches deterministically on every platform (Windows/macOS
+/// included), instead of relying on Unix `chmod` which is a no-op elsewhere.
+///
+/// Returns the writer, its non-blocking guard, and the selection outcome so
+/// callers/tests can assert which branch ran and where the log lines land.
+fn select_log_writer(
+    config_path: &str,
+    temp_dir: &std::path::Path,
+) -> (
+    tracing_appender::non_blocking::NonBlocking,
+    tracing_appender::non_blocking::WorkerGuard,
+    LogOutcome,
+) {
     use tracing_appender::non_blocking;
 
     // The tray's state lives beside its config (§9.3 设置持久化), so the
@@ -239,28 +277,17 @@ fn init_tracing_file(config_path: &str) -> tracing_appender::non_blocking::Worke
         .map(std::path::Path::to_path_buf)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    let appender = tracing_appender::rolling::RollingFileAppender::builder()
-        .rotation(tracing_appender::rolling::Rotation::NEVER)
-        .filename_prefix("custos-tray")
-        .filename_suffix("log")
-        .build(&config_dir);
-
-    // The writer must be `Write`; `RollingFileAppender` and `io::sink` are
-    // both. Pick the first directory that actually accepts the log file so
-    // the no-console Windows release always keeps a diagnosable file.
-    let mut log_dir = config_dir.clone();
-    let writer: Box<dyn std::io::Write + Send> = match appender {
+    let mut outcome = LogOutcome {
+        log_dir: Some(config_dir.clone()),
+        relocated: false,
+        discarded: false,
+    };
+    let writer: Box<dyn std::io::Write + Send> = match build_log_appender(&config_dir) {
         Ok(appender) => Box::new(appender),
         Err(config_err) => {
             // Config dir is read-only (e.g. Program Files): try the system
             // temp directory before giving up on a file entirely.
-            let temp_dir = std::env::temp_dir();
-            match tracing_appender::rolling::RollingFileAppender::builder()
-                .rotation(tracing_appender::rolling::Rotation::NEVER)
-                .filename_prefix("custos-tray")
-                .filename_suffix("log")
-                .build(&temp_dir)
-            {
+            match build_log_appender(temp_dir) {
                 Ok(fallback_appender) => {
                     eprintln!(
                         "warning: cannot open log file in {} ({config_err}); \
@@ -268,7 +295,8 @@ fn init_tracing_file(config_path: &str) -> tracing_appender::non_blocking::Worke
                         config_dir.display(),
                         temp_dir.display()
                     );
-                    log_dir = temp_dir;
+                    outcome.relocated = true;
+                    outcome.log_dir = Some(temp_dir.to_path_buf());
                     Box::new(fallback_appender)
                 }
                 Err(temp_err) => {
@@ -278,13 +306,28 @@ fn init_tracing_file(config_path: &str) -> tracing_appender::non_blocking::Worke
                          log output will be discarded",
                         config_dir.display()
                     );
+                    outcome.discarded = true;
+                    outcome.log_dir = None;
                     Box::new(std::io::sink())
                 }
             }
         }
     };
     let (writer, guard) = non_blocking(writer);
+    (writer, guard, outcome)
+}
 
+/// File-based tracing: writes `custos-tray.log` next to the config file.
+/// Required because the windowed Windows release has no console — stdout
+/// logging would silently vanish (see the `windows_subsystem` attribute).
+/// Returns the non-blocking writer guard; the caller must keep it alive for
+/// the process lifetime or buffered log lines are dropped on flush.
+fn init_tracing_file(config_path: &str) -> tracing_appender::non_blocking::WorkerGuard {
+    let (writer, guard, outcome) = select_log_writer(config_path, &std::env::temp_dir());
+    let config_dir = std::path::Path::new(config_path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
     let _ = tracing_subscriber::fmt()
         .with_writer(writer)
         .with_target(true)
@@ -297,11 +340,12 @@ fn init_tracing_file(config_path: &str) -> tracing_appender::non_blocking::Worke
     // installed): the windowed Windows release has no console, so the stderr
     // warning above may be invisible and the log file itself is the only
     // user-visible signal.
-    if log_dir != config_dir {
+    if outcome.relocated {
+        let relocated_dir = outcome.log_dir.as_deref().unwrap_or(config_dir);
         tracing::warn!(
             target: "custos::tray",
             "log file relocated to {} ({} was unwritable)",
-            log_dir.display(),
+            relocated_dir.display(),
             config_dir.display()
         );
     }
@@ -408,65 +452,128 @@ mod tests {
 
     static UNIQUE_DIR: AtomicU64 = AtomicU64::new(0);
 
+    fn unique_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "custos-tray-test-log-{tag}-{}",
+            // The counter keeps the name unique within a process; the
+            // timestamp across processes.
+            UNIQUE_DIR.fetch_add(1, Ordering::Relaxed),
+        ))
+    }
+
+    /// Runs `f` with a thread-local tracing subscriber writing to `writer`
+    /// (`with_default` scopes the subscriber to the current thread, so it
+    /// does not fight other tests' `try_init` global subscriber).
+    fn with_tracing_subscriber<W, T>(writer: W, f: impl FnOnce() -> T) -> T
+    where
+        W: for<'writer> tracing_subscriber::fmt::MakeWriter<'writer> + Send + Sync + 'static,
+    {
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(writer)
+            .with_target(true)
+            .with_max_level(tracing::Level::INFO)
+            .finish();
+        tracing::subscriber::with_default(subscriber, f)
+    }
+
+    fn assert_log_contains(log_file: &std::path::Path, needle: &str) {
+        let content = std::fs::read_to_string(log_file)
+            .unwrap_or_else(|e| panic!("read {}: {e}", log_file.display()));
+        assert!(
+            content.contains(needle),
+            "log file {} should contain {needle:?}, got:\n{content}",
+            log_file.display()
+        );
+    }
+
     #[test]
     fn init_tracing_file_writes_a_log_file() {
-        let dir = std::env::temp_dir().join(format!(
-            "custos-tray-test-log-{}",
-            UNIQUE_DIR.fetch_add(1, Ordering::Relaxed)
-                + std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos() as u64)
-                    .unwrap_or(0)
-        ));
+        let dir = unique_dir("writable");
         std::fs::create_dir_all(&dir).expect("create temp dir");
         let config_path = dir.join("custos-tray.json");
+
         // The logger writes beside the config, so this also exercises the
         // log-directory derivation from the config path.
-        let _guard = init_tracing_file(&config_path.to_string_lossy());
-        tracing::info!(target: "custos::tray", "log-file smoke test");
-        // The non-blocking worker may need a moment to flush, but the guard
-        // held above flushes on drop; drop it before asserting.
-        drop(_guard);
+        let (writer, guard, outcome) =
+            select_log_writer(&config_path.to_string_lossy(), &std::env::temp_dir());
+        assert_eq!(outcome.log_dir, Some(dir.clone()));
+        assert!(!outcome.relocated);
+        assert!(!outcome.discarded);
+
+        with_tracing_subscriber(writer, || {
+            tracing::info!(target: "custos::tray", "log-file smoke test");
+        });
+        // Drop the guard to flush the background worker before asserting.
+        drop(guard);
         let log_file = dir.join("custos-tray.log");
         assert!(
             log_file.exists(),
             "log file should exist at {}",
             log_file.display()
         );
+        assert_log_contains(&log_file, "log-file smoke test");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn init_tracing_file_falls_back_to_temp_dir_on_readonly() {
-        // Create a real directory, then make it read-only so the appender
-        // cannot create the log file. On Unix this is `chmod 0o500`.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let dir = std::env::temp_dir().join(format!(
-                "custos-tray-test-readonly-{}",
-                UNIQUE_DIR.fetch_add(1, Ordering::Relaxed)
-                    + std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_nanos() as u64)
-                        .unwrap_or(0)
-            ));
-            std::fs::create_dir_all(&dir).expect("create temp dir");
-            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500))
-                .expect("chmod readonly");
-            let config_path = dir.join("custos-tray.json");
-            let _guard = init_tracing_file(&config_path.to_string_lossy());
+        // Use a regular file standing in for the config directory: the
+        // appender cannot create the log file inside a non-directory, which
+        // triggers the read-only fallback on every platform (Windows/macOS
+        // included) without relying on Unix chmod.
+        let config_dir = unique_dir("config-file");
+        std::fs::create_dir_all(&config_dir).expect("create parent");
+        let config_file = config_dir.join("not-a-dir");
+        std::fs::write(&config_file, b"x").expect("write file-as-dir");
+        let config_path = config_file.join("custos-tray.json");
+
+        let fallback_dir = unique_dir("fallback");
+        std::fs::create_dir_all(&fallback_dir).expect("create fallback dir");
+        let (writer, guard, outcome) =
+            select_log_writer(&config_path.to_string_lossy(), &fallback_dir);
+
+        // The fallback moved the log out of the unwritable config dir.
+        assert!(outcome.relocated, "expected relocation, got {outcome:?}");
+        assert!(!outcome.discarded);
+        assert_eq!(outcome.log_dir, Some(fallback_dir.clone()));
+
+        with_tracing_subscriber(writer, || {
             tracing::info!(target: "custos::tray", "fallback smoke test");
-            drop(_guard);
-            // Restore permissions so the test cleanup can remove the dir.
-            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))
-                .expect("restore permissions");
-            std::fs::remove_dir_all(&dir).ok();
-            // The fallback writes to std::env::temp_dir(), which is the parent
-            // of `dir` in this test; we can't easily assert on the exact temp
-            // log because it's shared, but the absence of a panic plus the
-            // function returning a valid guard proves the fallback path ran.
-        }
-        // Non-Unix CI (Windows/macOS): the function should not panic, but
-        // the permission model differs, so this test is a no-op there.
+        });
+        drop(guard);
+        let log_file = fallback_dir.join("custos-tray.log");
+        assert!(
+            log_file.exists(),
+            "fallback log file should exist at {}",
+            log_file.display()
+        );
+        assert_log_contains(&log_file, "fallback smoke test");
+        std::fs::remove_dir_all(&config_dir).ok();
+        std::fs::remove_dir_all(&fallback_dir).ok();
+    }
+
+    #[test]
+    fn init_tracing_file_discards_when_both_dirs_unwritable() {
+        // Both the config dir and the fallback temp dir are regular files
+        // (non-directories), so neither appender can be built -> io::sink.
+        let config_dir = unique_dir("config-file-2");
+        std::fs::create_dir_all(&config_dir).expect("create parent");
+        let config_file = config_dir.join("not-a-dir");
+        std::fs::write(&config_file, b"x").expect("write file-as-dir");
+        let config_path = config_file.join("custos-tray.json");
+
+        let fallback_dir = unique_dir("fallback-2");
+        std::fs::create_dir_all(&fallback_dir).expect("create fallback parent");
+        let fallback_file = fallback_dir.join("also-not-a-dir");
+        std::fs::write(&fallback_file, b"x").expect("write fallback file-as-dir");
+
+        let (_writer, guard, outcome) =
+            select_log_writer(&config_path.to_string_lossy(), &fallback_file);
+        assert!(outcome.discarded, "expected discard, got {outcome:?}");
+        assert!(!outcome.relocated);
+        assert_eq!(outcome.log_dir, None);
+        drop(guard);
+        std::fs::remove_dir_all(&config_dir).ok();
+        std::fs::remove_dir_all(&fallback_dir).ok();
     }
 }
