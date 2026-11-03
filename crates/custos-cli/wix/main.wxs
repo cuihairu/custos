@@ -7,7 +7,7 @@
          (docs/public/logo.svg) by scripts/make-windows-icon.py. Shown in
          Add/Remove Programs and on shortcuts. The same .ico is embedded
          into both exes at build time (crates/*/build.rs). -->
-    <Icon Id="CustosIcon" SourceFile="assets\icons\custos.ico" />
+    <Icon Id="CustosIcon" SourceFile="..\..\assets\icons\custos.ico" />
     <Property Id="ARPPRODUCTICON" Value="CustosIcon" />
     <Feature Id="ProductFeature" Title="Custos" Level="1">
       <ComponentRef Id="MainExecutable" />
@@ -66,13 +66,13 @@
           </Component>
           <!-- LICENSE + READMEs at the install root. -->
             <Component Id="CustosLicense" Guid="9B37CC19-FD39-A350-1CF0-2EC0AABBAE23">
-              <File Id="CustosLicenseFile" Source="LICENSE" KeyPath="yes" />
+              <File Id="CustosLicenseFile" Source="..\..\LICENSE" KeyPath="yes" />
             </Component>
             <Component Id="CustosReadme" Guid="11784A32-912E-8305-F645-87C29AD45D50">
-              <File Id="CustosReadmeFile" Source="README.md" KeyPath="yes" />
+              <File Id="CustosReadmeFile" Source="..\..\README.md" KeyPath="yes" />
             </Component>
             <Component Id="CustosReadmeZh" Guid="0F61393F-DDCE-4FA4-5687-789F17155415">
-              <File Id="CustosReadmeZhFile" Source="README.zh.md" KeyPath="yes" />
+              <File Id="CustosReadmeZhFile" Source="..\..\README.zh.md" KeyPath="yes" />
             </Component>
           <!-- Sample configurations (examples/): shipped so users can
                validate/start from a working example
@@ -80,13 +80,13 @@
                NOTE: keep in sync with examples/*.toml. -->
           <Directory Id="ExamplesFolder" Name="examples">
             <Component Id="ExampleBasicProcess" Guid="72374CEB-6F30-DD5D-40EE-60684032DE87">
-              <File Id="ExampleBasicProcessFile" Source="examples\basic-process.toml" KeyPath="yes" />
+              <File Id="ExampleBasicProcessFile" Source="..\..\examples\basic-process.toml" KeyPath="yes" />
             </Component>
             <Component Id="ExampleDependencyChain" Guid="4EF5EFDD-AA25-CFE5-A37A-10C45270F5E3">
-              <File Id="ExampleDependencyChainFile" Source="examples\dependency-chain.toml" KeyPath="yes" />
+              <File Id="ExampleDependencyChainFile" Source="..\..\examples\dependency-chain.toml" KeyPath="yes" />
             </Component>
             <Component Id="ExampleNotifications" Guid="244C1F3D-E95A-25C0-90B8-B62B1F39816A">
-              <File Id="ExampleNotificationsFile" Source="examples\notifications.toml" KeyPath="yes" />
+              <File Id="ExampleNotificationsFile" Source="..\..\examples\notifications.toml" KeyPath="yes" />
             </Component>
           </Directory>
           <!-- Offline docs snapshot (markdown, not the built site):
@@ -95,113 +95,113 @@
                (a new guide file needs a Component entry here). -->
           <Directory Id="DocsFolder" Name="docs">
             <Component Id="DocsIndex" Guid="4804396D-34EA-2DDD-FF8A-61E9F1DCCC6E">
-              <File Id="DocsIndexFile" Source="docs\index.md" KeyPath="yes" />
+              <File Id="DocsIndexFile" Source="..\..\docs\index.md" KeyPath="yes" />
             </Component>
             <Directory Id="DocsGuideFolder" Name="guide">
             <Component Id="DocGuideAdrprinciples" Guid="6B70564C-069B-3BAF-6EC3-E7A9690C8ADD">
-              <File Id="DocGuideAdrprinciplesFile" Source="docs\guide\adr-principles.md" KeyPath="yes" />
+              <File Id="DocGuideAdrprinciplesFile" Source="..\..\docs\guide\adr-principles.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideAgentbrief" Guid="74ED85E5-A9E1-CBC2-0765-1CBBC49712EF">
-              <File Id="DocGuideAgentbriefFile" Source="docs\guide\agent-brief.md" KeyPath="yes" />
+              <File Id="DocGuideAgentbriefFile" Source="..\..\docs\guide\agent-brief.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideAgentprotocol" Guid="E32AEF80-6278-8C4B-699E-558D64E7EA91">
-              <File Id="DocGuideAgentprotocolFile" Source="docs\guide\agent-protocol.md" KeyPath="yes" />
+              <File Id="DocGuideAgentprotocolFile" Source="..\..\docs\guide\agent-protocol.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideDashboardcliconfig" Guid="CCFE7033-266F-F536-58CF-F9DABE1CD621">
-              <File Id="DocGuideDashboardcliconfigFile" Source="docs\guide\dashboard-cli-config.md" KeyPath="yes" />
+              <File Id="DocGuideDashboardcliconfigFile" Source="..\..\docs\guide\dashboard-cli-config.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideNotification" Guid="C9EC251C-70C9-8B62-40FB-5CCCB208F12C">
-              <File Id="DocGuideNotificationFile" Source="docs\guide\notification.md" KeyPath="yes" />
+              <File Id="DocGuideNotificationFile" Source="..\..\docs\guide\notification.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideOverview" Guid="33ADE6A0-8A33-D160-ECB2-65CE3E61AA97">
-              <File Id="DocGuideOverviewFile" Source="docs\guide\overview.md" KeyPath="yes" />
+              <File Id="DocGuideOverviewFile" Source="..\..\docs\guide\overview.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuidePersistence" Guid="8DF45975-2AF4-E08E-C22D-8467D6365E37">
-              <File Id="DocGuidePersistenceFile" Source="docs\guide\persistence.md" KeyPath="yes" />
+              <File Id="DocGuidePersistenceFile" Source="..\..\docs\guide\persistence.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuidePlatforms" Guid="5D0C95F9-296D-07B0-7855-B174C91FD38A">
-              <File Id="DocGuidePlatformsFile" Source="docs\guide\platforms.md" KeyPath="yes" />
+              <File Id="DocGuidePlatformsFile" Source="..\..\docs\guide\platforms.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuidePlugins" Guid="186A4C66-61A7-E54D-E211-805A2C552C79">
-              <File Id="DocGuidePluginsFile" Source="docs\guide\plugins.md" KeyPath="yes" />
+              <File Id="DocGuidePluginsFile" Source="..\..\docs\guide\plugins.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideProbediagnosis" Guid="E8460274-7961-C661-6C65-7BE7B53D9D3B">
-              <File Id="DocGuideProbediagnosisFile" Source="docs\guide\probe-diagnosis.md" KeyPath="yes" />
+              <File Id="DocGuideProbediagnosisFile" Source="..\..\docs\guide\probe-diagnosis.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideProbesurvey" Guid="6826FA73-465D-B09D-2B14-062155661738">
-              <File Id="DocGuideProbesurveyFile" Source="docs\guide\probe-survey.md" KeyPath="yes" />
+              <File Id="DocGuideProbesurveyFile" Source="..\..\docs\guide\probe-survey.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideRecoveryengine" Guid="100CC6D4-1610-2CF4-B58A-23D43B4F77DD">
-              <File Id="DocGuideRecoveryengineFile" Source="docs\guide\recovery-engine.md" KeyPath="yes" />
+              <File Id="DocGuideRecoveryengineFile" Source="..\..\docs\guide\recovery-engine.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideResources" Guid="30A910DD-5308-9B88-6669-9C400FA3B69E">
-              <File Id="DocGuideResourcesFile" Source="docs\guide\resources.md" KeyPath="yes" />
+              <File Id="DocGuideResourcesFile" Source="..\..\docs\guide\resources.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideRoadmap" Guid="E7EBFC25-FB5D-6DAC-B739-B26A25968CEF">
-              <File Id="DocGuideRoadmapFile" Source="docs\guide\roadmap.md" KeyPath="yes" />
+              <File Id="DocGuideRoadmapFile" Source="..\..\docs\guide\roadmap.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideSecurity" Guid="82B2B375-5CA7-1A40-7CAA-BE5CA874CEEB">
-              <File Id="DocGuideSecurityFile" Source="docs\guide\security.md" KeyPath="yes" />
+              <File Id="DocGuideSecurityFile" Source="..\..\docs\guide\security.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideTesting" Guid="801F4137-659E-C5CD-A8A3-13DCC59A3CAD">
-              <File Id="DocGuideTestingFile" Source="docs\guide\testing.md" KeyPath="yes" />
+              <File Id="DocGuideTestingFile" Source="..\..\docs\guide\testing.md" KeyPath="yes" />
             </Component>
             <Component Id="DocGuideWorkspace" Guid="9306764A-E452-7C50-DB9B-5687F88CE3C1">
-              <File Id="DocGuideWorkspaceFile" Source="docs\guide\workspace.md" KeyPath="yes" />
+              <File Id="DocGuideWorkspaceFile" Source="..\..\docs\guide\workspace.md" KeyPath="yes" />
             </Component>
             </Directory>
             <Directory Id="DocsZhFolder" Name="zh">
               <Directory Id="DocsZhGuideFolder" Name="guide">
             <Component Id="DocZhGuideAdrprinciples" Guid="FBA0F4B5-756C-48A8-E88B-C34A5510D642">
-              <File Id="DocZhGuideAdrprinciplesFile" Source="docs\zh\guide\adr-principles.md" KeyPath="yes" />
+              <File Id="DocZhGuideAdrprinciplesFile" Source="..\..\docs\zh\guide\adr-principles.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideAgentbrief" Guid="7AA1A3D8-73AF-1620-D5C1-D9A32523B72A">
-              <File Id="DocZhGuideAgentbriefFile" Source="docs\zh\guide\agent-brief.md" KeyPath="yes" />
+              <File Id="DocZhGuideAgentbriefFile" Source="..\..\docs\zh\guide\agent-brief.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideAgentprotocol" Guid="6CC3A83F-2A17-8212-D012-8141E7DF92C6">
-              <File Id="DocZhGuideAgentprotocolFile" Source="docs\zh\guide\agent-protocol.md" KeyPath="yes" />
+              <File Id="DocZhGuideAgentprotocolFile" Source="..\..\docs\zh\guide\agent-protocol.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideDashboardcliconfig" Guid="EB2BBBF9-6C20-9F37-FB10-04B1039485BC">
-              <File Id="DocZhGuideDashboardcliconfigFile" Source="docs\zh\guide\dashboard-cli-config.md" KeyPath="yes" />
+              <File Id="DocZhGuideDashboardcliconfigFile" Source="..\..\docs\zh\guide\dashboard-cli-config.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideNotification" Guid="9240D4C3-3E7B-FE7B-F419-4851BBB3FFF9">
-              <File Id="DocZhGuideNotificationFile" Source="docs\zh\guide\notification.md" KeyPath="yes" />
+              <File Id="DocZhGuideNotificationFile" Source="..\..\docs\zh\guide\notification.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideOverview" Guid="DF460AB8-7059-8686-F1DB-4166C47EA52E">
-              <File Id="DocZhGuideOverviewFile" Source="docs\zh\guide\overview.md" KeyPath="yes" />
+              <File Id="DocZhGuideOverviewFile" Source="..\..\docs\zh\guide\overview.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuidePersistence" Guid="7453B9C7-68C2-7985-9575-4AE28AD2299E">
-              <File Id="DocZhGuidePersistenceFile" Source="docs\zh\guide\persistence.md" KeyPath="yes" />
+              <File Id="DocZhGuidePersistenceFile" Source="..\..\docs\zh\guide\persistence.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuidePlatforms" Guid="FE28C3CB-0E95-5DBE-8A2D-E72B1315EE15">
-              <File Id="DocZhGuidePlatformsFile" Source="docs\zh\guide\platforms.md" KeyPath="yes" />
+              <File Id="DocZhGuidePlatformsFile" Source="..\..\docs\zh\guide\platforms.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuidePlugins" Guid="F4D2A5FF-235A-1528-96D4-302AC9B2CBC2">
-              <File Id="DocZhGuidePluginsFile" Source="docs\zh\guide\plugins.md" KeyPath="yes" />
+              <File Id="DocZhGuidePluginsFile" Source="..\..\docs\zh\guide\plugins.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideProbediagnosis" Guid="290D22AC-647F-7769-1FC7-D96C537A97D2">
-              <File Id="DocZhGuideProbediagnosisFile" Source="docs\zh\guide\probe-diagnosis.md" KeyPath="yes" />
+              <File Id="DocZhGuideProbediagnosisFile" Source="..\..\docs\zh\guide\probe-diagnosis.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideProbesurvey" Guid="F71B46F9-1A18-0AD3-C98F-9328F93D73C5">
-              <File Id="DocZhGuideProbesurveyFile" Source="docs\zh\guide\probe-survey.md" KeyPath="yes" />
+              <File Id="DocZhGuideProbesurveyFile" Source="..\..\docs\zh\guide\probe-survey.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideRecoveryengine" Guid="F3865250-4E59-4350-19FF-31EE90D774D4">
-              <File Id="DocZhGuideRecoveryengineFile" Source="docs\zh\guide\recovery-engine.md" KeyPath="yes" />
+              <File Id="DocZhGuideRecoveryengineFile" Source="..\..\docs\zh\guide\recovery-engine.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideResources" Guid="BB78647B-4F63-3B73-F40F-298A281CCF69">
-              <File Id="DocZhGuideResourcesFile" Source="docs\zh\guide\resources.md" KeyPath="yes" />
+              <File Id="DocZhGuideResourcesFile" Source="..\..\docs\zh\guide\resources.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideRoadmap" Guid="D28C5D38-9885-78A1-11D9-D5BEB524038C">
-              <File Id="DocZhGuideRoadmapFile" Source="docs\zh\guide\roadmap.md" KeyPath="yes" />
+              <File Id="DocZhGuideRoadmapFile" Source="..\..\docs\zh\guide\roadmap.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideSecurity" Guid="8E3C031C-9159-23C8-6DB8-CF7021278D29">
-              <File Id="DocZhGuideSecurityFile" Source="docs\zh\guide\security.md" KeyPath="yes" />
+              <File Id="DocZhGuideSecurityFile" Source="..\..\docs\zh\guide\security.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideTesting" Guid="AFC3FCA9-F763-7BC9-4949-101E8B0D314A">
-              <File Id="DocZhGuideTestingFile" Source="docs\zh\guide\testing.md" KeyPath="yes" />
+              <File Id="DocZhGuideTestingFile" Source="..\..\docs\zh\guide\testing.md" KeyPath="yes" />
             </Component>
             <Component Id="DocZhGuideWorkspace" Guid="05AD2DDB-9870-DA26-FB7C-89677ACCFC56">
-              <File Id="DocZhGuideWorkspaceFile" Source="docs\zh\guide\workspace.md" KeyPath="yes" />
+              <File Id="DocZhGuideWorkspaceFile" Source="..\..\docs\zh\guide\workspace.md" KeyPath="yes" />
             </Component>
               </Directory>
             </Directory>

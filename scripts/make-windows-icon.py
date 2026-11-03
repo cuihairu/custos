@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+import shutil
 
 ROOT = Path(__file__).resolve().parent.parent
 SVG = ROOT / "docs" / "public" / "logo.svg"
@@ -34,30 +35,45 @@ def main() -> int:
     if not SVG.is_file():
         print(f"error: source SVG not found: {SVG}", file=sys.stderr)
         return 1
+
+    # Resolve tools on PATH (not hardcoded /usr/bin): Homebrew (macOS) and
+    # /usr/local/bin installs both land on PATH but not in /usr/bin.
+    tools: dict[str, str] = {}
     for tool in ("rsvg-convert", "magick"):
-        if not Path(f"/usr/bin/{tool}").is_file():
-            print(f"error: {tool} not found (see module docstring)", file=sys.stderr)
+        found = shutil.which(tool)
+        if found is None:
+            print(f"error: {tool} not found on PATH (see module docstring)", file=sys.stderr)
             return 1
+        tools[tool] = found
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory() as tmp:
-        pngs: list[str] = []
-        for size in SIZES:
-            png = Path(tmp) / f"custos-{size}.png"
-            subprocess.run(
-                ["rsvg-convert", "-w", str(size), "-h", str(size),
-                 "-o", str(png), str(SVG)],
-                check=True,
-            )
-            pngs.append(str(png))
-        # Exact-size inputs: ImageMagick packs them as-is into one .ico.
-        subprocess.run(["magick", *pngs, str(OUT)], check=True)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            pngs: list[str] = []
+            for size in SIZES:
+                png = Path(tmp) / f"custos-{size}.png"
+                subprocess.run(
+                    [tools["rsvg-convert"], "-w", str(size), "-h", str(size),
+                     "-o", str(png), str(SVG)],
+                    check=True,
+                )
+                pngs.append(str(png))
+            # Exact-size inputs: ImageMagick packs them as-is into one .ico.
+            subprocess.run([tools["magick"], *pngs, str(OUT)], check=True)
 
-    # Verify every requested size actually landed in the container.
-    identify = subprocess.run(
-        ["magick", "identify", str(OUT)], check=True, capture_output=True, text=True
-    )
-    print(identify.stdout)
+        # Verify every requested size actually landed in the container.
+        identify = subprocess.run(
+            [tools["magick"], "identify", str(OUT)], check=True,
+            capture_output=True, text=True,
+        )
+        print(identify.stdout)
+    except subprocess.CalledProcessError as exc:
+        print(
+            f"error: {exc.cmd[0] if exc.cmd else 'tool'} failed (exit {exc.returncode}); "
+            f"output: {exc.stderr.strip() or exc.stdout.strip() or exc}",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

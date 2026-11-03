@@ -12,6 +12,12 @@ import mermaid from 'mermaid'
 
 let queue: Promise<void> = Promise.resolve()
 let counter = 0
+// Single observer for the whole session: `<html>` class flips (dark/light
+// toggle) are global, so one observer re-renders every mermaid block on
+// every route change. Re-creating it per `setupMermaid()` call would leak
+// observers (each fires `enqueue()` on every class change) and duplicate
+// full-page rescans.
+let themeObserver: MutationObserver | null = null
 
 function currentTheme(): 'dark' | 'default' {
   return document.documentElement.classList.contains('dark') ? 'dark' : 'default'
@@ -67,8 +73,11 @@ export function setupMermaid(): void {
   if (typeof window === 'undefined') return
   enqueue()
   // Dark/light toggle: <html> class flips, re-render with the new theme.
-  new MutationObserver(enqueue).observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['class'],
-  })
+  if (!themeObserver) {
+    themeObserver = new MutationObserver(enqueue)
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    })
+  }
 }
