@@ -346,7 +346,9 @@ fn warn_log_discarded(msg: &str) {
             .collect()
     };
     let caption = wide("custos-tray");
-    let text = wide(&format!("{msg}\n\nLogging is disabled; events are not persisted."));
+    let text = wide(&format!(
+        "{msg}\n\nLogging is disabled; events are not persisted."
+    ));
     // SAFETY: all pointers point to NUL-terminated UTF-16 buffers that stay
     // alive for the call; hwnd is NULL (no owner) and the style is OK+WARNING.
     unsafe {
