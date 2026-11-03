@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Custos configuration-effect evidence generator (DOC-GIF · P2).
 #
-# For every user-facing config switch that has an observable off->on
-# effect, this script drives the real `custos` binary and captures a
+# For the user-facing config switches that have an observable off->on
+# effect (four switches), this script drives the real `custos` binary and captures a
 # terminal recording of the OFF state and the ON state, then stitches a
 # GIF (off frame -> on frame, looping) with ffmpeg. It is re-runnable:
 # any config change re-generates the evidence in place.
@@ -19,6 +19,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$OUT"
 command -v ffmpeg >/dev/null || { echo "ffmpeg required"; exit 1; }
+command -v convert >/dev/null || { echo "ImageMagick (convert) required"; exit 1; }
 [ -x "$BIN" ] || { echo "build custos first: cargo build -p custos-cli"; exit 1; }
 
 # render a terminal-style text block to a PNG using ImageMagick.
