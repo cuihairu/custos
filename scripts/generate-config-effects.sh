@@ -26,6 +26,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$OUT"
+command -v curl >/dev/null || { echo "curl required"; exit 1; }
 command -v ffmpeg >/dev/null || { echo "ffmpeg required"; exit 1; }
 command -v convert >/dev/null || { echo "ImageMagick (convert) required"; exit 1; }
 [ -x "$BIN" ] || { echo "build custos first: cargo build -p custos-cli"; exit 1; }
@@ -60,9 +61,13 @@ stitch() { # stitch <off-png> <on-png> <out-gif>
     -loop 0 "$gif"
 }
 
+# Counts every assertion so the final summary is not a hard-coded value.
+ASSERT_COUNT=0
+
 # Asserts that a grep pattern appears in a file, with a descriptive message.
 assert_grep() { # assert_grep <needle> <file> <what>
   local needle="$1" file="$2" what="$3"
+  ASSERT_COUNT=$((ASSERT_COUNT + 1))
   if ! grep -q "$needle" "$file"; then
     echo "ASSERTION FAILED: $what" >&2
     echo "  expected to find: $needle" >&2
@@ -76,6 +81,7 @@ assert_grep() { # assert_grep <needle> <file> <what>
 # Asserts that a grep pattern does NOT appear in a file.
 assert_not_grep() { # assert_not_grep <needle> <file> <what>
   local needle="$1" file="$2" what="$3"
+  ASSERT_COUNT=$((ASSERT_COUNT + 1))
   if grep -q "$needle" "$file"; then
     echo "ASSERTION FAILED: $what" >&2
     echo "  expected NOT to find: $needle" >&2
@@ -150,12 +156,8 @@ EOF
 # Regression assertion: off state must NOT be reachable (curl fails, exit!=0).
 assert_grep "curl exit=" "$TMP/dash-off.txt" \
   "dashboard OFF frame must show curl exit"
-if grep -q "curl exit=0" "$TMP/dash-off.txt"; then
-  echo "ASSERTION FAILED: dashboard OFF frame must show no listener (curl succeeded)" >&2
-  echo "  expected curl exit != 0 in: $TMP/dash-off.txt" >&2
-  sed 's/^/  /' "$TMP/dash-off.txt" >&2
-  exit 1
-fi
+assert_not_grep "curl exit=0" "$TMP/dash-off.txt" \
+  "dashboard OFF frame must show no listener (curl succeeded)"
 
 {
   echo "\$ custos start dash-on.toml"
@@ -357,4 +359,4 @@ cp "$TMP/hr-on.png" "$OUT/allow-high-risk-on.png"
 echo "generated allow-high-risk.gif"
 
 echo "all configuration-effect evidence generated under $OUT"
-echo "regression assertions: 4/4 passed"
+echo "regression assertions: $ASSERT_COUNT/$ASSERT_COUNT passed"
