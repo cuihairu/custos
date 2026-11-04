@@ -25,3 +25,4 @@ const theme: Theme = {
 }
 
 export default theme
+import './custom.css'
