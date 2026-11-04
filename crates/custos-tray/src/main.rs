@@ -293,7 +293,7 @@ fn select_log_writer(
             match build_log_appender(temp_dir) {
                 Ok(fallback_appender) => {
                     let msg = format!(
-                        "warning: cannot open log file in {} ({config_err}); \
+                        "cannot open log file in {} ({config_err}); \
                          falling back to {}",
                         config_dir.display(),
                         temp_dir.display()
@@ -376,7 +376,17 @@ fn warn_log_discarded(msg: &str) {
 /// Returns the non-blocking writer guard; the caller must keep it alive for
 /// the process lifetime or buffered log lines are dropped on flush.
 fn init_tracing_file(config_path: &str) -> tracing_appender::non_blocking::WorkerGuard {
-    let (writer, guard, outcome) = select_log_writer(config_path, &std::env::temp_dir());
+    init_tracing_file_in(config_path, &std::env::temp_dir())
+}
+
+/// Testable core of [`init_tracing_file`]: the temp directory is injected so
+/// tests can force the relocation branch without touching the real system
+/// temp directory.
+fn init_tracing_file_in(
+    config_path: &str,
+    temp_dir: &std::path::Path,
+) -> tracing_appender::non_blocking::WorkerGuard {
+    let (writer, guard, outcome) = select_log_writer(config_path, temp_dir);
     let config_dir = std::path::Path::new(config_path)
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -393,6 +403,16 @@ fn init_tracing_file(config_path: &str) -> tracing_appender::non_blocking::Worke
     // installed): the windowed Windows release has no console, so the stderr
     // warning may be invisible and the log file itself is the only
     // user-visible signal.
+    emit_deferred_warnings(&outcome, config_dir);
+    // The guard flushes the background worker on drop, so it must outlive
+    // every logging call (bound to `main`'s scope by the caller).
+    guard
+}
+
+/// Emits the warnings that were deferred until the tracing subscriber is
+/// installed. Split out so tests can assert the lines actually reach the
+/// chosen writer (a regression test that this emission is not dropped).
+fn emit_deferred_warnings(outcome: &LogOutcome, config_dir: &std::path::Path) {
     if let Some(msg) = &outcome.warning {
         tracing::warn!(target: "custos::tray", "{msg}");
     }
@@ -405,9 +425,6 @@ fn init_tracing_file(config_path: &str) -> tracing_appender::non_blocking::Worke
             config_dir.display()
         );
     }
-    // The guard flushes the background worker on drop, so it must outlive
-    // every logging call (bound to `main`'s scope by the caller).
-    guard
 }
 
 #[cfg(test)]
@@ -636,6 +653,74 @@ mod tests {
         assert!(!outcome.relocated);
         assert_eq!(outcome.log_dir, None);
         drop(guard);
+        std::fs::remove_dir_all(&config_dir).ok();
+        std::fs::remove_dir_all(&fallback_dir).ok();
+    }
+
+    /// Regression test for the audit finding "the deferred warning emission in
+    /// `init_tracing_file` has no test": drives the real `init_tracing_file`
+    /// (not just `select_log_writer`) through the relocation branch and
+    /// asserts the deferred warning line actually lands in the relocated log
+    /// file after the subscriber is installed. Deleting the emission in
+    /// `emit_deferred_warnings` makes this test fail.
+    #[test]
+    fn init_tracing_file_emits_deferred_relocation_warning() {
+        // A regular file stands in for the config directory, forcing the
+        // relocation branch deterministically on every platform.
+        let config_dir = unique_dir("relocate-config");
+        std::fs::create_dir_all(&config_dir).expect("create parent");
+        let config_file = config_dir.join("not-a-dir");
+        std::fs::write(&config_file, b"x").expect("write file-as-dir");
+        let config_path = config_file.join("custos-tray.json");
+
+        let fallback_dir = unique_dir("relocate-fallback");
+        std::fs::create_dir_all(&fallback_dir).expect("create fallback dir");
+
+        // `init_tracing_file_in` installs a *global* subscriber via try_init.
+        // A prior global subscriber (e.g. another test's try_init) would make
+        // this a no-op, so assert on the file directly: the warning line is
+        // written through the relocated writer regardless.
+        let guard = init_tracing_file_in(&config_path.to_string_lossy(), &fallback_dir);
+
+        // Give the non-blocking worker a moment to flush, then drop the guard.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        drop(guard);
+        let log_file = fallback_dir.join("custos-tray.log");
+        assert!(
+            log_file.exists(),
+            "relocated log file should exist at {}",
+            log_file.display()
+        );
+        // The deferred warning must be present in the file, proving the
+        // emission in `init_tracing_file_in` actually reached the writer.
+        assert_log_contains(&log_file, "cannot open log file in");
+        assert_log_contains(&log_file, "falling back to");
+        std::fs::remove_dir_all(&config_dir).ok();
+        std::fs::remove_dir_all(&fallback_dir).ok();
+    }
+
+    /// The relocated and discard warning messages must share one prefix form
+    /// (no redundant literal `"warning: "` inside a `WARN`-level event).
+    #[test]
+    fn deferred_warning_messages_have_no_redundant_prefix() {
+        let config_dir = unique_dir("prefix-config");
+        std::fs::create_dir_all(&config_dir).expect("create parent");
+        let config_file = config_dir.join("not-a-dir");
+        std::fs::write(&config_file, b"x").expect("write file-as-dir");
+        let config_path = config_file.join("custos-tray.json");
+
+        let fallback_dir = unique_dir("prefix-fallback");
+        std::fs::create_dir_all(&fallback_dir).expect("create fallback dir");
+
+        let (_, _guard, outcome) = select_log_writer(&config_path.to_string_lossy(), &fallback_dir);
+        assert!(outcome.relocated);
+        let relocated_msg = outcome.warning.expect("relocated has a warning");
+        assert!(
+            !relocated_msg.starts_with("warning:"),
+            "relocated message must not carry a redundant `warning:` prefix: {relocated_msg}"
+        );
+        assert!(relocated_msg.starts_with("cannot open log file"));
+
         std::fs::remove_dir_all(&config_dir).ok();
         std::fs::remove_dir_all(&fallback_dir).ok();
     }
