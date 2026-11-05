@@ -273,9 +273,18 @@ pub fn route_print_argv() -> Vec<String> {
 }
 
 /// Extracts the default gateway from `route print -4` output: the row whose
-/// network destination and mask are both `0.0.0.0`.
+/// network destination and mask are both `0.0.0.0`. Stops at the localized
+/// Persistent Routes section header so a stale persistent default route is
+/// never reported as the active gateway (openclaw audit 2026-11-05) —
+/// mirrors `parse_route_print_default_gateway` in custos-probe/netif.rs.
 pub fn parse_default_gateway(output: &str) -> Option<String> {
     for line in output.lines() {
+        // Mirrors the netif.rs scanner: the Persistent Routes section keeps
+        // the configured gateway after the active route drops; scanning
+        // past its header would report that stale route as Healthy.
+        if custos_probe::netif::is_persistent_routes_header(line) {
+            break;
+        }
         let mut fields = line.split_whitespace();
         let Some(destination) = fields.next() else {
             continue;
@@ -343,22 +352,53 @@ pub fn netsh_wlan_connect_argv(profile: &str) -> Vec<String> {
 pub fn netsh_wlan_reports_adapter(output: &str) -> bool {
     for line in output.lines() {
         let line = line.trim();
-        // Localized "no wireless interface" markers (en / zh-CN).
-        if line.to_lowercase().contains("no wireless interface") || line.contains("没有无线接口")
-        {
+        // Localized "no wireless interface" markers. `netsh wlan show
+        // interfaces` prints one of these when the host has no radio; the
+        // exit status alone is not evidence either way (openclaw audit
+        // 2026-11-05). Covers en/zh-CN plus the other common Windows
+        // locales; a marker that still fails to match leaves the default
+        // `false` (conservative: no adapter is never claimed native).
+        if is_no_wlan_marker(line) {
             return false;
         }
         // An interface block carries a `Name : <value>` field.
         if let Some((label, value)) = line.split_once(':') {
             let label = label.trim();
-            if (label.eq_ignore_ascii_case("Name") || label.starts_with("名称"))
-                && !value.trim().is_empty()
-            {
+            if is_wlan_name_label(label) && !value.trim().is_empty() {
                 return true;
             }
         }
     }
     false
+}
+
+/// True when `line` is a localized "no wireless interface on the system"
+/// notice. `route`/`netsh` localize these strings; the marker set mirrors
+/// the Windows locales the route header parser covers. Pure.
+fn is_no_wlan_marker(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    lower.contains("no wireless interface")
+        || lower.contains("no wireless adapter")
+        || line.contains("没有无线接口")
+        || line.contains("ワイヤレス インターフェイスがシステム上にありません")
+        || lower.contains("aucune interface sans fil")
+        || lower.contains("keine drahtlose schnittstelle")
+        || lower.contains("keine drahtlose schnittstelle vorhanden")
+        || line.contains("무선 인터페이스가 없습니다")
+        || lower.contains("беспроводной интерфейс не найден")
+}
+
+/// True when `label` is a localized `Name` field label in a
+/// `netsh wlan show interfaces` block. Non-English Windows localize the
+/// column (ja 名前 / fr Nom / ko 이름 / ru Имя / es Nombre / it Nome /
+/// pl Nazwa / nl Naam / tr Ad); matching only `Name`/`名称` would report
+/// no adapter on those systems (openclaw audit 2026-11-05). Pure.
+fn is_wlan_name_label(label: &str) -> bool {
+    matches!(
+        label,
+        "Name" | "名称" | "名前" | "Nom" | "이름" | "Имя" | "Nombre" | "Nome" | "Nazwa"
+            | "Naam" | "Ad" | "Název"
+    )
 }
 
 /// True when the host has a usable Wi-Fi adapter — probed via

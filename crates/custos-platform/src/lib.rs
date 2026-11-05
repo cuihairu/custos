@@ -40,9 +40,25 @@ pub fn default_reboot_controller() -> std::sync::Arc<dyn RebootController> {
     {
         std::sync::Arc::new(windows::WindowsRebootController)
     }
-    #[cfg(not(windows))]
+    #[cfg(all(not(windows), not(target_os = "macos")))]
     {
         std::sync::Arc::new(linux::LinuxRebootController::detect())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::sync::Arc::new(MacosRebootController)
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct MacosRebootController;
+
+#[cfg(target_os = "macos")]
+impl RebootController for MacosRebootController {
+    fn reboot(&self) -> PlatformResult<()> {
+        Err(PlatformError::Unsupported(
+            "no macOS reboot controller is implemented yet".into(),
+        ))
     }
 }
 

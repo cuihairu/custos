@@ -175,6 +175,25 @@ fn wifi_adapter_probe_requires_an_interface_list_not_just_exit_status() {
         !netsh_wlan_reports_adapter("系统上没有无线接口。"),
         "zh-CN localized no-adapter notice"
     );
+    // Non-en/zh-CN no-adapter notices and Name labels must still parse
+    // (openclaw audit 2026-11-05: matching only Name/名称 and the two
+    // notices left wifi.reconnect silently unavailable on those systems).
+    assert!(
+        !netsh_wlan_reports_adapter("ワイヤレス インターフェイスがシステム上にありません。"),
+        "ja localized no-adapter notice"
+    );
+    assert!(
+        !netsh_wlan_reports_adapter("Aucune interface sans fil sur le système."),
+        "fr localized no-adapter notice"
+    );
+    assert!(
+        !netsh_wlan_reports_adapter("Es ist keine drahtlose Schnittstelle vorhanden."),
+        "de localized no-adapter notice"
+    );
+    assert!(
+        !netsh_wlan_reports_adapter("무선 인터페이스가 시스템에 없습니다."),
+        "ko localized no-adapter notice"
+    );
     let with_adapter = "\
 There is 1 wireless interface on the system
 
@@ -193,6 +212,14 @@ There is 1 wireless interface on the system
         !netsh_wlan_reports_adapter("Name                    :"),
         "empty Name value is not an adapter"
     );
+    // Localized Name labels still prove the radio exists.
+    for label in ["名前", "Nom", "이름", "Имя", "Nombre", "Nome", "Nazwa", "Naam", "Ad"] {
+        let localized = format!("    {label} : Wi-Fi\n");
+        assert!(
+            netsh_wlan_reports_adapter(&localized),
+            "localized Name label must prove the radio: {label}"
+        );
+    }
 }
 
 const ROUTE_PRINT: &str =
@@ -218,6 +245,26 @@ fn route_print_default_gateway_extraction() {
     );
     assert_eq!(parse_default_gateway("no routes here"), None);
     assert_eq!(route_print_argv(), vec!["route", "print", "-4"]);
+}
+
+#[test]
+fn route_print_default_gateway_ignores_persistent_only_default_gateway() {
+    let output = "\
+Active Routes:
+        127.0.0.0        255.0.0.0         On-link         127.0.0.1    331
+永久路由:
+      0.0.0.0          0.0.0.0    192.168.1.1  Default
+";
+    assert_eq!(parse_default_gateway(output), None);
+
+    let active_route = "\
+Active Routes:
+        127.0.0.0        255.0.0.0         On-link         127.0.0.1    331
+        0.0.0.0          0.0.0.0    192.168.1.1  192.168.1.42  25
+Persistent Routes:
+      0.0.0.0          0.0.0.0    192.168.9.9  Default
+";
+    assert_eq!(parse_default_gateway(active_route).as_deref(), Some("192.168.1.1"));
 }
 
 #[test]

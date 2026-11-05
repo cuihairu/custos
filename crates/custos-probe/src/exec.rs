@@ -461,4 +461,20 @@ mod tests {
         // historical zh-CN behaviour rather than panicking.
         assert_eq!(decode_with_oem_code_page(65001, &[0xC4, 0xAC]), "默");
     }
+
+    #[test]
+    fn remaining_dos_code_pages_are_not_misdecoded_as_gbk() {
+        // openclaw audit 2026-11-05: only CP437/CP850 were table-decoded;
+        // every other DOS single-byte page (CP775/852/855/857/858/860-865/
+        // 869) fell through to GBK. With the `all` known-codepages feature
+        // each page now decodes its own table, so a byte that GBK would
+        // turn into a CJK pair stays a single Latin/Cyrillic character.
+        assert_eq!(decode_with_oem_code_page(775, &[0xA1]), "Ī"); // Baltic
+        assert_eq!(decode_with_oem_code_page(852, &[0xA5]), "ą"); // Central Europe
+        assert_eq!(decode_with_oem_code_page(855, &[0x80]), "ђ"); // Cyrillic IBM
+        assert_eq!(decode_with_oem_code_page(858, &[0xD5]), "€"); // 850 + euro
+        assert_eq!(decode_with_oem_code_page(869, &[0x8F]), "Ή"); // Greek modern
+        // ASCII is invariant across the single-byte DOS pages.
+        assert_eq!(decode_with_oem_code_page(862, b"abc"), "abc");
+    }
 }
