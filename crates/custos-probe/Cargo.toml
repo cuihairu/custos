@@ -29,6 +29,7 @@ redis = { version = "1.8", default-features = false }
 windows-service = "0.8"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Storage_FileSystem",
     "Win32_System_SystemInformation",
 ] }

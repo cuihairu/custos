@@ -301,6 +301,16 @@ pub fn parse_proc_route_default_gateway(table: &str) -> Option<(String, String)>
 /// `route print -4` → default gateway (mask 0.0.0.0).
 pub fn parse_route_print_default_gateway(output: &str) -> Option<String> {
     for line in output.lines() {
+        // Only the Active Routes section carries the *live* default
+        // gateway. `route print -4` keeps a configured default gateway in
+        // the Persistent Routes section even after the NIC drops and the
+        // active table loses it; scanning past the section header would
+        // report that non-active route as Healthy. Stop at the first
+        // line of the Persistent Routes section (openclaw audit
+        // 2026-11-05: full-scan rewrite introduced this leak).
+        if line.contains("Persistent Routes") {
+            break;
+        }
         // Real output interleaves the Interface List, separator rules,
         // section headers and BLANK LINES between the route rows. A line
         // without fields must be skipped, not end the scan — the `?`
@@ -401,6 +411,32 @@ Persistent Routes:
         );
         assert!(parse_route_print_default_gateway("").is_none());
         assert!(parse_route_print_default_gateway("nothing here").is_none());
+    }
+
+    #[test]
+    fn route_print_parser_ignores_persistent_only_default_gateway() {
+        // Active Routes carries no 0.0.0.0/0 row (NIC down, live default
+        // route gone) but Persistent Routes still remembers the configured
+        // gateway. The parser must NOT report that stale route as the
+        // active default gateway.
+        let output = "\
+===========================================================================
+Interface List
+ 12...54 52 00 a1 b2 c3 ......Intel(R) Ethernet Connection I219-LM
+===========================================================================
+
+IPv4 Route Table
+===========================================================================
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+        127.0.0.0        255.0.0.0         On-link         127.0.0.1    331
+===========================================================================
+Persistent Routes:
+  Network Address          Netmask  Gateway Address   Metric
+      0.0.0.0          0.0.0.0    192.168.1.1  Default
+===========================================================================
+";
+        assert_eq!(parse_route_print_default_gateway(output), None);
     }
 
     #[test]

@@ -165,20 +165,64 @@ fn read_capped<R: Read>(pipe: &mut R, max_bytes: usize) -> CappedOutput {
 
 /// Decodes captured command output bytes. Valid UTF-8 passes through
 /// untouched; anything else is decoded with the console OEM code page of
-/// the supported zh-CN Windows deployments (CP936/GBK). The previous
-/// `String::from_utf8_lossy` destroyed every non-ASCII byte of a zh-CN
-/// `route print`/`netsh` output into U+FFFD mush (openclaw audit
-/// 2026-11-05). Pure, so the GBK fixture test runs on every platform.
+/// the host. The previous `String::from_utf8_lossy` destroyed every
+/// non-ASCII byte of a zh-CN `route print`/`netsh` output into U+FFFD
+/// mush (openclaw audit 2026-11-05). Pure, so the fixture test runs on
+/// every platform.
 pub fn decode_console_output(bytes: &[u8]) -> String {
     if let Ok(text) = std::str::from_utf8(bytes) {
         return text.to_owned();
     }
-    // GBK decoding never fails hard: bytes outside the encoding map to
-    // U+FFFD, which matches the old lossy fallback for binary garbage.
-    // BOM handling is off — console output has no BOM, and sniffing one
-    // would silently strip the first bytes of the payload.
-    let (text, _had_errors) = encoding_rs::GBK.decode_without_bom_handling(bytes);
+    // Encoding selection is a heuristic with one inherent ambiguity: a
+    // byte sequence that happens to be valid UTF-8 (e.g. GBK 默 = C4 AC,
+    // which is also U+012C) is decoded as UTF-8 rather than the OEM
+    // code page when the WHOLE payload is valid UTF-8. This is accepted:
+    // it only affects display fidelity of non-ASCII text, never the ASCII
+    // route/NIC parsing, and the old from_utf8_lossy path had the same
+    // UTF-8-first preference. BOM handling is off — console output has no
+    // BOM, and sniffing one would silently strip the first bytes.
+    let encoding = oem_code_page_encoding();
+    // No single-byte/OEM encoding fails hard: bytes outside the map
+    // become U+FFFD, which matches the old lossy fallback for garbage.
+    let (text, _had_errors) = encoding.decode_without_bom_handling(bytes);
     text.into_owned()
+}
+
+/// Maps the host console OEM code page to the encoding_rs encoding used
+/// for non-UTF-8 output. Windows reports it via `GetOEMCP`; other hosts
+/// have no console code page, so GBK is the historical default for the
+/// zh-CN deployments the probe targets.
+fn oem_code_page_encoding() -> &'static encoding_rs::Encoding {
+    #[cfg(windows)]
+    {
+        // SAFETY: GetOEMCP is a plain kernel32 call with no arguments; it
+        // cannot fail and has no precondition on its input.
+        let cp = unsafe { windows_sys::Win32::Globalization::GetOEMCP() };
+        return match cp {
+            932 => encoding_rs::SHIFT_JIS,
+            936 => encoding_rs::GBK,
+            949 => encoding_rs::EUC_KR,
+            950 => encoding_rs::BIG5,
+            866 => encoding_rs::IBM866,
+            874 => encoding_rs::WINDOWS_874,
+            1250 => encoding_rs::WINDOWS_1250,
+            1251 => encoding_rs::WINDOWS_1251,
+            1252 => encoding_rs::WINDOWS_1252,
+            1253 => encoding_rs::WINDOWS_1253,
+            1254 => encoding_rs::WINDOWS_1254,
+            1255 => encoding_rs::WINDOWS_1255,
+            1256 => encoding_rs::WINDOWS_1256,
+            1257 => encoding_rs::WINDOWS_1257,
+            1258 => encoding_rs::WINDOWS_1258,
+            _ => encoding_rs::GBK,
+        };
+    }
+    #[cfg(not(windows))]
+    {
+        // Non-Windows hosts don't run `route print`/`netsh`; keep the
+        // historical zh-CN default so the fixture test stays meaningful.
+        encoding_rs::GBK
+    }
 }
 
 fn join_reader(handle: Option<std::thread::JoinHandle<CappedOutput>>) -> CappedOutput {

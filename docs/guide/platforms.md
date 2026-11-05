@@ -26,7 +26,8 @@ Capabilities to support progressively include:
 - Process detection.
 - Windows Service control.
 - Wi-Fi state detection.
-- Wi-Fi reconnection.
+- Wi-Fi reconnection (built, not yet wired — see Capabilities for the
+  current `unsupported` declaration).
 - Network interface reset.
 - DNS flush.
 - IP configuration checks.

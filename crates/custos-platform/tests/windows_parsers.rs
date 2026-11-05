@@ -4,12 +4,12 @@
 //! (x86_64-pc-windows-gnu) — never guessed on a non-Windows host.
 
 use custos_platform::windows::{
-    capabilities, ipconfig_flushdns_argv, netsh_interface_reset_argv, netsh_wlan_connect_argv,
-    parse_default_gateway, parse_netsh_interfaces, parse_netsh_wlan_state, parse_sc_query,
-    parse_tasklist_csv, route_print_argv, sc_argv, tasklist_argv, tasklist_has_pid,
-    WindowsProcessController,
+    capabilities, has_wifi_adapter, ipconfig_flushdns_argv, netsh_interface_reset_argv,
+    netsh_wlan_connect_argv, parse_default_gateway, parse_netsh_interfaces, parse_netsh_wlan_state,
+    parse_sc_query, parse_tasklist_csv, route_print_argv, sc_argv, tasklist_argv, tasklist_has_pid,
+    NetshNetworkController, WindowsProcessController,
 };
-use custos_platform::{PlatformError, ProcessController};
+use custos_platform::{NetworkInterfaceController, PlatformError, ProcessController};
 
 const TASKLIST_CSV: &str = concat!(
     "\"myapp.exe\",\"4816\",\"Console\",\"1\",\"12,288 K\"\n",
@@ -146,6 +146,19 @@ fn windows_process_controller_refuses_on_linux_without_faking() {
     assert!(!controller.is_alive(1), "never fakes liveness");
 }
 
+#[cfg(not(windows))]
+#[test]
+fn wifi_adapter_probe_and_connect_refuse_on_linux_without_faking() {
+    // The adapter probe and connect path must not guess on non-Windows:
+    // no netsh, so no Wi-Fi adapter and connect is Unsupported.
+    assert!(!has_wifi_adapter(), "no netsh on Linux: no Wi-Fi adapter");
+    let controller = NetshNetworkController;
+    let err = controller
+        .connect_wifi("HomeNet")
+        .expect_err("must refuse on non-Windows");
+    assert!(matches!(err, PlatformError::Unsupported(_)), "{err}");
+}
+
 const ROUTE_PRINT: &str =
     "===========================================================================
 Interface List
@@ -173,17 +186,43 @@ fn route_print_default_gateway_extraction() {
 
 #[test]
 fn capabilities_do_not_claim_unwired_wifi_reconnect() {
-    // §11.1: 不得伪造平台支持. netsh_wlan_connect_argv exists but no
-    // dispatch path runs it and no adapter probe guards the declaration,
-    // so the gate must refuse — with the concrete reason, never a guess.
+    // §11.1: 不得伪造平台支持. On a host with no Wi-Fi adapter the probe
+    // answers false and the gate must refuse with the concrete reason,
+    // never a guess. (On a real Windows host with a radio the probe
+    // answers true and the declaration is native.)
     let set = capabilities();
-    let err = set
-        .require("wifi.reconnect")
-        .expect_err("unwired wifi.reconnect must not be claimed native");
-    assert!(matches!(err, PlatformError::Unsupported(_)), "{err}");
-    let reason = err.to_string();
-    assert!(reason.contains("no Wi-Fi adapter probe"), "{reason}");
+    if has_wifi_adapter() {
+        assert!(
+            set.is_native("wifi.reconnect"),
+            "with a Wi-Fi adapter present the declaration must be native"
+        );
+    } else {
+        let err = set
+            .require("wifi.reconnect")
+            .expect_err("no Wi-Fi adapter: wifi.reconnect must not be claimed native");
+        assert!(matches!(err, PlatformError::Unsupported(_)), "{err}");
+        let reason = err.to_string();
+        assert!(
+            reason.contains("no Wi-Fi adapter detected"),
+            "reason must name the probe outcome, got: {reason}"
+        );
+    }
     // The rest of the set keeps its wired operations.
-    assert!(set.is_native("network.interface.reset"));
-    assert!(set.is_native("dns.flush"));
+    for operation in [
+        "process.detect",
+        "service.status",
+        "service.start",
+        "service.stop",
+        "service.restart",
+        "network.interface.list",
+        "network.interface.reset",
+        "network.connectivity.tcp",
+        "dns.flush",
+        "system.reboot",
+    ] {
+        assert!(
+            set.is_native(operation),
+            "`{operation}` must stay native; refusing wifi.reconnect must not drop wired operations"
+        );
+    }
 }

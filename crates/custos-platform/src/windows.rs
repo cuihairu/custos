@@ -321,10 +321,11 @@ pub fn parse_netsh_wlan_state(output: &str) -> (bool, Option<String>) {
 /// Builds the Wi-Fi reconnect argv for an SSID and profile (pure).
 ///
 /// UNWIRED (openclaw audit 2026-11-05): no dispatch path executes this
-/// argv and nothing probes whether the host even has a Wi-Fi adapter, so
-/// [`capabilities`] declares `wifi.reconnect` as unsupported. Wiring it
-/// takes BOTH an adapter probe (e.g. `netsh wlan show interfaces`) to gate
-/// the declaration and a toolbox/dispatch entry that actually runs it.
+/// argv — the [`NetshNetworkController::connect_wifi`] execution path and
+/// the [`has_wifi_adapter`] adapter probe now wire it, and the static
+/// [`capabilities`] set still lists `wifi.reconnect` as unsupported: the
+/// runtime gate is the adapter probe, not the static declaration (the
+/// static set cannot call the OS at declaration time).
 pub fn netsh_wlan_connect_argv(profile: &str) -> Vec<String> {
     vec![
         "netsh".into(),
@@ -332,6 +333,21 @@ pub fn netsh_wlan_connect_argv(profile: &str) -> Vec<String> {
         "connect".into(),
         format!("name={profile}"),
     ]
+}
+
+/// True when the host has a usable Wi-Fi adapter — probed via
+/// `netsh wlan show interfaces`, never guessed. Windows-only; other
+/// platforms always answer false because netsh does not exist there.
+pub fn has_wifi_adapter() -> bool {
+    #[cfg(windows)]
+    {
+        let argv = ["netsh", "wlan", "show", "interfaces"];
+        matches!(run(&argv), ExecResult::Succeeded { .. })
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
 }
 
 /// Builds the interface reset argv (HIGH RISK: may cut the management
@@ -383,6 +399,26 @@ impl NetworkInterfaceController for NetshNetworkController {
         #[cfg(not(windows))]
         {
             let _ = name;
+            Err(PlatformError::Unsupported(
+                "netsh.exe does not exist on this platform".into(),
+            ))
+        }
+    }
+
+    fn connect_wifi(&self, profile: &str) -> PlatformResult<()> {
+        #[cfg(windows)]
+        {
+            if !has_wifi_adapter() {
+                return Err(PlatformError::Unsupported(
+                    "no Wi-Fi adapter detected via `netsh wlan show interfaces`".into(),
+                ));
+            }
+            let argv = netsh_wlan_connect_argv(profile);
+            expect_success(run(&argv.iter().map(String::as_str).collect::<Vec<_>>()))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = profile;
             Err(PlatformError::Unsupported(
                 "netsh.exe does not exist on this platform".into(),
             ))
@@ -471,9 +507,13 @@ impl RebootController for WindowsRebootController {
 
 /// The Windows adapter's declared support (todo.md 193). Declares only
 /// operations with a real execution path behind them (§11.1: 不得伪造平台
-/// 支持).
+/// 支持). `wifi.reconnect` is declared native only when the runtime
+/// [`has_wifi_adapter`] probe sees a real Wi-Fi adapter AND the
+/// [`NetshNetworkController::connect_wifi`] execution path exists; on a
+/// non-Windows host the probe answers false and the declaration stays
+/// unsupported (never guessed).
 pub fn capabilities() -> PlatformCapabilitySet {
-    PlatformCapabilitySet::new()
+    let mut set = PlatformCapabilitySet::new()
         .native("process.detect")
         .native("service.status")
         .native("service.start")
@@ -481,15 +521,16 @@ pub fn capabilities() -> PlatformCapabilitySet {
         .native("service.restart")
         .native("network.interface.list")
         .native("network.interface.reset")
-        .native("network.connectivity.tcp")
-        // The argv builder exists (netsh_wlan_connect_argv) but no dispatch
-        // path executes it and no adapter probe guards the declaration, so
-        // claiming native support was a false promise. Unwired until both
-        // exist (openclaw audit 2026-11-05; todo.md tracks the gap).
-        .unsupported(
+        .native("network.connectivity.tcp");
+    if has_wifi_adapter() {
+        // Wired: the adapter probe saw a real radio and connect_wifi runs
+        // `netsh wlan connect` behind it (openclaw audit 2026-11-05).
+        set = set.native("wifi.reconnect");
+    } else {
+        set = set.unsupported(
             "wifi.reconnect",
-            "netsh wlan connect is built but no Wi-Fi adapter probe or execution path is wired yet",
-        )
-        .native("dns.flush")
-        .native("system.reboot")
+            "no Wi-Fi adapter detected via `netsh wlan show interfaces`",
+        );
+    }
+    set.native("dns.flush").native("system.reboot")
 }

@@ -202,7 +202,7 @@ fn process(id: &str) -> String {
 pid_file = "/var/run/REPLACE_ME.pid"
 interval_ms = 5000
 timeout_ms = 2000"#,
-        &["process_exited", "probe_timeout"],
+        &["process_exited"],
         r#"# Detached spawn (see examples/basic-process.toml): setsid frees the
 # process group, redirections release the output pipes, and $$ + exec keep
 # the PID stable for the pid file above.
@@ -234,7 +234,6 @@ max_output_bytes = 65536"#,
         &[
             "remote_endpoint_unreachable",
             "probe_timeout",
-            "unknown_failure",
         ],
         r#"program = "sh"
 args = ["-c", "echo 'REPLACE_ME: recovery command'"]"#,
@@ -512,6 +511,10 @@ mod tests {
             text.contains("applicable_faults = [\"process_exited\""),
             "process plans must match the `process_exited` diagnosis, got:\n{text}"
         );
+        assert!(
+            !text.contains("probe_timeout"),
+            "`process` never diagnoses `probe_timeout`, got:\n{text}"
+        );
     }
 
     #[test]
@@ -519,9 +522,13 @@ mod tests {
         let text = generate("custom-command", "check").expect("custom-command template");
         assert!(
             text.contains(
-                "applicable_faults = [\"remote_endpoint_unreachable\", \"probe_timeout\", \"unknown_failure\"]"
+                "applicable_faults = [\"remote_endpoint_unreachable\", \"probe_timeout\"]"
             ),
             "exec-probed plans must match the exec fault mapping, got:\n{text}"
+        );
+        assert!(
+            !text.contains("unknown_failure"),
+            "`custom-command` never diagnoses `unknown_failure`, got:\n{text}"
         );
     }
 

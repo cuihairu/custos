@@ -142,6 +142,77 @@ impl BuiltinTool for InterfaceResetTool {
     }
 }
 
+/// `wifi.reconnect`: connects the Wi-Fi radio to a named profile through
+/// the platform adapter. The adapter itself probes for a wireless adapter
+/// before executing (never guesses), so the static capability set keeps
+/// `wifi.reconnect` as unsupported and this tool supplies the runtime
+/// execution path behind the permission gate.
+pub struct WifiReconnectTool {
+    controller: std::sync::Arc<dyn custos_platform::NetworkInterfaceController>,
+}
+
+impl WifiReconnectTool {
+    pub fn new(
+        controller: std::sync::Arc<dyn custos_platform::NetworkInterfaceController>,
+    ) -> Self {
+        Self { controller }
+    }
+}
+
+impl BuiltinTool for WifiReconnectTool {
+    fn capability(&self) -> Capability {
+        Capability {
+            kind: CapabilityKind::RecoveryActionProvider,
+            operation_id: "wifi.reconnect".into(),
+            summary: "connect the Wi-Fi radio to a named profile".into(),
+            read_only: false,
+            required_permission: "host.network".into(),
+            affected_scope: AffectedScope::NamedResource,
+            interrupts_network: true,
+            interrupts_remote_admin: true,
+            cancelable: false,
+            idempotent: true,
+            verifiable: true,
+            possible_failures: vec![
+                "permission_denied".into(),
+                "unsupported".into(),
+                "profile_not_found".into(),
+            ],
+            compensation_operation: None,
+        }
+    }
+
+    fn execute(&self, params: &OperationParams) -> Result<ToolOutcome, ToolboxError> {
+        let profile = params
+            .args
+            .get("profile")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                ToolboxError::new(
+                    ToolboxErrorKind::InvalidParams,
+                    "`profile` must be a non-empty Wi-Fi profile name",
+                )
+            })?;
+        let _guard = match NETWORK_OPS.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return Err(ToolboxError::new(
+                    ToolboxErrorKind::Failed,
+                    "another network operation is already running; refusing to race it",
+                ))
+            }
+        };
+        self.controller
+            .connect_wifi(profile)
+            .map(|_| ToolOutcome::Action {
+                succeeded: true,
+                detail: format!("wifi profile {profile} connect issued"),
+            })
+            .map_err(|e| ToolboxError::new(ToolboxErrorKind::Failed, e.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,6 +308,16 @@ mod tests {
         assert!(err.message.contains("already running"), "{err}");
         drop(guard);
         // With the mutex free the same call succeeds.
+        struct FastReset;
+        impl custos_platform::NetworkInterfaceController for FastReset {
+            fn list(&self) -> PlatformResult<Vec<custos_platform::InterfaceStatus>> {
+                Ok(vec![])
+            }
+            fn reset(&self, _name: &str) -> PlatformResult<()> {
+                Ok(())
+            }
+        }
+        let tool = InterfaceResetTool::new(std::sync::Arc::new(FastReset));
         let outcome = tool
             .execute(&OperationParams {
                 operation_id: "network.interface.reset".into(),
@@ -276,5 +357,73 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.kind, ToolboxErrorKind::InvalidParams);
         assert_eq!(tool.capability().required_permission, "host.network");
+    }
+
+    #[test]
+    fn wifi_reconnect_requires_a_profile() {
+        struct Noop;
+        impl custos_platform::NetworkInterfaceController for Noop {
+            fn list(&self) -> PlatformResult<Vec<custos_platform::InterfaceStatus>> {
+                Ok(vec![])
+            }
+            fn reset(&self, _name: &str) -> PlatformResult<()> {
+                Ok(())
+            }
+        }
+        let tool = WifiReconnectTool::new(std::sync::Arc::new(Noop));
+        let err = tool
+            .execute(&OperationParams {
+                operation_id: "wifi.reconnect".into(),
+                resource_id: "wan".into(),
+                run_id: None,
+                args: Default::default(),
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, ToolboxErrorKind::InvalidParams);
+        assert_eq!(tool.capability().required_permission, "host.network");
+    }
+
+    #[test]
+    fn wifi_reconnect_declares_network_scope_and_interruptions() {
+        struct Noop;
+        impl custos_platform::NetworkInterfaceController for Noop {
+            fn list(&self) -> PlatformResult<Vec<custos_platform::InterfaceStatus>> {
+                Ok(vec![])
+            }
+            fn reset(&self, _name: &str) -> PlatformResult<()> {
+                Ok(())
+            }
+        }
+        let cap = WifiReconnectTool::new(std::sync::Arc::new(Noop)).capability();
+        assert_eq!(cap.operation_id, "wifi.reconnect");
+        assert!(cap.interrupts_network);
+        assert!(cap.interrupts_remote_admin);
+    }
+
+    #[test]
+    fn wifi_reconnect_unsupported_adapter_is_surfaced() {
+        struct NoWifi;
+        impl custos_platform::NetworkInterfaceController for NoWifi {
+            fn list(&self) -> PlatformResult<Vec<custos_platform::InterfaceStatus>> {
+                Ok(vec![])
+            }
+            fn reset(&self, _name: &str) -> PlatformResult<()> {
+                Ok(())
+            }
+            fn connect_wifi(&self, _profile: &str) -> PlatformResult<()> {
+                Err(PlatformError::Unsupported("no Wi-Fi adapter (test)".into()))
+            }
+        }
+        let tool = WifiReconnectTool::new(std::sync::Arc::new(NoWifi));
+        let err = tool
+            .execute(&OperationParams {
+                operation_id: "wifi.reconnect".into(),
+                resource_id: "wan".into(),
+                run_id: None,
+                args: [("profile".into(), serde_json::json!("HomeNet"))].into(),
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, ToolboxErrorKind::Failed, "{err}");
+        assert!(err.message.contains("no Wi-Fi adapter"), "{err}");
     }
 }

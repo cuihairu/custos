@@ -3,7 +3,7 @@
 //! are described by [`crate::PlatformCapabilitySet`], never faked for the
 //! sake of a unified interface.
 
-use crate::error::PlatformResult;
+use crate::error::{PlatformError, PlatformResult};
 
 /// A live process on this host.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +62,14 @@ pub trait NetworkInterfaceController: Send + Sync {
 
     /// Brings one named interface down and up again (high risk).
     fn reset(&self, name: &str) -> PlatformResult<()>;
+
+    /// Connects the Wi-Fi radio to the named profile (wireless-only).
+    /// Default: unsupported — adapters without a wireless path never guess.
+    fn connect_wifi(&self, _profile: &str) -> PlatformResult<()> {
+        Err(PlatformError::Unsupported(
+            "this network controller has no Wi-Fi connect path".into(),
+        ))
+    }
 }
 
 /// One connectivity target the platform layer can check.
