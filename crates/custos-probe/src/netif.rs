@@ -301,16 +301,30 @@ pub fn parse_proc_route_default_gateway(table: &str) -> Option<(String, String)>
 /// `route print -4` → default gateway (mask 0.0.0.0).
 pub fn parse_route_print_default_gateway(output: &str) -> Option<String> {
     for line in output.lines() {
+        // Real output interleaves the Interface List, separator rules,
+        // section headers and BLANK LINES between the route rows. A line
+        // without fields must be skipped, not end the scan — the `?`
+        // form returned None for the whole output the moment a blank
+        // line appeared (openclaw audit 2026-11-05: probe was always
+        // Unhealthy on Windows). Mirrors the platform-side
+        // parse_default_gateway in custos-platform/src/windows.rs.
         let mut fields = line.split_whitespace();
-        let destination = fields.next()?;
+        let Some(destination) = fields.next() else {
+            continue;
+        };
         if destination != "0.0.0.0" {
             continue;
         }
-        if fields.next()? != "0.0.0.0" {
+        let Some(mask) = fields.next() else {
+            continue;
+        };
+        if mask != "0.0.0.0" {
             continue;
         }
-        let gateway = fields.next()?;
-        if gateway != "On-link" && !gateway.is_empty() {
+        let Some(gateway) = fields.next() else {
+            continue;
+        };
+        if gateway != "On-link" {
             return Some(gateway.to_owned());
         }
     }
@@ -356,14 +370,36 @@ enp3s0\t0001A8C0\t00000000\t0001\t0\t0\t100\tFFFFFF00\t0\t0\t0
 
     #[test]
     fn route_print_parser_fixture() {
+        // Verbatim shape of a real `route print -4` (Windows Server 2022):
+        // Interface List, a BLANK line, section headers, then Active Routes
+        // carrying TWO 0.0.0.0/0 rows — the metric-worse On-link row must
+        // be skipped in favour of the real gateway, and the blank line and
+        // headers must not abort the scan.
         let output = "\
+===========================================================================
+Interface List
+ 12...54 52 00 a1 b2 c3 ......Intel(R) Ethernet Connection I219-LM
+  1...................Loopback Pseudo-Interface 1
+===========================================================================
+
+IPv4 Route Table
+===========================================================================
+Active Routes:
 Network Destination        Netmask          Gateway       Interface  Metric
-          0.0.0.0          0.0.0.0    192.168.1.1    192.168.1.42     25
+          0.0.0.0          0.0.0.0         On-link     192.168.1.42    281
+          0.0.0.0          0.0.0.0    192.168.1.1      192.168.1.42     25
+        127.0.0.0        255.0.0.0         On-link         127.0.0.1    331
+===========================================================================
+Persistent Routes:
+  Network Address          Netmask  Gateway Address   Metric
+      0.0.0.0          0.0.0.0    192.168.1.1  Default
+===========================================================================
 ";
         assert_eq!(
             parse_route_print_default_gateway(output).as_deref(),
             Some("192.168.1.1")
         );
+        assert!(parse_route_print_default_gateway("").is_none());
         assert!(parse_route_print_default_gateway("nothing here").is_none());
     }
 
