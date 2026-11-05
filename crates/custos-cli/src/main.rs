@@ -3,7 +3,10 @@
 //!
 //! P0 commands: `validate` (startup gate incl. dependency cycles), `start`
 //! (run the engine loop), `status` (store counters + recent audit), and
-//! `resources`/`graph` for configuration introspection.
+//! `resources`/`graph` for configuration introspection. `init` scaffolds a
+//! complete configuration for a resource type (src/init.rs).
+
+mod init;
 
 use custos_config::ValidatedConfig;
 use custos_core::Assembled;
@@ -20,6 +23,10 @@ COMMANDS:
     validate <CONFIG>          Parse and validate a configuration file
                                (rejects duplicate IDs, dangling references
                                and dependency cycles before startup)
+    init <TYPE> --id <ID> [--out PATH] [--force]
+                               Scaffold a complete configuration template for
+                               a resource type (placeholder values; see
+                               docs/guide/resources.md §3.1)
     start <CONFIG> [OPTIONS]   Run the engine loop
         --db PATH              Database file (default: custos.db)
         --interval MS          Tick interval override (default: 5s)
@@ -42,6 +49,7 @@ fn main() -> ExitCode {
             Some(path) => validate(path),
             None => missing_arg("validate", "CONFIG"),
         },
+        Some("init") => init::run(&args[1..], USAGE),
         Some("start") => match args.get(1) {
             Some(path) => start(path, &args[2..]),
             None => missing_arg("start", "CONFIG"),

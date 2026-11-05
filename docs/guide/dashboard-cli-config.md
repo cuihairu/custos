@@ -30,6 +30,9 @@ The CLI is the P0/P1 operating surface (implemented):
 
 ```text
 custos validate <CONFIG>           Parse and validate the configuration (rejects duplicate IDs, dangling references, cycles)
+custos init <TYPE> --id <ID> [--out PATH] [--force]
+                                   Scaffold a complete configuration template for a resource type
+                                   (placeholder values; edit before use, then validate)
 custos start <CONFIG> [OPTIONS]    Run the engine loop (--db PATH, --interval MS, --once)
 custos status [--db PATH]          Store counters and recent audit events
 custos runs [--db PATH]            Recent recovery runs (newest first)
