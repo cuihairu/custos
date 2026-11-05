@@ -231,10 +231,7 @@ fn custom_command(id: &str) -> String {
 command = ["REPLACE_ME-check-command", "--arg"]
 timeout_ms = 3000
 max_output_bytes = 65536"#,
-        &[
-            "remote_endpoint_unreachable",
-            "probe_timeout",
-        ],
+        &["remote_endpoint_unreachable", "probe_timeout"],
         r#"program = "sh"
 args = ["-c", "echo 'REPLACE_ME: recovery command'"]"#,
     )
