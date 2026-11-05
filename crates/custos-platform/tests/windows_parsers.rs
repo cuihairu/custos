@@ -213,7 +213,9 @@ There is 1 wireless interface on the system
         "empty Name value is not an adapter"
     );
     // Localized Name labels still prove the radio exists.
-    for label in ["名前", "Nom", "이름", "Имя", "Nombre", "Nome", "Nazwa", "Naam", "Ad"] {
+    for label in [
+        "名前", "Nom", "이름", "Имя", "Nombre", "Nome", "Nazwa", "Naam", "Ad",
+    ] {
         let localized = format!("    {label} : Wi-Fi\n");
         assert!(
             netsh_wlan_reports_adapter(&localized),
@@ -264,7 +266,10 @@ Active Routes:
 Persistent Routes:
       0.0.0.0          0.0.0.0    192.168.9.9  Default
 ";
-    assert_eq!(parse_default_gateway(active_route).as_deref(), Some("192.168.1.1"));
+    assert_eq!(
+        parse_default_gateway(active_route).as_deref(),
+        Some("192.168.1.1")
+    );
 }
 
 #[test]

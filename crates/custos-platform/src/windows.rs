@@ -396,8 +396,18 @@ fn is_no_wlan_marker(line: &str) -> bool {
 fn is_wlan_name_label(label: &str) -> bool {
     matches!(
         label,
-        "Name" | "名称" | "名前" | "Nom" | "이름" | "Имя" | "Nombre" | "Nome" | "Nazwa"
-            | "Naam" | "Ad" | "Název"
+        "Name"
+            | "名称"
+            | "名前"
+            | "Nom"
+            | "이름"
+            | "Имя"
+            | "Nombre"
+            | "Nome"
+            | "Nazwa"
+            | "Naam"
+            | "Ad"
+            | "Název"
     )
 }
 

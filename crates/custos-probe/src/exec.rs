@@ -474,7 +474,7 @@ mod tests {
         assert_eq!(decode_with_oem_code_page(855, &[0x80]), "ђ"); // Cyrillic IBM
         assert_eq!(decode_with_oem_code_page(858, &[0xD5]), "€"); // 850 + euro
         assert_eq!(decode_with_oem_code_page(869, &[0x8F]), "Ή"); // Greek modern
-        // ASCII is invariant across the single-byte DOS pages.
+                                                                  // ASCII is invariant across the single-byte DOS pages.
         assert_eq!(decode_with_oem_code_page(862, b"abc"), "abc");
     }
 }
