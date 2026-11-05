@@ -96,7 +96,11 @@ impl ToolRegistry {
     }
 
     /// Registers the core's built-in executors (ADR-0015): controlled
-    /// command execution and process status today.
+    /// command execution, process status, and the platform tools (reboot,
+    /// interface reset, Wi-Fi reconnect). Every operation with a real
+    /// platform adapter behind it must be in this table, otherwise the
+    /// permission-gated dispatch path cannot reach it (openclaw audit
+    /// 2026-11-05: `WifiReconnectTool` was built but never registered).
     pub fn with_builtin_tools() -> Self {
         let mut registry = Self::new();
         registry
@@ -104,6 +108,21 @@ impl ToolRegistry {
             .expect("builtin operation ids are unique");
         registry
             .register_builtin(Box::new(crate::process_tool::ProcessStatusTool::new()))
+            .expect("builtin operation ids are unique");
+        registry
+            .register_builtin(Box::new(crate::platform_tools::RebootTool::new(
+                custos_platform::default_reboot_controller(),
+            )))
+            .expect("builtin operation ids are unique");
+        registry
+            .register_builtin(Box::new(crate::platform_tools::InterfaceResetTool::new(
+                custos_platform::default_network_controller(),
+            )))
+            .expect("builtin operation ids are unique");
+        registry
+            .register_builtin(Box::new(crate::platform_tools::WifiReconnectTool::new(
+                custos_platform::default_network_controller(),
+            )))
             .expect("builtin operation ids are unique");
         registry
     }
@@ -330,5 +349,28 @@ mod tests {
         let err = registry.dispatch(&|_| true, &params("nope")).unwrap_err();
         assert_eq!(err.kind, ToolboxErrorKind::UnknownOperation);
         assert!(err.message.contains("nope"), "{err}");
+    }
+
+    #[test]
+    fn default_registry_wires_the_wifi_reconnect_tool() {
+        // openclaw audit 2026-11-05: `WifiReconnectTool` was built but the
+        // default registry never registered it, so `wifi.reconnect` could
+        // never be dispatched. The default table must serve every built-in
+        // operation with a real platform adapter.
+        let registry = ToolRegistry::with_builtin_tools();
+        assert!(registry.knows("wifi.reconnect"), "wifi.reconnect wired");
+        assert!(
+            registry.knows("network.interface.reset"),
+            "interface reset wired"
+        );
+        assert!(registry.knows("system.reboot"), "reboot wired");
+        // The capability surface matches: wifi.reconnect is a recovery
+        // action provider behind host.network.
+        let caps = registry.capabilities();
+        let wifi = caps
+            .iter()
+            .find(|c| c.operation_id == "wifi.reconnect")
+            .expect("wifi.reconnect capability present");
+        assert_eq!(wifi.required_permission, "host.network");
     }
 }

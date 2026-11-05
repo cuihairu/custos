@@ -31,6 +31,59 @@ pub use controller::{
 };
 pub use error::{PlatformError, PlatformResult};
 
+/// The default reboot controller for THIS host (todo.md 208 重启矩阵).
+/// The returned adapter refuses `reboot` with a concrete reason on hosts
+/// without a wired implementation; authorization still lives in toolbox
+/// dispatch (ADR-0012), never in the adapter.
+pub fn default_reboot_controller() -> std::sync::Arc<dyn RebootController> {
+    #[cfg(windows)]
+    {
+        std::sync::Arc::new(windows::WindowsRebootController)
+    }
+    #[cfg(not(windows))]
+    {
+        std::sync::Arc::new(linux::LinuxRebootController::detect())
+    }
+}
+
+/// The default network interface controller for THIS host (todo.md 209
+/// 网络控制矩阵). On Windows the `netsh` adapter; on Unix the sysfs/proc
+/// controller; macOS has no adapter yet, so it answers `Unsupported` for
+/// every operation (绝不误执行). The toolbox registers its built-in
+/// platform tools with this controller so the permission-gated dispatch
+/// path runs the real adapter rather than nothing.
+pub fn default_network_controller() -> std::sync::Arc<dyn NetworkInterfaceController> {
+    #[cfg(windows)]
+    {
+        std::sync::Arc::new(windows::NetshNetworkController)
+    }
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        std::sync::Arc::new(linux::SysnetInterfaceController)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::sync::Arc::new(MacosNetworkController)
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct MacosNetworkController;
+
+#[cfg(target_os = "macos")]
+impl NetworkInterfaceController for MacosNetworkController {
+    fn list(&self) -> PlatformResult<Vec<InterfaceStatus>> {
+        Err(PlatformError::Unsupported(
+            "no macOS network adapter is implemented yet".into(),
+        ))
+    }
+    fn reset(&self, _name: &str) -> PlatformResult<()> {
+        Err(PlatformError::Unsupported(
+            "no macOS network adapter is implemented yet".into(),
+        ))
+    }
+}
+
 /// Placeholder retained for compatibility; the adapters have landed.
 pub fn not_yet_implemented() -> &'static str {
     "custos-platform: platform adapters are planned for P2 (docs/guide/roadmap.md)"
