@@ -4,7 +4,7 @@
 //! (x86_64-pc-windows-gnu) — never guessed on a non-Windows host.
 
 use custos_platform::windows::{
-    ipconfig_flushdns_argv, netsh_interface_reset_argv, netsh_wlan_connect_argv,
+    capabilities, ipconfig_flushdns_argv, netsh_interface_reset_argv, netsh_wlan_connect_argv,
     parse_default_gateway, parse_netsh_interfaces, parse_netsh_wlan_state, parse_sc_query,
     parse_tasklist_csv, route_print_argv, sc_argv, tasklist_argv, tasklist_has_pid,
     WindowsProcessController,
@@ -169,4 +169,21 @@ fn route_print_default_gateway_extraction() {
     );
     assert_eq!(parse_default_gateway("no routes here"), None);
     assert_eq!(route_print_argv(), vec!["route", "print", "-4"]);
+}
+
+#[test]
+fn capabilities_do_not_claim_unwired_wifi_reconnect() {
+    // §11.1: 不得伪造平台支持. netsh_wlan_connect_argv exists but no
+    // dispatch path runs it and no adapter probe guards the declaration,
+    // so the gate must refuse — with the concrete reason, never a guess.
+    let set = capabilities();
+    let err = set
+        .require("wifi.reconnect")
+        .expect_err("unwired wifi.reconnect must not be claimed native");
+    assert!(matches!(err, PlatformError::Unsupported(_)), "{err}");
+    let reason = err.to_string();
+    assert!(reason.contains("no Wi-Fi adapter probe"), "{reason}");
+    // The rest of the set keeps its wired operations.
+    assert!(set.is_native("network.interface.reset"));
+    assert!(set.is_native("dns.flush"));
 }

@@ -319,6 +319,12 @@ pub fn parse_netsh_wlan_state(output: &str) -> (bool, Option<String>) {
 }
 
 /// Builds the Wi-Fi reconnect argv for an SSID and profile (pure).
+///
+/// UNWIRED (openclaw audit 2026-11-05): no dispatch path executes this
+/// argv and nothing probes whether the host even has a Wi-Fi adapter, so
+/// [`capabilities`] declares `wifi.reconnect` as unsupported. Wiring it
+/// takes BOTH an adapter probe (e.g. `netsh wlan show interfaces`) to gate
+/// the declaration and a toolbox/dispatch entry that actually runs it.
 pub fn netsh_wlan_connect_argv(profile: &str) -> Vec<String> {
     vec![
         "netsh".into(),
@@ -463,7 +469,9 @@ impl RebootController for WindowsRebootController {
     }
 }
 
-/// The Windows adapter's declared support (todo.md 193).
+/// The Windows adapter's declared support (todo.md 193). Declares only
+/// operations with a real execution path behind them (§11.1: 不得伪造平台
+/// 支持).
 pub fn capabilities() -> PlatformCapabilitySet {
     PlatformCapabilitySet::new()
         .native("process.detect")
@@ -474,7 +482,14 @@ pub fn capabilities() -> PlatformCapabilitySet {
         .native("network.interface.list")
         .native("network.interface.reset")
         .native("network.connectivity.tcp")
-        .native("wifi.reconnect")
+        // The argv builder exists (netsh_wlan_connect_argv) but no dispatch
+        // path executes it and no adapter probe guards the declaration, so
+        // claiming native support was a false promise. Unwired until both
+        // exist (openclaw audit 2026-11-05; todo.md tracks the gap).
+        .unsupported(
+            "wifi.reconnect",
+            "netsh wlan connect is built but no Wi-Fi adapter probe or execution path is wired yet",
+        )
         .native("dns.flush")
         .native("system.reboot")
 }
