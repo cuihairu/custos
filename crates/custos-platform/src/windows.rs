@@ -335,14 +335,44 @@ pub fn netsh_wlan_connect_argv(profile: &str) -> Vec<String> {
     ]
 }
 
+/// Detects a usable wireless adapter in `netsh wlan show interfaces`
+/// output. The command exits 0 BOTH when an adapter exists and when the
+/// system reports "There is no wireless interface on the system." — the
+/// exit status alone is not evidence of a radio (openclaw audit
+/// 2026-11-05). Pure, fixture-testable on every platform.
+pub fn netsh_wlan_reports_adapter(output: &str) -> bool {
+    for line in output.lines() {
+        let line = line.trim();
+        // Localized "no wireless interface" markers (en / zh-CN).
+        if line.to_lowercase().contains("no wireless interface") || line.contains("没有无线接口")
+        {
+            return false;
+        }
+        // An interface block carries a `Name : <value>` field.
+        if let Some((label, value)) = line.split_once(':') {
+            let label = label.trim();
+            if (label.eq_ignore_ascii_case("Name") || label.starts_with("名称"))
+                && !value.trim().is_empty()
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// True when the host has a usable Wi-Fi adapter — probed via
-/// `netsh wlan show interfaces`, never guessed. Windows-only; other
-/// platforms always answer false because netsh does not exist there.
+/// `netsh wlan show interfaces` and confirmed by the interface list, never
+/// guessed. Windows-only; other platforms always answer false because
+/// netsh does not exist there.
 pub fn has_wifi_adapter() -> bool {
     #[cfg(windows)]
     {
         let argv = ["netsh", "wlan", "show", "interfaces"];
-        matches!(run(&argv), ExecResult::Succeeded { .. })
+        match run(&argv) {
+            ExecResult::Succeeded { stdout, .. } => netsh_wlan_reports_adapter(&stdout),
+            _ => false,
+        }
     }
     #[cfg(not(windows))]
     {

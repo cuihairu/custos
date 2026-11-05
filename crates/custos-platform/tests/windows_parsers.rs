@@ -5,9 +5,10 @@
 
 use custos_platform::windows::{
     capabilities, has_wifi_adapter, ipconfig_flushdns_argv, netsh_interface_reset_argv,
-    netsh_wlan_connect_argv, parse_default_gateway, parse_netsh_interfaces, parse_netsh_wlan_state,
-    parse_sc_query, parse_tasklist_csv, route_print_argv, sc_argv, tasklist_argv, tasklist_has_pid,
-    NetshNetworkController, WindowsProcessController,
+    netsh_wlan_connect_argv, netsh_wlan_reports_adapter, parse_default_gateway,
+    parse_netsh_interfaces, parse_netsh_wlan_state, parse_sc_query, parse_tasklist_csv,
+    route_print_argv, sc_argv, tasklist_argv, tasklist_has_pid, NetshNetworkController,
+    WindowsProcessController,
 };
 use custos_platform::{NetworkInterfaceController, PlatformError, ProcessController};
 
@@ -157,6 +158,41 @@ fn wifi_adapter_probe_and_connect_refuse_on_linux_without_faking() {
         .connect_wifi("HomeNet")
         .expect_err("must refuse on non-Windows");
     assert!(matches!(err, PlatformError::Unsupported(_)), "{err}");
+}
+
+#[test]
+fn wifi_adapter_probe_requires_an_interface_list_not_just_exit_status() {
+    // openclaw audit 2026-11-05: `netsh wlan show interfaces` exits 0 even
+    // when the host has NO wireless adapter (it prints a "no wireless
+    // interface" notice). The probe must inspect the reported interface
+    // list, not trust the exit code.
+    assert!(!netsh_wlan_reports_adapter(""), "empty output: no adapter");
+    assert!(
+        !netsh_wlan_reports_adapter("There is no wireless interface on the system."),
+        "en localized no-adapter notice"
+    );
+    assert!(
+        !netsh_wlan_reports_adapter("系统上没有无线接口。"),
+        "zh-CN localized no-adapter notice"
+    );
+    let with_adapter = "\
+There is 1 wireless interface on the system
+
+    Name                   : Wi-Fi
+    Description            : Intel(R) Wi-Fi 6 AX201
+    GUID                   : 12345678-1234-1234-1234-123456789abc
+    State                  : connected
+";
+    assert!(
+        netsh_wlan_reports_adapter(with_adapter),
+        "a Name field proves the radio exists"
+    );
+    // A header-like line mentioning "Name" without an interface block is
+    // not an adapter.
+    assert!(
+        !netsh_wlan_reports_adapter("Name                    :"),
+        "empty Name value is not an adapter"
+    );
 }
 
 const ROUTE_PRINT: &str =
