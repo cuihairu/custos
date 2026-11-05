@@ -373,3 +373,13 @@
 ## 审核发现 2026-11-04（ddd2267b..HEAD，只审不改）
 
 - [x] 审核发现：本轮 diff 未见问题（ddd2267b..HEAD）→ 属实（独立复核 `ddd2267b..HEAD`（`297866f`+`6ce4237`）：deferred-warning 经 `with_default` 路由到所选 writer、curl 守卫、`assert_not_grep` 调用、`ASSERT_COUNT` 动态计数均与描述一致，无新增问题；`cargo test -p custos-tray` 28 全绿 + `cargo test --workspace` 508 全绿 + `bash scripts/generate-config-effects.sh` 9/9 断言绿）
+- [x] 审核发现：新增的内容宽度规则被 VitePress 默认主题带 scoped 属性的同名选择器覆盖，含侧栏目录的页面仍受 43rem 限制，未实现预期的 960px 内容宽度（docs/.vitepress/theme/custom.css:12） → 属实但已修复（3b70052b 时点属实：custom.css 的 `.VPDoc.has-aside .content-container`（特异度 0-2-0）无 `!important`，被 VPDoc.vue scoped 后的 `.VPDoc.has-aside .content-container[data-v-…]`（0-3-0）`max-width: 43rem` 覆盖；`1e68d34` 已为三条宽度规则补 `!important`。HEAD 实测：`pnpm docs:build` 后 preview 实测 has-aside 页 `/custos/guide/overview.html`，`.VPDoc.has-aside .content-container` computed max-width = `960px`，43rem 规则不再生效） `1e68d34`
+- [x] 审核发现：本轮 diff 未见问题（3b70052b..HEAD）→ 属实（独立复核 `3b70052b..1e68d34`（本轮审核时点的 HEAD）：纯 docs 改动——markdown 长行解包 + custom.css 三条 960px 宽度规则补 `!important`，无代码路径变更；docs 站 `pnpm docs:build` 绿）
+
+## 审核发现 2026-11-05（openclaw 只读侦察，逐项修复）
+
+- [x] 网关解析空行 bug：`parse_route_print_default_gateway` 对每行用 `fields.next()?`，真实 `route print -4` 输出 Interface List 段后的空行导致整体返回 None，Windows 默认网关探针恒 Unhealthy → 属实（`8b2469a`：改 let-else `continue` 跳过无字段行/表头，镜像 windows.rs `parse_default_gateway`；fixture 换真实格式——Interface List + 空行 + 双默认路由（含 On-link 行）+ Persistent Routes，`cargo test -p custos-probe netif` 7 绿）
+- [x] CP936 解码 bug：`read_capped` 用 `String::from_utf8_lossy`，zh-CN Windows 控制台 GBK（OEM 代码页 CP936）输出的非 ASCII 字节全变 U+FFFD → 属实（`e6c1944`：新增 `decode_console_output`——有效 UTF-8 原样通过，否则 encoding_rs GBK 解码（关 BOM 嗅探，防 UTF-16LE BOM 吃掉首字节）；GBK fixture 测试 `output_decoding_prefers_utf8_then_gbk` 覆盖 UTF-8 直通/GBK 解码/混合行/非法字节降级）
+- [x] wifi.reconnect 虚假声明：`capabilities()` 无条件 `.native("wifi.reconnect")`，但 `netsh_wlan_connect_argv` 全仓无执行路径、无适配器探测 → 属实（`df76651`：改 `.unsupported("wifi.reconnect", "netsh wlan connect is built but no Wi-Fi adapter probe or execution path is wired yet")`，argv builder 文档标注 UNWIRED，新增测试 `capabilities_do_not_claim_unwired_wifi_reconnect` 断言门拒并带具体理由）
+- [ ] wifi.reconnect 接线缺口（后续工作）：补齐需 ① 适配器探测（如 `netsh wlan show interfaces`）守卫能力声明 + ② toolbox/dispatch 执行路径真正运行 `netsh wlan connect name=<profile>`，二者齐备后方可改回 `.native`
+
