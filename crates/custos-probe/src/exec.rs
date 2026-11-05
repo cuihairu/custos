@@ -160,7 +160,25 @@ fn read_capped<R: Read>(pipe: &mut R, max_bytes: usize) -> CappedOutput {
             }
         }
     }
-    (String::from_utf8_lossy(&kept).into_owned(), truncated)
+    (decode_console_output(&kept), truncated)
+}
+
+/// Decodes captured command output bytes. Valid UTF-8 passes through
+/// untouched; anything else is decoded with the console OEM code page of
+/// the supported zh-CN Windows deployments (CP936/GBK). The previous
+/// `String::from_utf8_lossy` destroyed every non-ASCII byte of a zh-CN
+/// `route print`/`netsh` output into U+FFFD mush (openclaw audit
+/// 2026-11-05). Pure, so the GBK fixture test runs on every platform.
+pub fn decode_console_output(bytes: &[u8]) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_owned();
+    }
+    // GBK decoding never fails hard: bytes outside the encoding map to
+    // U+FFFD, which matches the old lossy fallback for binary garbage.
+    // BOM handling is off — console output has no BOM, and sniffing one
+    // would silently strip the first bytes of the payload.
+    let (text, _had_errors) = encoding_rs::GBK.decode_without_bom_handling(bytes);
+    text.into_owned()
 }
 
 fn join_reader(handle: Option<std::thread::JoinHandle<CappedOutput>>) -> CappedOutput {
@@ -334,5 +352,26 @@ mod tests {
             64,
         );
         assert!(matches!(result, ExecResult::StartFailed(_)));
+    }
+
+    #[test]
+    fn output_decoding_prefers_utf8_then_gbk() {
+        // Valid UTF-8 passes through byte-for-byte.
+        assert_eq!(
+            decode_console_output("网关 192.168.1.1".as_bytes()),
+            "网关 192.168.1.1"
+        );
+        // zh-CN OEM code page (CP936): "默认网关" as GBK bytes. The old
+        // from_utf8_lossy path turned each of these bytes into U+FFFD
+        // replacement mush.
+        let gbk = [0xC4u8, 0xAC, 0xC8, 0xCF, 0xCD, 0xF8, 0xB9, 0xD8];
+        assert_eq!(decode_console_output(&gbk), "默认网关");
+        // Mixed GBK payload + ASCII, e.g. a netsh state line.
+        let mut netsh = b"State: ".to_vec();
+        netsh.extend([0xD2, 0xD1, 0xC1, 0xAC, 0xBD, 0xD3]); // 已连接
+        assert_eq!(decode_console_output(&netsh), "State: 已连接");
+        // Bytes invalid in both UTF-8 and GBK still degrade to U+FFFD
+        // rather than panicking.
+        assert_eq!(decode_console_output(&[0xFF, 0xFE]), "\u{FFFD}\u{FFFD}");
     }
 }
