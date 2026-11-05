@@ -308,7 +308,7 @@ pub fn parse_route_print_default_gateway(output: &str) -> Option<String> {
         // report that non-active route as Healthy. Stop at the first
         // line of the Persistent Routes section (openclaw audit
         // 2026-11-05: full-scan rewrite introduced this leak).
-        if line.contains("Persistent Routes") {
+        if is_persistent_routes_header(line) {
             break;
         }
         // Real output interleaves the Interface List, separator rules,
@@ -339,6 +339,31 @@ pub fn parse_route_print_default_gateway(output: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// True when `line` is the header of the Persistent Routes section in a
+/// localized `route print -4` output. `route` localizes this header on
+/// non-English Windows (e.g. zh-CN prints 「持久路由:」), and only
+/// recognizing the English title let the scan run through the persistent
+/// block and report a stale default gateway as Healthy (openclaw audit
+/// 2026-11-05). Matches the trailing colon because `route` always appends
+/// one, so a data row containing e.g. "持久路由" as a column value cannot
+/// be mistaken for the header. Pure, fixture-testable.
+fn is_persistent_routes_header(line: &str) -> bool {
+    let trimmed = line.trim();
+    let without_colon = trimmed.strip_suffix(':').unwrap_or(trimmed);
+    matches!(
+        without_colon.trim(),
+        // English (en-US) and the major localized titles.
+        "Persistent Routes"
+            | "持久路由"
+            | "永続ルート"
+            | "영구 경로"
+            | "Persistente Routen"
+            | "Itinéraires persistants"
+            | "Rutas persistentes"
+            | "Постоянные маршруты"
+    )
 }
 
 #[cfg(test)]
@@ -437,6 +462,50 @@ Persistent Routes:
 ===========================================================================
 ";
         assert_eq!(parse_route_print_default_gateway(output), None);
+    }
+
+    #[test]
+    fn route_print_parser_stops_at_localized_persistent_headers() {
+        // openclaw audit 2026-11-05: non-English Windows localizes the
+        // section title (zh-CN prints 「持久路由:」), and only matching the
+        // English "Persistent Routes" let the scan run through the
+        // persistent block and report a stale gateway as Healthy.
+        for header in [
+            "Persistent Routes:",
+            "持久路由:",
+            "永続ルート:",
+            "영구 경로:",
+            "Persistente Routen:",
+            "Itinéraires persistants:",
+            "Rutas persistentes:",
+            "Постоянные маршруты:",
+        ] {
+            let output = format!(
+                "\
+Active Routes:
+        127.0.0.0        255.0.0.0         On-link         127.0.0.1    331
+{header}
+      0.0.0.0          0.0.0.0    192.168.1.1  Default
+"
+            );
+            assert_eq!(
+                parse_route_print_default_gateway(&output),
+                None,
+                "localized header must stop the scan: {header}"
+            );
+        }
+        // Active-only output still parses under a localized marker.
+        let zh_active = "\
+Active Routes:
+          0.0.0.0          0.0.0.0    192.168.1.1      192.168.1.42     25
+持久路由:
+      0.0.0.0          0.0.0.0    192.168.9.9  Default
+";
+        assert_eq!(
+            parse_route_print_default_gateway(zh_active).as_deref(),
+            Some("192.168.1.1"),
+            "the active gateway is reported, the persistent one skipped"
+        );
     }
 
     #[test]
