@@ -24,6 +24,7 @@ postgres = { version = "0.19", default-features = false }
 mysql = { version = "28", default-features = false }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 redis = { version = "1.8", default-features = false }
+known-codepages = { version = "0.0.4", default-features = false, features = ["cp850", "std"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8"

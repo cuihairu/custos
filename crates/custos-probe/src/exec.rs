@@ -181,47 +181,71 @@ pub fn decode_console_output(bytes: &[u8]) -> String {
     // route/NIC parsing, and the old from_utf8_lossy path had the same
     // UTF-8-first preference. BOM handling is off — console output has no
     // BOM, and sniffing one would silently strip the first bytes.
-    let encoding = oem_code_page_encoding();
-    // No single-byte/OEM encoding fails hard: bytes outside the map
-    // become U+FFFD, which matches the old lossy fallback for garbage.
-    let (text, _had_errors) = encoding.decode_without_bom_handling(bytes);
-    text.into_owned()
+    decode_with_oem_code_page(oem_code_page(), bytes)
 }
 
-/// Maps the host console OEM code page to the encoding_rs encoding used
-/// for non-UTF-8 output. Windows reports it via `GetOEMCP`; other hosts
-/// have no console code page, so GBK is the historical default for the
-/// zh-CN deployments the probe targets.
-fn oem_code_page_encoding() -> &'static encoding_rs::Encoding {
+/// The host console OEM code page. Windows reports it via `GetOEMCP`;
+/// other hosts have no console code page, so GBK (936) is the historical
+/// default for the zh-CN deployments the probe targets.
+fn oem_code_page() -> u16 {
     #[cfg(windows)]
     {
         // SAFETY: GetOEMCP is a plain kernel32 call with no arguments; it
         // cannot fail and has no precondition on its input.
-        let cp = unsafe { windows_sys::Win32::Globalization::GetOEMCP() };
-        return match cp {
-            932 => encoding_rs::SHIFT_JIS,
-            936 => encoding_rs::GBK,
-            949 => encoding_rs::EUC_KR,
-            950 => encoding_rs::BIG5,
-            866 => encoding_rs::IBM866,
-            874 => encoding_rs::WINDOWS_874,
-            1250 => encoding_rs::WINDOWS_1250,
-            1251 => encoding_rs::WINDOWS_1251,
-            1252 => encoding_rs::WINDOWS_1252,
-            1253 => encoding_rs::WINDOWS_1253,
-            1254 => encoding_rs::WINDOWS_1254,
-            1255 => encoding_rs::WINDOWS_1255,
-            1256 => encoding_rs::WINDOWS_1256,
-            1257 => encoding_rs::WINDOWS_1257,
-            1258 => encoding_rs::WINDOWS_1258,
-            _ => encoding_rs::GBK,
-        };
+        unsafe { windows_sys::Win32::Globalization::GetOEMCP() as u16 }
     }
     #[cfg(not(windows))]
     {
         // Non-Windows hosts don't run `route print`/`netsh`; keep the
         // historical zh-CN default so the fixture test stays meaningful.
-        encoding_rs::GBK
+        936
+    }
+}
+
+/// Decodes non-UTF-8 output with the given Windows OEM code page. The
+/// common single-byte DOS pages 437 and 850 use the table-driven
+/// `known_codepages` decoder; every other page falls through to the
+/// matching `encoding_rs` single-byte/DBCS encoding. No page fails hard:
+/// bytes outside the map become U+FFFD, matching the old lossy fallback
+/// for garbage. Pure, so it is tested on every platform with a code page
+/// argument rather than only where `GetOEMCP` runs.
+fn decode_with_oem_code_page(cp: u16, bytes: &[u8]) -> String {
+    let page = known_codepages::CodePage::from_number(cp);
+    if let Some(page) = page {
+        let mut out = String::with_capacity(bytes.len());
+        for &byte in bytes {
+            out.push(page.decode(byte).unwrap_or('\u{FFFD}'));
+        }
+        return out;
+    }
+    // No single-byte/OEM encoding fails hard: bytes outside the map
+    // become U+FFFD, which matches the old lossy fallback for garbage.
+    let (text, _had_errors) = encoding_for_oem_code_page(cp).decode_without_bom_handling(bytes);
+    text.into_owned()
+}
+
+/// Maps a Windows OEM code page to the `encoding_rs` encoding used for
+/// non-UTF-8 output. Pages 437 and 850 are handled by
+/// `decode_with_oem_code_page` before this is reached; unknown pages fall
+/// back to GBK (the historical zh-CN default).
+fn encoding_for_oem_code_page(cp: u16) -> &'static encoding_rs::Encoding {
+    match cp {
+        932 => encoding_rs::SHIFT_JIS,
+        936 => encoding_rs::GBK,
+        949 => encoding_rs::EUC_KR,
+        950 => encoding_rs::BIG5,
+        866 => encoding_rs::IBM866,
+        874 => encoding_rs::WINDOWS_874,
+        1250 => encoding_rs::WINDOWS_1250,
+        1251 => encoding_rs::WINDOWS_1251,
+        1252 => encoding_rs::WINDOWS_1252,
+        1253 => encoding_rs::WINDOWS_1253,
+        1254 => encoding_rs::WINDOWS_1254,
+        1255 => encoding_rs::WINDOWS_1255,
+        1256 => encoding_rs::WINDOWS_1256,
+        1257 => encoding_rs::WINDOWS_1257,
+        1258 => encoding_rs::WINDOWS_1258,
+        _ => encoding_rs::GBK,
     }
 }
 
@@ -417,5 +441,24 @@ mod tests {
         // Bytes invalid in both UTF-8 and GBK still degrade to U+FFFD
         // rather than panicking.
         assert_eq!(decode_console_output(&[0xFF, 0xFE]), "\u{FFFD}\u{FFFD}");
+    }
+
+    #[test]
+    fn oem_cp437_and_cp850_are_not_misdecoded_as_gbk() {
+        // CP437: 0x82=é, 0xE1=ß, 0x9C=£, 0xE5=σ. The old `_ => GBK`
+        // fallback decoded these pairs as CJK (e.g. 0x82,0xE1 -> 傖),
+        // turning English/Western European console output into garbage.
+        assert_eq!(decode_with_oem_code_page(437, &[0x82, 0xE1]), "éß");
+        assert_eq!(decode_with_oem_code_page(437, &[0x9C]), "£");
+        assert_eq!(decode_with_oem_code_page(437, &[0xE5]), "σ");
+        // CP850: 0x9B=ø, 0x9D=Ø, 0xE1=ß.
+        assert_eq!(decode_with_oem_code_page(850, &[0x9B]), "ø");
+        assert_eq!(decode_with_oem_code_page(850, &[0x9D]), "Ø");
+        assert_eq!(decode_with_oem_code_page(850, &[0xE1]), "ß");
+        // ASCII is invariant on both single-byte pages.
+        assert_eq!(decode_with_oem_code_page(437, b"C:\\> "), "C:\\> ");
+        // An unknown code page still falls back to GBK, preserving the
+        // historical zh-CN behaviour rather than panicking.
+        assert_eq!(decode_with_oem_code_page(65001, &[0xC4, 0xAC]), "默");
     }
 }

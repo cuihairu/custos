@@ -554,6 +554,7 @@ dependencies = [
  "custos-model",
  "encoding_rs",
  "flate2",
+ "known-codepages",
  "libc",
  "mysql",
  "ping",
@@ -1477,6 +1478,12 @@ dependencies = [
  "bitflags",
  "serde",
 ]
+
+[[package]]
+name = "known-codepages"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1701278b89e5bfa827f52ae715cb7200b8b8ba78ff986f8600faa37e1c67b881"
 
 [[package]]
 name = "lazy_static"
