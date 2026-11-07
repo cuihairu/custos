@@ -90,20 +90,26 @@ impl TelegramChannel {
         match request.send(payload.to_owned()) {
             Ok(response) => {
                 let status = response.status().as_u16();
+                // Telegram's Bot API returns HTTP 200 with `{"ok": true}`
+                // only on acceptance. A 2xx IS the delivery confirmation:
+                // a body that fails to read or parse must not turn a
+                // delivered message into a dead letter (the old `.ok()`
+                // swallow classified it Rejected). For non-2xx the body
+                // carries the error detail.
+                if (200..300).contains(&status) {
+                    let _ = response.into_body().read_to_string();
+                    return Ok(());
+                }
                 let code = response
                     .into_body()
                     .read_to_string()
                     .ok()
                     .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
                     .and_then(|v| v.get("ok").and_then(|ok| ok.as_bool()));
-                if (200..300).contains(&status) && code == Some(true) {
-                    Ok(())
-                } else {
-                    Err(ChannelError::new(
-                        ChannelErrorKind::Rejected,
-                        format!("telegram rejected: HTTP {status}, ok={code:?}"),
-                    ))
-                }
+                Err(ChannelError::new(
+                    ChannelErrorKind::Rejected,
+                    format!("telegram rejected: HTTP {status}, ok={code:?}"),
+                ))
             }
             Err(ureq::Error::StatusCode(code)) if (400..500).contains(&code) => Err(
                 ChannelError::new(ChannelErrorKind::Rejected, format!("telegram HTTP {code}")),
