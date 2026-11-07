@@ -4,11 +4,12 @@
     <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
     <MediaTemplate EmbedCab="yes" />
     <!-- Nightly rolling installs: same UpgradeCode across builds, a fresh
-         ProductCode each build (Id="*"). AllowSameVersionUpgrades makes the
-         nightly next-build replace the previous build; AllowDowngrades keeps
-         an older nightly from refusing to overwrite a newer one. -->
-    <MajorUpgrade AllowSameVersionUpgrades="yes" AllowDowngrades="yes"
-                  DowngradeErrorMessage="A newer version of Custos is already installed." />
+         ProductCode each build (Id="*"). Nightlies all carry the same
+         version, so AllowSameVersionUpgrades lets the next build replace
+         the previous one. Downgrades stay blocked by default (the safe
+         direction); no versioned release exists, so there is no
+         higher-versioned build to roll back from. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes" />
     <!-- Application icon: converted from the official SVG brand asset
          (docs/public/logo.svg) by scripts/make-windows-icon.py. Shown in
          Add/Remove Programs and on shortcuts. The same .ico is embedded
@@ -76,9 +77,10 @@
         <Directory Id="INSTALLFOLDER" Name="Custos">
           <Component Id="MainExecutable" Guid="A1B2C3D4-E5F6-4789-AB12-CD34EF56AB01">
             <File Id="CustosExe" Name="custos.exe" Source="$(var.CargoTargetBinDir)\custos.exe" KeyPath="yes">
-              <!-- Start Menu → Custos folder → "Custos CLI" (console app). -->
+              <!-- Start Menu → Custos folder → "Custos CLI" (console app).
+                   Nested under File, the shortcut targets this file itself. -->
               <Shortcut Id="StartMenuCustosCli" Directory="CustosMenuDir"
-                        Name="Custos CLI" Target="[INSTALLFOLDER]custos.exe"
+                        Name="Custos CLI"
                         WorkingDirectory="INSTALLFOLDER" Icon="CustosIcon" Advertise="no" />
             </File>
             <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
@@ -87,7 +89,7 @@
             <File Id="CustosTrayExe" Name="custos-tray.exe" Source="$(var.CargoTargetBinDir)\custos-tray.exe">
               <!-- Start Menu → Custos folder → "Custos Tray" (GUI app). -->
               <Shortcut Id="StartMenuCustosTray" Directory="CustosMenuDir"
-                        Name="Custos Tray" Target="[INSTALLFOLDER]custos-tray.exe"
+                        Name="Custos Tray"
                         WorkingDirectory="INSTALLFOLDER" Icon="CustosIcon" Advertise="no" />
             </File>
           </Component>
@@ -100,9 +102,9 @@
                            Name="custos-tray" Value="[INSTALLFOLDER]custos-tray.exe"
                            Type="string" KeyPath="yes" />
           </Component>
-          <!-- Removes the now-empty Custos Start Menu folder on uninstall. -->
-          <Component Id="CustosMenuDirCleanup" Guid="E6F7A8B9-3C4D-4E5F-A0B1-2D3E4F5A6B7C"
-                     Directory="CustosMenuDir">
+          <!-- Removes the now-empty Custos Start Menu folder on uninstall.
+               Nested under the directory, so no @Directory attribute. -->
+          <Component Id="CustosMenuDirCleanup" Guid="E6F7A8B9-3C4D-4E5F-A0B1-2D3E4F5A6B7C">
             <RemoveFolder Id="RemoveCustosMenuDir" Directory="CustosMenuDir" On="uninstall" />
             <RegistryValue Root="HKCU" Key="Software\Custos" Name="menu_dir_installed"
                            Type="integer" Value="1" KeyPath="yes" />
