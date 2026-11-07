@@ -431,3 +431,7 @@
 ## 整机 MSI（用户反复提出未落账，2026-11-08 补记并排期）
 
 - [ ] CUSTOS-MSI-001 [P1] custos 整机安装包：现 Nightly 产物名 `custos-cli-*.msi`，实际虽含 custos+custos-tray 两 exe 但命名与定位是「CLI 的 MSI」——用户要的是 custos 整机安装包。改法：wxs Product 更名 Custos（开始菜单两组快捷方式：Custos CLI / Custos Tray），产物更名 `custos-<ver>-x64.msi`（版本仍从 Cargo.toml 动态读，禁手写），tray 可选开机自启（注册表 Run 键，安装参数开关），升级路径同 ProductCode 覆盖安装，卸载干净（含自启键清理）；nightly.yml 上传更名后产物；Windows 真机（imac）msiexec 实装/卸载双向验证 + 截图证据。
+
+## 默认示例补向日葵监控场景（用户反复提出未落账，2026-11-08 补记并排期）
+
+- [ ] CUSTOS-EXAM-001 [P1] 默认示例集补向日葵监控：新增 `examples/sunlogin.toml`（type="service"，Windows unit="SunloginService" 实测于 imac 存在，Linux 对应 systemd unit 注释说明；依赖链 sunlogin→network 照 roadmap 场景1 口径）；`examples/` 现仅 3 个（basic-process/dependency-chain/notifications），README 未列 examples 入口——补 README 示例节 + nightly.yml 打包照旧 cp examples/*.toml；`custos validate examples/sunlogin.toml` 必过 + `cargo test --workspace` 全绿。
