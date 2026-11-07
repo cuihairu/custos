@@ -137,7 +137,17 @@ pub fn run_controlled(argv: &[String], timeout: Duration, max_output_bytes: usiz
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
-            Err(err) => return ExecResult::StartFailed(err.to_string()),
+            Err(err) => {
+                // The child DID spawn: a wait error must not leak it. Kill
+                // the tree and join the readers exactly like the timeout
+                // arm, then report; the label says start, the detail says
+                // where it actually broke.
+                kill_tree(&child);
+                let _ = child.wait();
+                let _ = join_reader(stdout_reader);
+                let _ = join_reader(stderr_reader);
+                return ExecResult::StartFailed(format!("wait failed after spawn: {err}"));
+            }
         }
     }
 }
