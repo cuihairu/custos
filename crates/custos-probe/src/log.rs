@@ -124,7 +124,12 @@ impl Probe for LogProbe {
                 );
             }
         };
-        state.offset = metadata.len();
+        // Advance by what was actually consumed, not the pre-read file
+        // length: a burst larger than max_bytes_per_check is read up to
+        // the cap, and pinning the offset to the old file end would skip
+        // its tail forever (missed pattern matches). Growth between the
+        // stat and the read is likewise covered exactly.
+        state.offset += new_bytes.len() as u64;
 
         if new_bytes.is_empty() {
             return report(true, HealthStatus::Healthy, "no new log lines".to_owned());
@@ -264,6 +269,36 @@ mod tests {
             report.observation.contains("panic"),
             "{}",
             report.observation
+        );
+    }
+
+    #[test]
+    fn burst_beyond_per_check_cap_is_not_skipped() {
+        let (path, _dir) = temp_log("");
+        let mut probe = probe_for(&path, "panic");
+        probe.max_bytes_per_check = 128;
+        probe.probe(&resource()); // baseline
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        // Filler larger than one check window pushes the panic line beyond
+        // the first read's cap.
+        writeln!(file, "{}", "x".repeat(200)).unwrap();
+        writeln!(file, "thread 'main' panicked at src/main.rs:3").unwrap();
+        drop(file);
+
+        let first = probe.probe(&resource());
+        assert_eq!(first.status, HealthStatus::Healthy, "{}", first.observation);
+        // The tail beyond the cap must be scanned on the next call (the
+        // offset advances by what was read, not by the pre-read length).
+        let second = probe.probe(&resource());
+        assert_eq!(
+            second.status,
+            HealthStatus::Unhealthy,
+            "{}",
+            second.observation
         );
     }
 
