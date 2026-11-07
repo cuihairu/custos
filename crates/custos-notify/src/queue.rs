@@ -44,6 +44,7 @@ pub trait NotificationQueue {
         id: u64,
         next_attempt_at_unix_ms: u64,
         error: &str,
+        now_unix_ms: u64,
     ) -> Result<(), QueueError>;
 
     fn mark_dead(&self, id: u64, error: &str, now_unix_ms: u64) -> Result<(), QueueError>;
@@ -92,8 +93,9 @@ impl<T: NotificationQueue + ?Sized> NotificationQueue for std::sync::Arc<T> {
         id: u64,
         next_attempt_at_unix_ms: u64,
         error: &str,
+        now_unix_ms: u64,
     ) -> Result<(), QueueError> {
-        (**self).mark_retry(id, next_attempt_at_unix_ms, error)
+        (**self).mark_retry(id, next_attempt_at_unix_ms, error, now_unix_ms)
     }
 
     fn mark_dead(&self, id: u64, error: &str, now_unix_ms: u64) -> Result<(), QueueError> {

@@ -255,7 +255,7 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
                 Err(err) => {
                     let next = retry_at(now_unix_ms, row.attempts);
                     let scrubbed = self.scrubber.scrub(&err.to_string());
-                    self.queue.mark_retry(row.id, next, &scrubbed)
+                    self.queue.mark_retry(row.id, next, &scrubbed, now_unix_ms)
                 }
             };
             match record {
@@ -411,7 +411,7 @@ mod tests {
             Ok(())
         }
 
-        fn mark_retry(&self, id: u64, _next: u64, error: &str) -> Result<(), QueueError> {
+        fn mark_retry(&self, id: u64, _next: u64, error: &str, _now: u64) -> Result<(), QueueError> {
             self.ops.borrow_mut().push(format!("retry:{id}:{error}"));
             for r in self.rows.borrow_mut().iter_mut() {
                 if r.id == id {

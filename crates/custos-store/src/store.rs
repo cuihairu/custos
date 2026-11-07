@@ -472,12 +472,15 @@ impl Store {
         .map_err(Into::into)
     }
 
-    /// Marks an entry delivered.
+    /// Marks an entry delivered. Only a claimed (`sending`) entry may
+    /// transition: a late call from a superseded claim no-ops instead of
+    /// overwriting an already-delivered row (or flipping it back).
     pub fn mark_notification_delivered(&self, id: u64, at_unix_ms: u64) -> Result<(), StoreError> {
         self.block(move |pool| async move {
             query(
                 "UPDATE notification_queue SET state = 'delivered', \
-                 delivered_at_unix_ms = ?, updated_at_unix_ms = ? WHERE id = ?",
+                 delivered_at_unix_ms = ?, updated_at_unix_ms = ? \
+                 WHERE id = ? AND state = 'sending'",
             )
             .bind(at_unix_ms as i64)
             .bind(at_unix_ms as i64)
@@ -489,22 +492,26 @@ impl Store {
         .map_err(Into::into)
     }
 
-    /// Increments the attempt count and schedules a retry.
+    /// Increments the attempt count and schedules a retry. Same `sending`
+    /// lease guard as [`mark_notification_delivered`]: a delivered entry is
+    /// never flipped back to a retry by a superseded claim.
     pub fn mark_notification_retry(
         &self,
         id: u64,
         next_attempt_at_unix_ms: u64,
         error: &str,
+        now_unix_ms: u64,
     ) -> Result<(), StoreError> {
         self.block(move |pool| async move {
             query(
                 "UPDATE notification_queue SET state = 'retry_scheduled', \
                  attempts = attempts + 1, next_attempt_at_unix_ms = ?, \
-                 last_error = ?, updated_at_unix_ms = ? WHERE id = ?",
+                 last_error = ?, updated_at_unix_ms = ? \
+                 WHERE id = ? AND state = 'sending'",
             )
             .bind(next_attempt_at_unix_ms as i64)
             .bind(error)
-            .bind(next_attempt_at_unix_ms as i64)
+            .bind(now_unix_ms as i64)
             .bind(id as i64)
             .execute(&pool)
             .await?;
@@ -648,8 +655,9 @@ impl custos_notify::NotificationQueue for Store {
         id: u64,
         next_attempt_at_unix_ms: u64,
         error: &str,
+        now_unix_ms: u64,
     ) -> Result<(), custos_notify::QueueError> {
-        self.mark_notification_retry(id, next_attempt_at_unix_ms, error)
+        self.mark_notification_retry(id, next_attempt_at_unix_ms, error, now_unix_ms)
             .map_err(|e| custos_notify::QueueError::new(e.to_string()))
     }
 
@@ -1514,7 +1522,7 @@ mod tests {
             .expect("enqueue");
         store.claim_due_notifications(1_000, 10).unwrap();
         store
-            .mark_notification_retry(id, 5_000, "smtp: transient")
+            .mark_notification_retry(id, 5_000, "smtp: transient", 1_000)
             .expect("retry");
         let rows = store.list_notifications(10).unwrap();
         assert_eq!(
@@ -1556,11 +1564,33 @@ mod tests {
             .unwrap();
         store.claim_due_notifications(1_000, 10).unwrap();
         store.mark_notification_delivered(a, 1_100).unwrap();
-        store.mark_notification_retry(b, 9_000, "timeout").unwrap();
+        store.mark_notification_retry(b, 9_000, "timeout", 1_100).unwrap();
 
         let counts = store.notification_counts().unwrap();
         assert_eq!(counts.delivered, 1);
         assert_eq!(counts.retry_scheduled, 1);
         assert_eq!(counts.total(), 2);
+    }
+
+    #[test]
+    fn delivered_notification_is_not_flipped_back_by_stale_retry() {
+        // A superseded claim must not resurrect a delivered notification:
+        // mark_retry carries the same `sending` lease guard as mark_delivered.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path().join("q.db")).expect("open");
+        let id = store
+            .enqueue_notification("mail", &notification_event("evt-3"), 1_000)
+            .unwrap();
+        store.claim_due_notifications(1_000, 10).unwrap();
+        store.mark_notification_delivered(id, 1_100).unwrap();
+        // The losing pass of a duplicate delivery tries to retry the row.
+        store.mark_notification_retry(id, 9_000, "stale retry", 1_200).unwrap();
+        let rows = store.list_notifications(10).unwrap();
+        assert_eq!(
+            rows[0].state,
+            custos_model::NotificationState::Delivered,
+            "delivered row must not flip back to retry"
+        );
+        assert_eq!(rows[0].attempts, 0, "no extra attempt counted");
     }
 }

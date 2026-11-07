@@ -125,7 +125,7 @@ impl NotificationQueue for TimeAwareQueue {
         Ok(())
     }
 
-    fn mark_retry(&self, id: u64, next: u64, error: &str) -> Result<(), QueueError> {
+    fn mark_retry(&self, id: u64, next: u64, error: &str, _now: u64) -> Result<(), QueueError> {
         for row in self.inner.rows.lock().unwrap().iter_mut() {
             if row.id == id {
                 row.state = NotificationState::RetryScheduled;
