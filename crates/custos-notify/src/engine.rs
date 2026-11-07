@@ -411,7 +411,13 @@ mod tests {
             Ok(())
         }
 
-        fn mark_retry(&self, id: u64, _next: u64, error: &str, _now: u64) -> Result<(), QueueError> {
+        fn mark_retry(
+            &self,
+            id: u64,
+            _next: u64,
+            error: &str,
+            _now: u64,
+        ) -> Result<(), QueueError> {
             self.ops.borrow_mut().push(format!("retry:{id}:{error}"));
             for r in self.rows.borrow_mut().iter_mut() {
                 if r.id == id {

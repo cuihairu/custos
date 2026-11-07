@@ -34,7 +34,11 @@ pub fn read_capped_line<R: std::io::BufRead>(
             if buf.is_empty() {
                 // EOF. Clean end-of-input with nothing pending is None;
                 // an unterminated final line (or oversized drain) is Some.
-                return Ok(if line.is_empty() && !oversized { None } else { Some(line) });
+                return Ok(if line.is_empty() && !oversized {
+                    None
+                } else {
+                    Some(line)
+                });
             }
             (buf.iter().position(|&b| b == b'\n'), buf.len())
         };
@@ -86,9 +90,6 @@ mod tests {
         let lines = read_all(b"aaaaaaaaaaaaaaaa\nnext\n", 8);
         // The 16-byte line exceeds the cap: drained (returns empty), the
         // following line is still read intact.
-        assert_eq!(
-            lines,
-            vec![Some(Vec::new()), Some(b"next\n".to_vec())]
-        );
+        assert_eq!(lines, vec![Some(Vec::new()), Some(b"next\n".to_vec())]);
     }
 }

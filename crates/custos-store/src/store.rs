@@ -1578,7 +1578,9 @@ mod tests {
             .unwrap();
         store.claim_due_notifications(1_000, 10).unwrap();
         store.mark_notification_delivered(a, 1_100).unwrap();
-        store.mark_notification_retry(b, 9_000, "timeout", 1_100).unwrap();
+        store
+            .mark_notification_retry(b, 9_000, "timeout", 1_100)
+            .unwrap();
 
         let counts = store.notification_counts().unwrap();
         assert_eq!(counts.delivered, 1);
@@ -1598,7 +1600,9 @@ mod tests {
         store.claim_due_notifications(1_000, 10).unwrap();
         store.mark_notification_delivered(id, 1_100).unwrap();
         // The losing pass of a duplicate delivery tries to retry the row.
-        store.mark_notification_retry(id, 9_000, "stale retry", 1_200).unwrap();
+        store
+            .mark_notification_retry(id, 9_000, "stale retry", 1_200)
+            .unwrap();
         let rows = store.list_notifications(10).unwrap();
         assert_eq!(
             rows[0].state,
