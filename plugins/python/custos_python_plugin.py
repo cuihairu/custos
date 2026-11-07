@@ -125,9 +125,46 @@ def _reply_error(rid, code, message):
     _real_stdout.flush()
 
 
+# §4.4 wire limit, mirrors custos-plugin-api limits.rs: 1 MiB per message.
+MAX_MESSAGE_BYTES = 1024 * 1024
+
+
+def _read_capped_line(stream, cap):
+    """Read one newline-delimited line, bounded at `cap` bytes (§4.4).
+
+    Returns the raw bytes (with the newline), or None on clean EOF. A line
+    that grows past the cap is drained to its newline (framing survives)
+    and returned as an empty bytes object, so a misbehaving host cannot
+    grow this loader's memory without bound.
+    """
+    pieces = []
+    total = 0
+    oversized = False
+    while True:
+        chunk = stream.readline(4096)
+        if not chunk:
+            # EOF. Clean end with nothing buffered is None; an unterminated
+            # final line (or an oversized drain cut short) is not.
+            if not pieces and not oversized:
+                return None
+            return b"" if oversized else b"".join(pieces)
+        if not oversized:
+            if total + len(chunk) > cap:
+                oversized = True
+                pieces = []
+            else:
+                pieces.append(chunk)
+                total += len(chunk)
+        if chunk.endswith(b"\n"):
+            return b"" if oversized else b"".join(pieces)
+
+
 def main():
-    for line in sys.stdin:
-        line = line.strip()
+    while True:
+        raw = _read_capped_line(sys.stdin.buffer, MAX_MESSAGE_BYTES)
+        if raw is None:
+            break
+        line = raw.decode("utf-8", errors="replace").strip()
         if not line:
             continue
         try:

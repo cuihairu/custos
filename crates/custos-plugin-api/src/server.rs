@@ -6,8 +6,9 @@
 //! This keeps plugin binaries thin: they implement semantics (probe,
 //! recovery actions), not framing.
 
+use crate::DEFAULT_MAX_MESSAGE_BYTES;
 use serde_json::{json, Value};
-use std::io::{BufRead, Write};
+use std::io::Write;
 
 /// What one dispatched request produced.
 pub enum Reply {
@@ -28,16 +29,18 @@ pub fn initialize_result(plugin_name: &str) -> Reply {
 }
 
 /// Runs the loop: `dispatch` receives (method, params) and answers.
-/// Undecodable lines are skipped (§4.4); EOF ends the loop.
+/// Undecodable lines are skipped (§4.4); EOF ends the loop. Each line is
+/// capped at [`DEFAULT_MAX_MESSAGE_BYTES`]; an oversized line (a misbehaving
+/// host) is drained and skipped so memory stays bounded.
 pub fn serve(dispatch: impl Fn(&str, Value) -> Reply) {
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
+    let mut reader = stdin.lock();
+    while let Ok(Some(line)) = crate::read_capped_line(&mut reader, DEFAULT_MAX_MESSAGE_BYTES) {
+        let trimmed = std::str::from_utf8(&line).ok().map(str::trim);
+        let Some(trimmed) = trimmed.filter(|s| !s.is_empty()) else {
             continue;
-        }
+        };
         let Ok(request) = serde_json::from_str::<Value>(trimmed) else {
             continue; // never crash on garbage (§4.4)
         };

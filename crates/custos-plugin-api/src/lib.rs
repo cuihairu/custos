@@ -13,7 +13,7 @@ pub mod rpc;
 pub mod server;
 
 pub use capability::{AffectedScope, Capability, CapabilityKind, OperationParams};
-pub use limits::{DEFAULT_MAX_MESSAGE_BYTES, MAX_STDERR_RETAINED_BYTES};
+pub use limits::{read_capped_line, DEFAULT_MAX_MESSAGE_BYTES, MAX_STDERR_RETAINED_BYTES};
 pub use rpc::{
     error_response, request, response, JsonRpc, Method, Request, RequestId, Response, RpcError,
     METHOD_PREFIX, PROTOCOL_VERSION,
