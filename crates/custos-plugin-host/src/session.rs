@@ -524,20 +524,20 @@ fn route_response(shared: &Arc<Shared>, response: Response) {
 fn stderr_loop(stderr: std::process::ChildStderr, shared: Arc<Shared>) -> impl FnOnce() {
     move || {
         let mut reader = BufReader::new(stderr);
-        let mut chunk = Vec::with_capacity(4096);
-        loop {
-            chunk.clear();
-            match reader.read_until(b'\n', &mut chunk) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {
-                    let mut tail = lock(&shared.stderr_tail);
-                    tail.extend(chunk.iter().copied());
-                    let retained = custos_plugin_api::MAX_STDERR_RETAINED_BYTES;
-                    if tail.len() > retained {
-                        let excess = tail.len() - retained;
-                        tail.drain(..excess);
-                    }
-                }
+        // Bound a single stderr line at the protocol message cap: a
+        // pathologically long line (no newline) must not grow memory
+        // without bound — the tail trims to MAX_STDERR_RETAINED_BYTES
+        // regardless, so an oversized line is drained and skipped.
+        while let Ok(Some(line)) = custos_plugin_api::read_capped_line(
+            &mut reader,
+            custos_plugin_api::DEFAULT_MAX_MESSAGE_BYTES,
+        ) {
+            let mut tail = lock(&shared.stderr_tail);
+            tail.extend(line.iter().copied());
+            let retained = custos_plugin_api::MAX_STDERR_RETAINED_BYTES;
+            if tail.len() > retained {
+                let excess = tail.len() - retained;
+                tail.drain(..excess);
             }
         }
     }
