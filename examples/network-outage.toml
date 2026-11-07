@@ -1,0 +1,84 @@
+# Network outage detection and layered recovery — the "断网" scenario.
+#
+# Two probes at different depths: the LAN gateway (inside the router) and a
+# public DNS anchor (past the router). The public probe DEPENDS on the gateway
+# probe, so recovery follows the real fault order:
+#   - gateway down  -> only gateway recovery runs (fix the LAN first)
+#   - gateway fine, public probe down -> only the WAN-side recovery runs
+#
+# Recovery actions are deliberately platform-specific placeholders: the real
+# fix differs per host (Windows: netsh/adapter restart; OpenWrt: waan reload;
+# Linux: nmcli/nft). Edit before use.
+version = 1
+
+[[resources]]
+id = "gateway"
+type = "network-connectivity"
+display_name = "LAN gateway (router)"
+
+[resources.probe]
+# Replace with your actual gateway IP (`ip route | grep default` / `route print`).
+host = "192.168.5.1"
+port = 80
+timeout_ms = 2000
+
+[resources.health_policy]
+failure_threshold = 3
+success_threshold = 2
+
+[[resources.recovery_policy.plans]]
+plan_id = "recover-gateway-link"
+applicable_faults = ["remote_endpoint_unreachable", "probe_timeout"]
+risk = "medium"
+idempotent = false
+timeout_ms = 30000
+max_attempts = 2
+cooldown_ms = 60000
+
+[resources.recovery_policy.plans.action]
+# Windows: renew the DHCP lease / bounce the adapter.
+#   program = "powershell"
+#   args = ["-Command", "ipconfig /renew"]
+# Linux: `nmcli networking off && nmcli networking on` or `ip link set NAME down/up`.
+program = "sh"
+args = ["-c", "echo 'LAN-link recovery (platform-specific): renew lease / bounce adapter'"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+
+[[resources]]
+id = "public-dns"
+type = "network-connectivity"
+display_name = "public anchor (AliDNS)"
+depends_on = ["gateway"]
+
+[resources.probe]
+# Public TCP-DNS anchor. Add a second anchor resource (e.g. 119.29.29.29:53)
+# if you want to distinguish "anchor down" from "WAN down".
+host = "223.5.5.5"
+port = 53
+timeout_ms = 3000
+
+[resources.health_policy]
+failure_threshold = 3
+success_threshold = 2
+
+[[resources.recovery_policy.plans]]
+plan_id = "recover-wan"
+applicable_faults = ["remote_endpoint_unreachable", "probe_timeout"]
+risk = "medium"
+idempotent = false
+timeout_ms = 30000
+max_attempts = 2
+cooldown_ms = 60000
+
+[resources.recovery_policy.plans.action]
+# Windows: flush DNS + renew; if the router itself is reachable but the WAN is
+# dead, the fix is on the router side (reboot from its admin plane) — keep the
+# risk "medium" and read your platform's guidance before automating a router
+# reboot.
+program = "sh"
+args = ["-c", "echo 'WAN recovery (platform-specific): flush DNS / renew / router-side fix'"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"

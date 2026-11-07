@@ -54,6 +54,8 @@ Ready-to-run monitoring configurations in `examples/` (each validates with `cust
 - [dependency-chain.toml](examples/dependency-chain.toml) — tunnel → proxy → network recovery order.
 - [notifications.toml](examples/notifications.toml) — webhook/SMTP notification wiring.
 - [sunlogin.toml](examples/sunlogin.toml) — 向日葵 (Sunlogin) remote-desktop supervision: PC offline detection and only-Sunlogin recovery, the canonical self-healing scenario (Windows `SunloginService`, Linux `oray-sunlogin.service`).
+- [remote-desktop.toml](examples/remote-desktop.toml) — RustDesk + TeamViewer + 向日葵 behind one network dependency: if the network is down only network recovery runs; otherwise only the dead remote-desktop service is restarted.
+- [network-outage.toml](examples/network-outage.toml) — 断网 detection with layered recovery: LAN gateway probe and public-DNS anchor as a dependency chain, so the LAN link is fixed before the WAN side.
 
 中文文档：[README.zh.md](README.zh.md)
 

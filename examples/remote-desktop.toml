@@ -1,0 +1,140 @@
+# Remote-desktop supervision fleet — RustDesk / TeamViewer / Sunlogin(向日葵)
+# behind one network dependency. The canonical "I lost remote access" scenario:
+# if the network is down only network recovery runs; if the network is fine,
+# only the dead remote-desktop service is restarted.
+#
+# Service names verified 2026-11-08 on the imac Windows host (TeamViewer =
+# "TeamViewer", Running; Sunlogin = "SunloginService"; RustDesk NOT installed
+# on any fleet host — the name below is RustDesk's official SCM service name,
+# verify with `sc query RustDesk` on a host that has it).
+# Linux equivalents: rustdesk.service / teamviewerd.service /
+# oray-sunlogin.service (systemd).
+version = 1
+
+[[resources]]
+id = "network"
+type = "network-connectivity"
+display_name = "base connectivity"
+
+[resources.probe]
+host = "223.5.5.5"
+port = 53
+timeout_ms = 3000
+
+[resources.health_policy]
+failure_threshold = 3
+success_threshold = 2
+
+[[resources.recovery_policy.plans]]
+plan_id = "restart-network"
+applicable_faults = ["remote_endpoint_unreachable", "probe_timeout"]
+risk = "medium"
+idempotent = false
+timeout_ms = 15000
+max_attempts = 2
+cooldown_ms = 30000
+
+[resources.recovery_policy.plans.action]
+program = "sh"
+args = ["-c", "echo 'restore network route (platform-specific)'"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+
+[[resources]]
+id = "rustdesk"
+type = "service"
+display_name = "RustDesk remote desktop"
+depends_on = ["network"]
+
+[resources.probe]
+# Windows SCM name: "RustDesk". Linux systemd: "rustdesk.service".
+unit = "RustDesk"
+timeout_ms = 3000
+
+[resources.health_policy]
+failure_threshold = 3
+success_threshold = 2
+
+[[resources.recovery_policy.plans]]
+plan_id = "restart-rustdesk"
+applicable_faults = ["unknown_failure"]
+risk = "low"
+idempotent = false
+timeout_ms = 10000
+max_attempts = 2
+cooldown_ms = 30000
+
+[resources.recovery_policy.plans.action]
+# Windows: `sc start RustDesk`. Linux: `systemctl restart rustdesk.service`.
+program = "powershell"
+args = ["-Command", "Start-Service -Name 'RustDesk'"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+
+[[resources]]
+id = "teamviewer"
+type = "service"
+display_name = "TeamViewer remote desktop"
+depends_on = ["network"]
+
+[resources.probe]
+# Windows SCM name "TeamViewer" (verified Running on imac, 2026-11-08).
+# Linux systemd: "teamviewerd.service".
+unit = "TeamViewer"
+timeout_ms = 3000
+
+[resources.health_policy]
+failure_threshold = 3
+success_threshold = 2
+
+[[resources.recovery_policy.plans]]
+plan_id = "restart-teamviewer"
+applicable_faults = ["unknown_failure"]
+risk = "low"
+idempotent = false
+timeout_ms = 10000
+max_attempts = 2
+cooldown_ms = 30000
+
+[resources.recovery_policy.plans.action]
+# Windows: `sc start TeamViewer`. Linux: `systemctl restart teamviewerd.service`.
+program = "powershell"
+args = ["-Command", "Start-Service -Name 'TeamViewer'"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+
+[[resources]]
+id = "sunlogin"
+type = "service"
+display_name = "Sunlogin (向日葵) remote desktop"
+depends_on = ["network"]
+
+[resources.probe]
+# Windows SCM name "SunloginService" (verified on imac). Linux:
+# "oray-sunlogin.service". Single-resource variant: examples/sunlogin.toml.
+unit = "SunloginService"
+timeout_ms = 3000
+
+[resources.health_policy]
+failure_threshold = 3
+success_threshold = 2
+
+[[resources.recovery_policy.plans]]
+plan_id = "restart-sunlogin"
+applicable_faults = ["unknown_failure"]
+risk = "low"
+idempotent = false
+timeout_ms = 10000
+max_attempts = 2
+cooldown_ms = 30000
+
+[resources.recovery_policy.plans.action]
+# Windows: `sc start SunloginService`. Linux: `systemctl restart oray-sunlogin.service`.
+program = "powershell"
+args = ["-Command", "Start-Service -Name 'SunloginService'"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"

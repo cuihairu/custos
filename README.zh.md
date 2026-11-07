@@ -54,6 +54,8 @@ pnpm run docs:build  # 构建
 - [dependency-chain.toml](examples/dependency-chain.toml) — tunnel → proxy → network 的恢复顺序。
 - [notifications.toml](examples/notifications.toml) — webhook/SMTP 通知接线。
 - [sunlogin.toml](examples/sunlogin.toml) — 向日葵远程桌面监控：PC 离线检测、只恢复向日葵，自愈的经典场景（Windows `SunloginService`，Linux `oray-sunlogin.service`）。
+- [remote-desktop.toml](examples/remote-desktop.toml) — RustDesk + TeamViewer + 向日葵统一挂在同一网络依赖下：断网时只修网络，网络正常时只重启挂掉的远程桌面服务。
+- [network-outage.toml](examples/network-outage.toml) — 断网检测与分层恢复：局域网网关探测与公网 DNS 锚点组成依赖链，先修内网链路再修外网。
 
 English: [README.md](README.md)
 
