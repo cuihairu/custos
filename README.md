@@ -46,6 +46,15 @@ pnpm run docs:build  # build
 
 Or read the sources directly: [docs/guide/overview.md](docs/guide/overview.md).
 
+## Examples
+
+Ready-to-run monitoring configurations in `examples/` (each validates with `custos validate <file>`):
+
+- [basic-process.toml](examples/basic-process.toml) — watch a PID file, restart via plan.
+- [dependency-chain.toml](examples/dependency-chain.toml) — tunnel → proxy → network recovery order.
+- [notifications.toml](examples/notifications.toml) — webhook/SMTP notification wiring.
+- [sunlogin.toml](examples/sunlogin.toml) — 向日葵 (Sunlogin) remote-desktop supervision: PC offline detection and only-Sunlogin recovery, the canonical self-healing scenario (Windows `SunloginService`, Linux `oray-sunlogin.service`).
+
 中文文档：[README.zh.md](README.zh.md)
 
 ## Status

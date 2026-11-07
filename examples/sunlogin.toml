@@ -1,0 +1,74 @@
+# Sunlogin (向日葵) remote-desktop supervision — the canonical "PC goes
+# offline" scenario (docs/guide/overview.md #1, docs/guide/roadmap.md
+# acceptance scenario 1). On Windows the SCM service is `SunloginService`
+# (verified present on the imac host, 2026-11-08); on Linux the equivalent
+# systemd unit is `oray-sunlogin.service`.
+#
+# Dependency chain (docs/guide/resources.md §3.6): recovery of `sunlogin`
+# requires `network` healthy first — if the network is down, only network
+# recovery runs; if the network is fine, only Sunlogin is restarted.
+version = 1
+
+[[resources]]
+id = "network"
+type = "network-connectivity"
+display_name = "base connectivity"
+
+[resources.probe]
+host = "223.5.5.5"
+port = 53
+timeout_ms = 3000
+
+[resources.health_policy]
+failure_threshold = 3
+success_threshold = 2
+
+[[resources.recovery_policy.plans]]
+plan_id = "restart-network"
+applicable_faults = ["remote_endpoint_unreachable", "probe_timeout"]
+risk = "medium"
+idempotent = false
+timeout_ms = 15000
+max_attempts = 2
+cooldown_ms = 30000
+
+[resources.recovery_policy.plans.action]
+program = "sh"
+args = ["-c", "echo 'restore network route (platform-specific)'"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+
+[[resources]]
+id = "sunlogin"
+type = "service"
+display_name = "Sunlogin remote desktop"
+depends_on = ["network"]
+
+[resources.probe]
+# On Windows this routes to the native SCM probe (SunloginService); on Linux
+# set `unit = "oray-sunlogin.service"` instead.
+unit = "SunloginService"
+timeout_ms = 3000
+
+[resources.health_policy]
+failure_threshold = 3
+success_threshold = 2
+
+[[resources.recovery_policy.plans]]
+plan_id = "restart-sunlogin"
+applicable_faults = ["unknown_failure"]
+risk = "low"
+idempotent = false
+timeout_ms = 10000
+max_attempts = 2
+cooldown_ms = 30000
+
+[resources.recovery_policy.plans.action]
+# Windows: `sc start SunloginService` or `Start-Service -Name SunloginService`.
+# Linux: `systemctl restart oray-sunlogin.service`.
+program = "powershell"
+args = ["-Command", "Start-Service -Name 'SunloginService'"]
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"

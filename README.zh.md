@@ -46,6 +46,15 @@ pnpm run docs:build  # 构建
 
 也可直接读源文件：[docs/guide/overview.md](docs/guide/overview.md)。
 
+## 示例
+
+`examples/` 下的开箱即用监控配置（每个均可用 `custos validate <file>` 校验）：
+
+- [basic-process.toml](examples/basic-process.toml) — 监控 PID 文件，按方案重启。
+- [dependency-chain.toml](examples/dependency-chain.toml) — tunnel → proxy → network 的恢复顺序。
+- [notifications.toml](examples/notifications.toml) — webhook/SMTP 通知接线。
+- [sunlogin.toml](examples/sunlogin.toml) — 向日葵远程桌面监控：PC 离线检测、只恢复向日葵，自愈的经典场景（Windows `SunloginService`，Linux `oray-sunlogin.service`）。
+
 English: [README.md](README.md)
 
 ## 状态
