@@ -358,16 +358,27 @@ impl Engine {
     pub fn probe_one(&mut self, id: &ResourceId, now_unix_ms: u64) -> ProbeReport {
         let (report, thresholds) = {
             let managed = &self.managed[id];
-            let probe = self
-                .probes
-                .get(id)
-                .expect("probe wired for every resource at construction");
-            let report = probe.probe(&managed.resource);
+            // A managed resource without a wired probe must not take down
+            // the whole recovery loop (no startup validation guarantees the
+            // wiring): report an honest Unreachable and let policy react.
+            let (report, probe_name) = match self.probes.get(id) {
+                Some(probe) => (probe.probe(&managed.resource), probe.name().to_owned()),
+                None => (
+                    ProbeReport {
+                        resource_id: id.clone(),
+                        probe_name: "unwired".to_owned(),
+                        succeeded: false,
+                        status: HealthStatus::Unreachable,
+                        observation: "no probe is wired for this resource".to_owned(),
+                    },
+                    "unwired".to_owned(),
+                ),
+            };
             // Evidence is persisted for every probe (§7.2 probe_results):
             // diagnosis must be re-derivable from stored facts.
             self.store.save_probe_result(&custos_model::Evidence {
                 resource_id: id.clone(),
-                probe_name: probe.name().to_owned(),
+                probe_name,
                 succeeded: report.succeeded,
                 observation: report.observation.clone(),
                 collected_at_unix_ms: now_unix_ms,
@@ -1069,27 +1080,38 @@ impl Engine {
         for member in &members {
             self.probe_one(member, self.clock.now_unix_ms());
         }
-        if group.satisfied_by(&|m| self.managed[m].snapshot.status == HealthStatus::Healthy) {
+        // A group member that is not a managed resource can never be
+        // satisfied (and offers no recovery); indexing would panic, so a
+        // missing member counts as unhealthy and is skipped below.
+        if group.satisfied_by(&|m| {
+            self.managed
+                .get(m)
+                .is_some_and(|managed| managed.snapshot.status == HealthStatus::Healthy)
+        }) {
             return true;
         }
         // Recover each unhealthy member (respecting in-flight/cooldown), then
         // re-probe and re-judge the group.
         for member in &members {
-            if self.managed[member].snapshot.status == HealthStatus::Healthy {
+            let Some(managed) = self.managed.get(member) else {
+                continue;
+            };
+            if managed.snapshot.status == HealthStatus::Healthy {
                 continue;
             }
             if self.active_runs.contains(member)
-                || now_lt(
-                    self.clock.now_unix_ms(),
-                    self.managed[member].cooldown_until_ms,
-                )
+                || now_lt(self.clock.now_unix_ms(), managed.cooldown_until_ms)
             {
                 continue;
             }
             let _ = self.try_recover(member);
             self.probe_one(member, self.clock.now_unix_ms());
         }
-        if group.satisfied_by(&|m| self.managed[m].snapshot.status == HealthStatus::Healthy) {
+        if group.satisfied_by(&|m| {
+            self.managed
+                .get(m)
+                .is_some_and(|managed| managed.snapshot.status == HealthStatus::Healthy)
+        }) {
             return true;
         }
         self.store.emit(EngineEvent::DependencyUnsatisfied {
