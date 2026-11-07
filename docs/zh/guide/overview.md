@@ -148,6 +148,10 @@ Dashboard 只是一个可选客户端。即使完全不编译 Dashboard，核心
 
 CLI 是首要的管理接口。
 
+### 源码架构
+
+该设计的实现地图——八个源码职责层、状态归属、调用通道、配置 schema 与拆分理由——见[源码架构](./source-architecture.md)。逐条术语表见[源码分层术语表](./glossary.md)。
+
 ## 2.3 核心运行原则
 
 1. Core Engine 控制整个恢复生命周期。

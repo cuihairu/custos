@@ -4,6 +4,8 @@ const enSidebar = {
   text: 'Design Documents',
   items: [
     { text: 'Overview and Architecture Decisions', link: '/guide/overview' },
+    { text: 'Source Architecture', link: '/guide/source-architecture' },
+    { text: 'Source-Layer Glossary', link: '/guide/glossary' },
     { text: 'Resource and Dependency Model', link: '/guide/resources' },
     { text: 'Plugin Architecture', link: '/guide/plugins' },
     { text: 'Probing, Diagnosis and Failure Verdicts', link: '/guide/probe-diagnosis' },
@@ -50,6 +52,8 @@ const zhSidebar = {
   text: '设计文档',
   items: [
     { text: '概述与架构决策', link: '/zh/guide/overview' },
+    { text: '源码架构', link: '/zh/guide/source-architecture' },
+    { text: '源码分层术语表', link: '/zh/guide/glossary' },
     { text: 'Resource 与 Dependency 模型', link: '/zh/guide/resources' },
     { text: '插件架构', link: '/zh/guide/plugins' },
     { text: '探测、诊断与故障判定', link: '/zh/guide/probe-diagnosis' },

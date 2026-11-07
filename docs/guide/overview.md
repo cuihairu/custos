@@ -148,6 +148,10 @@ The Dashboard is just an optional client. Even if the Dashboard is not compiled 
 
 The CLI is the primary management interface.
 
+### Source architecture
+
+The implementation map for this design — eight source-responsibility layers, state ownership, call channels, configuration schemas and split rationale — is in [Source architecture](./source-architecture.md). Its term-by-term table is in the [source-layer glossary](./glossary.md).
+
 ## 2.3 Core operating principles
 
 1. The Core Engine controls the entire recovery lifecycle.

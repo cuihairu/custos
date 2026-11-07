@@ -435,3 +435,30 @@
 ## 默认示例补向日葵监控场景（用户反复提出未落账，2026-11-08 补记并排期）
 
 - [ ] CUSTOS-EXAM-001 [P1] 默认示例集补向日葵监控：新增 `examples/sunlogin.toml`（type="service"，Windows unit="SunloginService" 实测于 imac 存在，Linux 对应 systemd unit 注释说明；依赖链 sunlogin→network 照 roadmap 场景1 口径）；`examples/` 现仅 3 个（basic-process/dependency-chain/notifications），README 未列 examples 入口——补 README 示例节 + nightly.yml 打包照旧 cp examples/*.toml；`custos validate examples/sunlogin.toml` 必过 + `cargo test --workspace` 全绿。
+
+## 源码分层分析 2026-11-07
+
+### 抽象层清单
+
+- 配置与领域契约层：启动前把 TOML 变成严格校验的资源、依赖、图、权限与集成配置。—— `crates/custos-config/src/lib.rs:347`
+- 协调与恢复状态层：按依赖图调度观测，驱动诊断、恢复状态机、预算、等待唤醒和最终健康判定。—— `crates/custos-engine/src/engine.rs:196`
+- 能力发现层：归一化原生探测，并以 JSON-RPC/能力声明接入外部插件，统一登记可调用操作。—— `crates/custos-core/src/assemble.rs:42`
+- 执行与平台层：在权限和能力检查后，用可替换的执行器与 OS 适配器执行本机动作。—— `crates/custos-engine/src/executor.rs:10`
+- 持久化与事件层：用 SQLite 保存运行、证据、诊断、审计、健康、步骤、插件注册与通知队列。—— `crates/custos-store/src/store.rs:810`
+- 通知投递层：规则化筛选、去重入队并由后台 worker 重试外发，故障不阻塞恢复。—— `crates/custos-notify/src/engine.rs:225`
+- 运行时装配与进程生命周期层：唯一组装完整运行时，恢复崩溃现场并监督 CLI、插件与后台 worker。—— `crates/custos-core/src/assemble.rs:58`
+- 接口与观察者层：提供 CLI、只读 dashboard、托盘和 Python 嵌入门面，但不绕过核心协调。—— `crates/custos-cli/src/main.rs:44`
+
+### 超大文件候选
+
+- [ ] LAY-001 [P1] 拆分 crates/custos-engine/src/engine.rs（2148 行）——观测、诊断、依赖等待、恢复计划、执行验证、预算升级和崩溃续跑都在一个类型路径中。——（crates/custos-engine/src/engine.rs:49）
+- [ ] LAY-002 [P1] 拆分 crates/custos-store/src/store.rs（1566 行）——连接生命周期、读取 API、运行仓储、通知队列、保留清理与多套集成测试耦合在一个实现文件。——（crates/custos-store/src/store.rs:34）
+- [ ] LAY-003 [P1] 拆分 crates/custos-config/src/lib.rs（1376 行）——主 schema、探测字段联合体、依赖/计划校验和运行结构构造都写在一个文件。——（crates/custos-config/src/lib.rs:56）
+- [ ] LAY-004 [P1] 拆分 crates/custos-probe/src/http.rs（1177 行）——HTTP 状态、内容、时延、重定向、TLS 与多协议出站探测混在一个适配器。——（crates/custos-probe/src/http.rs:26）
+- [ ] LAY-005 [P1] 拆分 crates/custos-config/src/notification.rs（1047 行）——五种通道配置、原始表解包、逐通道校验与测试集中在同一模块。——（crates/custos-config/src/notification.rs:55）
+
+### 目录/分类问题
+
+- `crates/custos-probe/src/http.rs:26` 将通用 HTTP 探测、TLS 证书路径检查与代理链路探测放在一个 1177 行文件；文件名 `http.rs` 不能表达这三类观测职责。
+- `crates/custos-config/src/lib.rs:56` 的 `RawProbe` 是所有探测类型的字段联合体，靠可选项表达每类约束；新增探测会继续扩大主配置文件而非各自形成类型化子模块。
+- `crates/custos-config/src/notification.rs:55` 的 `ChannelConfig` 与每个通道的配置、校验逻辑同文件；通道数量增加时配置契约和通道校验没有天然边界。
