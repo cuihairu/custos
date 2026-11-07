@@ -427,3 +427,7 @@
 - [x] 审核发现：本轮 diff 未见问题（b9482d2e..HEAD）。 → 已核实（`git diff --stat b9482d2e..HEAD` 仅 todo.md 1 行新增；逐行复核 `7071e1a` 仅上一条审核结论文档记录，无代码改动；当日 HEAD=`7071e1a`）
 - [x] 审核发现：本轮 diff 未见问题（7071e1af..HEAD）。 → 已核实（`git diff --name-only 7071e1af..HEAD` 仅 todo.md；`git show --stat 7dc8c0b` 仅 todo.md 1 行新增，内容为上一条审核结论文档记录，无代码改动；HEAD=7dc8c0b，父提交=7071e1a；`cargo test --workspace` exit 0，531 passed / 0 failed）
 - [x] 审核发现：本轮 diff 未见问题（7dc8c0bd..HEAD）。 → 已核实（`git diff --name-only 7dc8c0bd..HEAD` 仅 todo.md；`git show --stat 7c8c0b2` 仅 todo.md 1 行新增，内容为上一条审核结论文档记录，无代码改动；HEAD=7c8c0b2，父提交=7dc8c0b；`cargo test --workspace` exit 0，全部测试目标 0 failed）
+
+## 整机 MSI（用户反复提出未落账，2026-11-08 补记并排期）
+
+- [ ] CUSTOS-MSI-001 [P1] custos 整机安装包：现 Nightly 产物名 `custos-cli-*.msi`，实际虽含 custos+custos-tray 两 exe 但命名与定位是「CLI 的 MSI」——用户要的是 custos 整机安装包。改法：wxs Product 更名 Custos（开始菜单两组快捷方式：Custos CLI / Custos Tray），产物更名 `custos-<ver>-x64.msi`（版本仍从 Cargo.toml 动态读，禁手写），tray 可选开机自启（注册表 Run 键，安装参数开关），升级路径同 ProductCode 覆盖安装，卸载干净（含自启键清理）；nightly.yml 上传更名后产物；Windows 真机（imac）msiexec 实装/卸载双向验证 + 截图证据。
