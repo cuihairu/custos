@@ -88,7 +88,10 @@ struct MemoryMetrics {
     swap_free: u64,
 }
 
-#[cfg(unix)]
+/// `/proc` is Linux-only; macOS/BSD fall through to the unsupported stub
+/// below (§11.1: platform support must never be faked) instead of failing
+/// to open procfs and reporting a confusing I/O error.
+#[cfg(target_os = "linux")]
 fn memory() -> Result<MemoryMetrics, String> {
     use std::collections::HashMap;
     let content = std::fs::read_to_string("/proc/meminfo")
@@ -147,7 +150,7 @@ fn memory() -> Result<MemoryMetrics, String> {
     })
 }
 
-#[cfg(not(any(unix, windows)))]
+#[cfg(not(any(target_os = "linux", windows)))]
 fn memory() -> Result<MemoryMetrics, String> {
     Err("memory metrics are unsupported on this platform".to_owned())
 }
@@ -209,7 +212,7 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
+    #[cfg(any(target_os = "linux", windows))]
     #[test]
     fn real_memory_report_is_well_formed() {
         let probe = MemProbe {

@@ -117,8 +117,10 @@ impl Probe for CpuProbe {
     }
 }
 
-/// Reads the current cumulative CPU counters.
-#[cfg(unix)]
+/// Reads the current cumulative CPU counters. `/proc` is Linux-only;
+/// macOS/BSD fall through to the unsupported stub below (§11.1: platform
+/// support must never be faked) instead of failing to open procfs.
+#[cfg(target_os = "linux")]
 fn sample() -> Result<CpuTimes, String> {
     let content =
         std::fs::read_to_string("/proc/stat").map_err(|err| format!("read /proc/stat: {err}"))?;
@@ -188,13 +190,13 @@ fn sample() -> Result<CpuTimes, String> {
     })
 }
 
-#[cfg(not(any(unix, windows)))]
+#[cfg(not(any(target_os = "linux", windows)))]
 fn sample() -> Result<CpuTimes, String> {
     Err("cpu counters are unsupported on this platform".to_owned())
 }
 
-/// 1-minute load average per online core (Linux only).
-#[cfg(unix)]
+/// 1-minute load average per online core (Linux only: /proc/loadavg).
+#[cfg(target_os = "linux")]
 fn load_per_core() -> Result<Option<f64>, String> {
     let content = std::fs::read_to_string("/proc/loadavg")
         .map_err(|err| format!("read /proc/loadavg: {err}"))?;
@@ -210,12 +212,12 @@ fn load_per_core() -> Result<Option<f64>, String> {
     Ok(Some(load1 / cores as f64))
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 fn load_per_core() -> Result<Option<f64>, String> {
     Ok(None)
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn online_cores() -> u32 {
     // `_SC_NPROCESSORS_ONLN` is portable across POSIX platforms.
     let cores = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
@@ -288,7 +290,7 @@ mod tests {
         assert!(from_config(&json!({"warn_load": 1.0, "crit_load": 0.5})).is_err());
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn real_cpu_report_is_well_formed() {
         let probe = CpuProbe {
