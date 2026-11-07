@@ -221,8 +221,14 @@ impl Engine {
     /// resume (§6.1); `drive` re-checks dependencies first.
     fn redrive(&mut self, run: RecoveryRun, out: &mut Vec<RecoveryRun>) {
         let id = run.resource_id.clone();
-        if run.status != RecoveryRunStatus::Waiting || self.active_runs.contains(&id) {
+        if run.status != RecoveryRunStatus::Waiting {
             return; // safety: nothing to resume
+        }
+        if self.active_runs.contains(&id) {
+            // The run was already popped from its queue; re-queue it so it
+            // is tried again next tick instead of being orphaned forever.
+            self.resume_queue.push(run);
+            return;
         }
         // The wait condition may have cleared itself.
         if self.managed[&id].snapshot.status == HealthStatus::Healthy {
@@ -1219,7 +1225,10 @@ impl Engine {
                     changed = true;
                 }
             }
-            if changed || !run.status.is_terminal() {
+            if changed {
+                // Crashed mid-execution: the persisted attempt had no
+                // outcome. `OutcomeUnknown` is the legal transition from
+                // `Executing` (§6.6); never blindly re-execute.
                 run.status = RecoveryRunStatus::OutcomeUnknown;
                 run.updated_at_unix_ms = now;
                 self.store.save_run(&run);
@@ -1243,6 +1252,12 @@ impl Engine {
                     "resumed unfinished run: outcome may be unknown, not re-executing"
                 );
                 affected += 1;
+            } else if !run.status.is_terminal() {
+                // Crashed before or between actions (Planning/Diagnosing/
+                // Verifying, no unknown outcome): this is NOT an unknown
+                // outcome. Re-drive it through the normal cycle rather than
+                // declaring it terminal and never re-entering.
+                self.resume_queue.push(run);
             }
         }
         affected
