@@ -817,7 +817,21 @@ pub struct ProbeRow {
 
 impl RunStore for Store {
     fn save_run(&self, run: &RecoveryRun) {
-        let payload = serde_json::to_string(run).unwrap_or_else(|_| "{}".to_owned());
+        // Never persist a corrupt payload: `"{}"` looks like a row but has
+        // no id, so `unfinished_runs` drops it as corrupt and the recovery
+        // is lost silently. Log the serialization failure instead.
+        let payload = match serde_json::to_string(run) {
+            Ok(payload) => payload,
+            Err(err) => {
+                tracing::error!(
+                    target: "custos::store",
+                    run = run.id.as_str(),
+                    error = %err,
+                    "serialize recovery run failed; not persisting"
+                );
+                return;
+            }
+        };
         let incident = run.incident_id.as_ref().map(|i| i.as_str().to_owned());
         // Errors are reported, not propagated: the RunStore contract is
         // fire-and-forget and the engine must not stall on persistence.
