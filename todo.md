@@ -462,3 +462,46 @@
 - `crates/custos-probe/src/http.rs:26` 将通用 HTTP 探测、TLS 证书路径检查与代理链路探测放在一个 1177 行文件；文件名 `http.rs` 不能表达这三类观测职责。
 - `crates/custos-config/src/lib.rs:56` 的 `RawProbe` 是所有探测类型的字段联合体，靠可选项表达每类约束；新增探测会继续扩大主配置文件而非各自形成类型化子模块。
 - `crates/custos-config/src/notification.rs:55` 的 `ChannelConfig` 与每个通道的配置、校验逻辑同文件；通道数量增加时配置契约和通道校验没有天然边界。
+
+## 代码深审 2026-11-01（已修 16，余 29 记档）
+
+报告：`docs/review/2026-11-01-code-review.md`。已修项见该报告的 fix commits 一节，以下为本轮记录未修的 P2/P3。
+
+### P2
+
+- [ ] R9 [P2] `netif.rs:143` 路由解析遇到首个缺少双空格分隔符的行即 `?` 中断，本地化或畸形行使整表报 NotFound 而非跳过该行。
+- [ ] R10 [P2] `docker.rs:121` `restarts.parse::<u64>().unwrap_or(0)` 把解析失败当成 0，掩盖崩溃循环。
+- [ ] R11 [P2] `plugins/cloudflared/src/main.rs:54,59-69` `cloudflared_tunnel_ha_connections` 解析失败时 `connections = None`，匹配分支判 HEALTHY——想探测的故障在解析失败后反被当成健康。
+- [ ] R12 [P2] `windows.rs:523-524` `parse_netsh_interfaces` 只识别英文/zh-CN 词元，ja/fr/de 等系统语言下所有接口判 down。
+- [ ] R13 [P2] `windows.rs:435-444` `netsh_interface_reset_argv` 把 `admin=disabled` 与 `admin=enabled` 塞进同一条 `netsh interface set interface`，单次调用只接受一个 `admin=`。
+- [ ] R14 [P2] `openwrt.rs:68-73` 非 JSON 的 `ubus call service list` 经 `unwrap_or(false)` 映射为 "Stopped"，应报 Unknown/错误。
+- [ ] R15 [P2] `plugins/mihomo/src/main.rs:129-135` `plain.first()` 取首个非当前成员而非当前之后（含回绕）的下一个，反复恢复不推进轮转。
+- [ ] R16 [P2] `linux.rs:331` / `windows.rs:542` `probe_tcp` 用 `format!("{}:{}", host, port).parse()`，裸 IPv6 字面量永远不是合法 `SocketAddr` 串，IPv6 目标结构性不可达。
+- [ ] S2 [P2] `herald.rs:44` `endpoint()` 把 `config.base_url` 直接拼进 POST URL 且无 SSRF 校验（webhook 侧有 `webhook_ssrf.rs`）。
+- [ ] C2 [P2] `store.rs:257,1060` 损坏的 `outcome` 串解析为 `None`，被误判为「执行中途崩溃」，原始 outcome 文本丢失。
+- [ ] C4 [P2] `herald.rs:94-99` 2xx 但 body 不可读 → `code=None` → 判 `Http`/可重试，产生多余重试（方向安全，优先级低）。
+- [ ] C5 [P2] `engine.rs:289,1089` `let _ = self.try_recover(...)` 丢弃依赖/备用组恢复错误，等待中的 run 停在 Waiting 且无错误上报。
+- [ ] C7 [P2] `store.rs:437-446` + `webhook.rs:134-158` 过期 `sending` 回收（60s）与合法长投递（retries=6、退避 30000 翻倍超过 60s）竞态，导致并发重复投递；需租约/回收设计。
+- [ ] C8 [P2] `supervisor.rs:96,185` 插件状态锁跨进程 spawn + 两次 RPC 往返持有（约 20s 阻塞 I/O），卡住引擎 tick 与 `status()`。
+- [ ] C13 [P2] `budget.rs:54,134-138` attempt 历史无界增长，从不裁剪或重置（与 C29 叠加）。
+- [ ] C15 [P2] `engine.rs:263-311` 等待者的依赖每 tick 重探，绕过 `ProbeDueTracker`，每次调用落一行 `probe_results`。
+- [ ] C16 [P2] `notify engine.rs:255-258` 瞬时失败一律 `mark_retry`，无尝试上限，行与计数无界增长（关联 C17）。
+- [ ] C17 [P2] `notify engine.rs:244-259` 瞬时失败无限重试，无最大尝试死信；长期宕机的通道永不升级给人。
+- [ ] C18 [P2] `notify engine.rs:137-221` 同步 fsync 的 SQLite 插入在引擎 tick 线程内联执行，突发会拖住唯一 tick。
+- [ ] C19 [P2] `notify engine.rs:225-281` 单通道重试睡眠链阻塞整条串行投递队列（webhook 通道内 `thread::sleep` 翻倍）。
+- [ ] C20 [P2] `engine.rs:571-574,745-747` 恢复动作在 tick 线程上跑，只有 plan `timeout_ms` 无看门狗，动作挂死会无限拖住 tick。
+- [ ] C21 [P2] `executor.rs:41` `StartFailed → Failed` 可重试，永久缺失的二进制会在整个 plan 内反复重试。
+- [ ] C22 [P2] `webhook.rs:134-158` 退避重复计算：通道内重试与队列重试对同一错误各自排期。
+- [ ] C23 [P2] `dashboard/src/lib.rs:92-105` 每次读有 2s 超时但无整请求期限，慢速滴流客户端（< 64 KiB）可长期占住单线程 accept 循环。
+- [ ] C24 [P2] `session.rs:245-309` 写确认等待用 `default_timeout()` 而非调用方 `timeout`，静默截断较长请求。
+- [ ] C27 [P2] `supervisor.rs:128-144` `HostError::Unavailable` 被当作崩溃，但存活插件也会经声明式 RPC 错误返回该值，白耗崩溃预算。
+- [ ] C29 [P2] `budget.rs` attempt 预算文档称「每 incident」，但成功恢复后从不重置，抖动后转稳的资源可能被误判耗尽。
+- [ ] C30 [P2] `dashboard/src/lib.rs:70-83` `for stream in self.listener.incoming() { Err(_) => continue }` 无退避，持续 accept 错误（EMFILE）会空转死循环。
+
+### P3
+
+- [ ] R17 [P3] `platform/error.rs:63-64` `From<ExecResult> for PlatformError` 内对 `Succeeded` 变体 `unreachable!()`。
+- [ ] R18 [P3] `http.rs:120,127` `JsonOp::Exists` 分支 `unreachable!()`（当前结构上不可达，一次重构后即可达）。
+- [ ] S1 [P3] `plugins/python/examples/file_health_probe.py:20,31` `target` 取自 params 直接用于 `os.path.getmtime` / `open(..., "a")`，无规范化和 `..`、绝对路径拒绝。
+- [ ] C6 [P3] `notify engine.rs:274-277` 投递后队列写失败只记日志，无对账（行停在 `sending` 直至过期回收）。
+- [ ] C9 [P3] `platform_tools.rs` `std::sync::MutexGuard` 跨慢速平台 I/O 持有；`try_lock` 把竞争表现为静默跳过的操作而非等待。
