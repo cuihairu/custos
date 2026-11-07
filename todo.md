@@ -430,7 +430,7 @@
 
 ## 整机 MSI（用户反复提出未落账，2026-11-08 补记并排期）
 
-- [ ] CUSTOS-MSI-001 [P1] custos 整机安装包：现 Nightly 产物名 `custos-cli-*.msi`，实际虽含 custos+custos-tray 两 exe 但命名与定位是「CLI 的 MSI」——用户要的是 custos 整机安装包。改法：wxs Product 更名 Custos（开始菜单两组快捷方式：Custos CLI / Custos Tray），产物更名 `custos-<ver>-x64.msi`（版本仍从 Cargo.toml 动态读，禁手写），tray 可选开机自启（注册表 Run 键，安装参数开关），升级路径同 ProductCode 覆盖安装，卸载干净（含自启键清理）；nightly.yml 上传更名后产物；Windows 真机（imac）msiexec 实装/卸载双向验证 + 截图证据。
+- [x] CUSTOS-MSI-001 [P1] custos 整机安装包：现 Nightly 产物名 `custos-cli-*.msi`，实际虽含 custos+custos-tray 两 exe 但命名与定位是「CLI 的 MSI」——用户要的是 custos 整机安装包。改法：wxs Product 更名 Custos（开始菜单两组快捷方式：Custos CLI / Custos Tray），产物更名 `custos-<ver>-x64.msi`（版本仍从 Cargo.toml 动态读，禁手写），tray 可选开机自启（注册表 Run 键，安装参数开关），升级路径同 ProductCode 覆盖安装，卸载干净（含自启键清理）；nightly.yml 上传更名后产物；Windows 真机（imac）msiexec 实装/卸载双向验证 + 截图证据。 → 已完成（2026-11-08）。修复：`048b53f`（MajorUpgrade 组合）+ `1999489`（DowngradeErrorMessage，CNDL0010）+ `1d6ce42`（快捷方式独立组件，ICE43/ICE57）；产物 `custos-0.1.0-x64.msi` 由 nightly 42397054170 产出；imac（Win11 专业版 10.0.26300）实装验证：基线旧 nightly→新 MSI 同 UpgradeCode 覆盖升级（product code ED899C34→CF1414FC），两快捷方式+CustosIcon+HKCU Run 自启（AUTOTRAY=1 默认，=0 关闭）全部到位，卸载后零残留（文件/快捷方式/Run 键/PATH/产品记录全清）；证据归档 `docs/evidence/msi/`（README+4 份 msiexec /l*v 日志+2 张截图+2 个 .lnk）。
 
 ## 默认示例补向日葵监控场景（用户反复提出未落账，2026-11-08 补记并排期）
 
