@@ -662,8 +662,15 @@ fn chunked_complete(body: &[u8]) -> bool {
         let Ok(size) = usize::from_str_radix(size_text, 16) else {
             return false;
         };
-        let chunk_end = size_end + 2 + size;
-        if chunk_end + 2 > rest.len() {
+        // Same overflow guard as dechunk(): a declared size that wraps
+        // `chunk_end` past usize::MAX is malformed, not complete.
+        let Some(chunk_end) = (size_end + 2).checked_add(size) else {
+            return false;
+        };
+        let Some(limit) = chunk_end.checked_add(2) else {
+            return false;
+        };
+        if limit > rest.len() {
             return false;
         }
         if size == 0 {
@@ -721,11 +728,17 @@ fn dechunk(body: &[u8]) -> Option<Vec<u8>> {
         let size_end = rest.windows(2).position(|w| w == b"\r\n")?;
         let size_text = std::str::from_utf8(&rest[..size_end]).ok()?;
         let size = usize::from_str_radix(size_text.split(';').next()?.trim(), 16).ok()?;
-        let chunk_end = size_end + 2 + size;
-        if chunk_end + 2 > rest.len() {
+        // A peer can declare a huge chunk size (up to usize::MAX); the
+        // unchecked `size_end + 2 + size` overflows (debug: panic, release:
+        // wraps past the `rest.len()` guard) and the slice below then
+        // indexes start > end. Use checked arithmetic so an oversized or
+        // wrapping chunk is treated as a malformed body, not a crash.
+        let data_start = size_end + 2;
+        let chunk_end = data_start.checked_add(size)?;
+        if chunk_end.checked_add(2)? > rest.len() {
             return None;
         }
-        out.extend_from_slice(&rest[size_end + 2..chunk_end]);
+        out.extend_from_slice(&rest[data_start..chunk_end]);
         if size == 0 {
             return Some(out);
         }
@@ -1160,5 +1173,23 @@ mod tests {
         let response = parse_response(raw, 1024).unwrap();
         assert_eq!(response.status, 200);
         assert_eq!(response.body, "hello world");
+    }
+
+    #[test]
+    fn huge_chunk_size_is_malformed_not_panic() {
+        // A peer-declared chunk size near usize::MAX must overflow-reject
+        // (checked math), not panic on the add or slice start > end.
+        let body = b"FFFFFFFFFFFFFFFF\r\nabc";
+        assert!(!chunked_complete(body));
+        assert_eq!(dechunk(body), None);
+    }
+
+    #[test]
+    fn oversized_but_fitting_chunk_size_is_malformed() {
+        // Fits in usize without wrapping yet exceeds the buffered body:
+        // rejected by the length guard, not misread as complete.
+        let body = b"FFFFFFFF\r\nabc";
+        assert!(!chunked_complete(body));
+        assert_eq!(dechunk(body), None);
     }
 }
