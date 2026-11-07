@@ -223,7 +223,13 @@ pub fn from_config(config: &serde_json::Value) -> Result<HttpProbe, String> {
             (ms > 0).then_some(ms)
         },
         follow_redirects: bool_or(config, "follow_redirects", false),
-        max_redirects: u64_or(config, "max_redirects", MAX_REDIRECTS as u64) as u32,
+        max_redirects: {
+            // Reject instead of `as u32`: a 4GiB-plus value silently
+            // truncates to 0 (redirects off) or 1, lying about the config.
+            let raw = u64_or(config, "max_redirects", u64::from(MAX_REDIRECTS));
+            u32::try_from(raw)
+                .map_err(|_| format!("`probe.max_redirects` {raw} does not fit in u32"))?
+        },
         verify_tls: bool_or(config, "verify_tls", true),
         max_response_bytes: {
             let bytes = u64_or(config, "max_response_bytes", 0);
@@ -920,6 +926,18 @@ mod tests {
             "json_assertions": [{ "path": "$.a", "op": "==" }]
         });
         assert!(from_config(&missing).unwrap_err().contains("required"));
+    }
+
+    #[test]
+    fn from_config_rejects_redirect_cap_that_truncates() {
+        // 2^32 truncates to 0 via `as u32` (redirects silently off); it
+        // must be a config error instead.
+        let huge = serde_json::json!({ "url": "http://x/", "max_redirects": 4294967296u64 });
+        let err = from_config(&huge).unwrap_err();
+        assert!(err.contains("max_redirects"), "{err}");
+        // A sane explicit cap still parses.
+        let sane = serde_json::json!({ "url": "http://x/", "max_redirects": 2 });
+        assert_eq!(from_config(&sane).unwrap().max_redirects, 2);
     }
 
     #[test]
