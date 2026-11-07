@@ -191,7 +191,11 @@ jobs:
           # cargo-wix writes the msi to the workspace target/wix (manifest
           # target_directory). Previous --target layout failures were light
           # missing custos-tray.exe (fixed by the pre-build above), not the glob.
-          Copy-Item -Path "target/wix/*.msi" -Destination dist/ -Force
+          # Rename to the full-product artifact name: custos-<ver>-x64.msi
+          # (cargo-wix names it after the Cargo package + arch, i.e.
+          # custos-cli-0.1.0-x86_64.msi — not the operator-facing name).
+          $msi = Get-ChildItem "target/wix/*.msi" | Select-Object -First 1
+          Copy-Item $msi.FullName "dist/custos-$ver-x64.msi" -Force
           Get-ChildItem dist
 
       # macOS: dmg (ad-hoc signed .app) + binary tarball.
