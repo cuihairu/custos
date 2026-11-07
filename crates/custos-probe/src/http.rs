@@ -10,6 +10,7 @@ use crate::config::{bool_or, optional_str, required_str, string_array, u64_or};
 use crate::{tls, Probe, ProbeReport};
 use custos_model::{HealthStatus, Resource};
 use regex::Regex;
+use std::cmp::Ordering;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
@@ -123,7 +124,7 @@ pub fn check_json_assertion(root: &serde_json::Value, assertion: &JsonAssertion)
                 JsonOp::Equals => equal,
                 JsonOp::NotEquals => !equal,
                 JsonOp::GreaterThan => json_greater(actual, &assertion.value),
-                JsonOp::LessThan => !json_greater(actual, &assertion.value) && !equal,
+                JsonOp::LessThan => json_less(actual, &assertion.value),
                 JsonOp::Exists => unreachable!(),
             };
             if ok {
@@ -149,17 +150,32 @@ fn json_values_equal(actual: &serde_json::Value, expected: &str) -> bool {
     }
 }
 
-/// Numeric "greater": both sides must be numbers (or numeric strings).
-fn json_greater(actual: &serde_json::Value, expected: &str) -> bool {
-    let parse = |value: &serde_json::Value| match value {
+/// Numeric view of a JSON value: numbers pass through, numeric strings
+/// parse; everything else is incomparable.
+fn numeric_of(value: &serde_json::Value) -> Option<f64> {
+    match value {
         serde_json::Value::Number(num) => num.as_f64(),
         serde_json::Value::String(text) => text.trim().parse::<f64>().ok(),
         _ => None,
-    };
-    match (parse(actual), expected.trim().parse::<f64>()) {
-        (Some(left), Ok(right)) => left > right,
+    }
+}
+
+/// Numeric comparison contract for `<`/`>` assertions: both sides must be
+/// numbers (or numeric strings); incomparable types return false so the
+/// assertion fails instead of silently passing.
+fn json_compare(actual: &serde_json::Value, expected: &str, op: Ordering) -> bool {
+    match (numeric_of(actual), expected.trim().parse::<f64>()) {
+        (Some(left), Ok(right)) => left.partial_cmp(&right) == Some(op),
         _ => false,
     }
+}
+
+fn json_greater(actual: &serde_json::Value, expected: &str) -> bool {
+    json_compare(actual, expected, Ordering::Greater)
+}
+
+fn json_less(actual: &serde_json::Value, expected: &str) -> bool {
+    json_compare(actual, expected, Ordering::Less)
 }
 
 /// Builds from `[resources.probe]` (docs/guide/probe-survey.md §26.2).
@@ -862,6 +878,11 @@ mod tests {
         assert!(check("$.count", JsonOp::GreaterThan, "100").is_some());
         assert_eq!(check("$.ratio", JsonOp::LessThan, "4"), None);
         assert!(check("$.ratio", JsonOp::LessThan, "3").is_some());
+        // Non-numeric actual must FAIL the numeric op, not pass it
+        // (a negated-greater formulation used to let `<` pass silently).
+        assert!(check("$.status", JsonOp::LessThan, "5").is_some());
+        assert!(check("$.status", JsonOp::GreaterThan, "5").is_some());
+        assert!(check("$.enabled", JsonOp::LessThan, "5").is_some());
         // Missing path fails every value operator.
         assert!(check("$.missing", JsonOp::Equals, "x").is_some());
         // null is present: Exists passes; Equals to "null" also matches by
