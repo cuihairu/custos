@@ -8,8 +8,10 @@
          version, so AllowSameVersionUpgrades lets the next build replace
          the previous one. Downgrades stay blocked by default (the safe
          direction); no versioned release exists, so there is no
-         higher-versioned build to roll back from. -->
-    <MajorUpgrade AllowSameVersionUpgrades="yes" />
+         higher-versioned build to roll back from. AllowDowngrades is left
+         unset (no), so candle requires DowngradeErrorMessage (CNDL0010). -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of Custos is already installed. Downgrades are not supported." />
     <!-- Application icon: converted from the official SVG brand asset
          (docs/public/logo.svg) by scripts/make-windows-icon.py. Shown in
          Add/Remove Programs and on shortcuts. The same .ico is embedded
