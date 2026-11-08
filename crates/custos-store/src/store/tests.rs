@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::config::RetentionConfig;
 use crate::migrations::MIGRATIONS;
