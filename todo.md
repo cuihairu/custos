@@ -451,7 +451,7 @@
 
 ### 超大文件候选
 
-- [ ] LAY-001 [P1] 拆分 crates/custos-engine/src/engine.rs（2148 行）——观测、诊断、依赖等待、恢复计划、执行验证、预算升级和崩溃续跑都在一个类型路径中。——（crates/custos-engine/src/engine.rs:49）
+- [x] LAY-001 [P1] 拆分 crates/custos-engine/src/engine.rs（2148 行）——观测、诊断、依赖等待、恢复计划、执行验证、预算升级和崩溃续跑都在一个类型路径中。——（crates/custos-engine/src/engine.rs:49）✅ commit 70e1c72，engine.rs→engine/{mod,orchestrate,observation,recover,diagnose,dependency}.rs，测试 537 通过/0 失败
 - [ ] LAY-002 [P1] 拆分 crates/custos-store/src/store.rs（1566 行）——连接生命周期、读取 API、运行仓储、通知队列、保留清理与多套集成测试耦合在一个实现文件。——（crates/custos-store/src/store.rs:34）
 - [ ] LAY-003 [P1] 拆分 crates/custos-config/src/lib.rs（1376 行）——主 schema、探测字段联合体、依赖/计划校验和运行结构构造都写在一个文件。——（crates/custos-config/src/lib.rs:56）
 - [ ] LAY-004 [P1] 拆分 crates/custos-probe/src/http.rs（1177 行）——HTTP 状态、内容、时延、重定向、TLS 与多协议出站探测混在一个适配器。——（crates/custos-probe/src/http.rs:26）
