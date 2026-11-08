@@ -434,7 +434,7 @@
 
 ## 默认示例补向日葵监控场景（用户反复提出未落账，2026-11-08 补记并排期）
 
-- [ ] CUSTOS-EXAM-001 [P1] 默认示例集补向日葵监控：新增 `examples/sunlogin.toml`（type="service"，Windows unit="SunloginService" 实测于 imac 存在，Linux 对应 systemd unit 注释说明；依赖链 sunlogin→network 照 roadmap 场景1 口径）；`examples/` 现仅 3 个（basic-process/dependency-chain/notifications），README 未列 examples 入口——补 README 示例节 + nightly.yml 打包照旧 cp examples/*.toml；`custos validate examples/sunlogin.toml` 必过 + `cargo test --workspace` 全绿。
+- [x] CUSTOS-EXAM-001 [P1] 默认示例集补向日葵监控：新增 `examples/sunlogin.toml`（type="service"，Windows unit="SunloginService" 实测于 imac 存在，Linux 对应 systemd unit 注释说明；依赖链 sunlogin→network 照 roadmap 场景1 口径）；`examples/` 现仅 3 个（basic-process/dependency-chain/notifications），README 未列 examples 入口——补 README 示例节 + nightly.yml 打包照旧 cp examples/*.toml；`custos validate examples/sunlogin.toml` 必过 + `cargo test --workspace` 全绿。 → 已完成（2026-11-09，并行提交 `1ce8e58`）：`examples/sunlogin.toml` 已建（type="service"、unit="SunloginService"、Linux `oray-sunlogin.service` 注释、依赖链 sunlogin→network）；README.md:49-58 + README.zh.md 已补 Examples 节；nightly.yml:110 照旧 `cp examples/*.toml`；`custos validate examples/sunlogin.toml` = OK（2 resources, acyclic）；SunloginService 于 imac 实测存在（Status=Stopped, StartType=Manual，2026-11-09 复核）；无 Rust 改动（仅 docs/toml），`cargo test --workspace` 537 passed / 0 failed。
 
 ## 源码分层分析 2026-11-07
 
