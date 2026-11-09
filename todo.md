@@ -508,7 +508,7 @@
 
 ### P3
 
-- [ ] R17 [P3] `platform/error.rs:63-64` `From<ExecResult> for PlatformError` 内对 `Succeeded` 变体 `unreachable!()`。
+- [x] R17 [P3] `platform/error.rs:63-64` `From<ExecResult> for PlatformError` 内对 `Succeeded` 变体 `unreachable!()`。 `6184053`（Succeeded 臂改为 `PlatformError::Failed("internal: a successful execution reached the error conversion")`——当前生产路径（exec_tool.rs 自行 match，从不转换 Succeeded）确实不可达，但未来调用方接线错误会让看门狗 panic 而非暴露失败；恒不 panic 原则下归入 Failed 并注明 internal。红测试 `success_reaching_the_conversion_never_panics`（对旧代码实测 RED：panic at error.rs:64 `unreachable!`；修复后返回 Failed 且消息含 internal）；`cargo test --workspace` 579 通过 0 失败）
 - [ ] R18 [P3] `http.rs:120,127` `JsonOp::Exists` 分支 `unreachable!()`（当前结构上不可达，一次重构后即可达）。
 - [ ] S1 [P3] `plugins/python/examples/file_health_probe.py:20,31` `target` 取自 params 直接用于 `os.path.getmtime` / `open(..., "a")`，无规范化和 `..`、绝对路径拒绝。
 - [ ] C6 [P3] `notify engine.rs:274-277` 投递后队列写失败只记日志，无对账（行停在 `sending` 直至过期回收）。
