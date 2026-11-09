@@ -24,6 +24,9 @@ impl Engine {
             .check_start(id, &self.budget, self.active_runs.len())?;
 
         self.active_runs.insert(id.clone());
+        // The high-risk allowance is per run (§6.5, C29): every run
+        // starts with its own, not with the lifetime leftover.
+        self.budget_state.reset_high_risk();
         let run = self.recover(id);
         self.active_runs.remove(id);
         Ok(run)
@@ -185,6 +188,12 @@ impl Engine {
                         self.clock.now_unix_ms(),
                     );
                     self.close_incident_of(&run);
+                    // §6.5 caps attempts "per incident": the verified
+                    // recovery closed this incident, so the resource's
+                    // budget starts fresh for the next one (C29). Without
+                    // the reset the limit degrades to a lifetime total and
+                    // a recovered flapper stays blocked forever.
+                    self.budget_state.reset_attempts(id);
                     let run_id = run.id.clone();
                     let at = self.clock.now_unix_ms();
                     self.finish_run(

@@ -155,6 +155,20 @@ impl BudgetState {
         self.high_risk_used += 1;
     }
 
+    /// Clears the resource's attempt counter (§6.5 "per incident"): the
+    /// engine calls this when a recovery run verifies. A fresh incident
+    /// must not inherit the exhausted budget of a flapping past (C29) —
+    /// without the reset the limit degrades from per-incident to lifetime.
+    pub fn reset_attempts(&mut self, resource_id: &ResourceId) {
+        self.attempts.remove(resource_id);
+    }
+
+    /// Resets the high-risk allowance for a new RecoveryRun (§6.5: the
+    /// limit is per run, not a lifetime total) (C29).
+    pub fn reset_high_risk(&mut self) {
+        self.high_risk_used = 0;
+    }
+
     pub fn attempts_for(&self, resource_id: &ResourceId) -> u32 {
         self.attempts.get(resource_id).copied().unwrap_or(0)
     }

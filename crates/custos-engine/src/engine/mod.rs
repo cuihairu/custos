@@ -929,6 +929,66 @@ mod tests {
     }
 
     #[test]
+    fn attempt_budget_resets_after_a_verified_recovery() {
+        // C29: the attempt budget is documented "per incident" but was
+        // never reset — a resource that flapped once and then recovered
+        // stayed blocked forever, and the next incident was refused
+        // before any action ran.
+        let (mut engine, _store, _exec, clock) = test_engine_with_clock(
+            vec![resource(
+                "svc",
+                vec![plan("restart", 1, RiskLevel::Low)],
+                vec![],
+            )],
+            vec![(ResourceId::new("svc"), vec![])],
+            vec![vec![false, true, false, true]],
+            vec![ActionOutcome::Succeeded, ActionOutcome::Succeeded],
+        );
+        engine.set_budget(RecoveryBudget {
+            max_attempts_per_resource: 1,
+            ..RecoveryBudget::default()
+        });
+        let first = engine.tick();
+        assert_eq!(first[0].status, RecoveryRunStatus::Recovered);
+        // Refault after a verified recovery: a fresh incident gets a
+        // fresh budget. Advance past the cooldown AND the probe interval
+        // so the observation pass actually re-probes.
+        clock.advance_ms(11_000);
+        let second = engine.tick();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].status, RecoveryRunStatus::Recovered);
+        assert_eq!(second[0].action_attempts.len(), 1);
+    }
+
+    #[test]
+    fn high_risk_budget_resets_per_run() {
+        // Same defect for the high-risk budget: documented "per
+        // RecoveryRun", implemented as a lifetime counter — the second
+        // incident's single high-risk action was refused.
+        let (mut engine, _store, _exec, clock) = test_engine_with_clock(
+            vec![resource(
+                "svc",
+                vec![plan("restart", 1, RiskLevel::High)],
+                vec![],
+            )],
+            vec![(ResourceId::new("svc"), vec![])],
+            vec![vec![false, true, false, true]],
+            vec![ActionOutcome::Succeeded, ActionOutcome::Succeeded],
+        );
+        engine.set_budget(RecoveryBudget {
+            max_high_risk_actions: 1,
+            ..RecoveryBudget::default()
+        });
+        let first = engine.tick();
+        assert_eq!(first[0].status, RecoveryRunStatus::Recovered);
+        clock.advance_ms(11_000);
+        let second = engine.tick();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].status, RecoveryRunStatus::Recovered);
+        assert_eq!(second[0].action_attempts.len(), 1);
+    }
+
+    #[test]
     fn busy_mutex_rejects_second_run() {
         let (mut engine, _store, _) = test_engine(
             vec![resource(
