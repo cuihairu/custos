@@ -59,7 +59,23 @@ impl Engine {
                 self.suspend_on(run, target, step);
                 return false;
             }
-            let _ = self.try_recover(target);
+            // A refusal here must not vanish (C5): it is the difference
+            // between "recovery ran and failed" and "no recovery was ever
+            // attempted", and the escalation below reports it either way.
+            let refusal = match self.try_recover(target) {
+                Ok(_) => None,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "custos::engine",
+                        run = run.id.as_str(),
+                        resource = id.as_str(),
+                        dependency = target.as_str(),
+                        error = %err,
+                        "dependency recovery refused before any attempt"
+                    );
+                    Some(err.to_string())
+                }
+            };
             // Re-verify after dependency recovery.
             self.probe_one(target, self.clock.now_unix_ms());
             if self.managed[target].snapshot.status != HealthStatus::Healthy {
@@ -78,11 +94,18 @@ impl Engine {
                     dependency_id: target.clone(),
                     at_unix_ms: self.clock.now_unix_ms(),
                 });
+                let detail = match &refusal {
+                    Some(reason) => format!(
+                        "dependency `{}` unsatisfied (recovery refused: {reason})",
+                        target.as_str()
+                    ),
+                    None => format!("dependency `{}` unsatisfied", target.as_str()),
+                };
                 self.store.save_step(
                     &run.id,
                     bump(step),
                     "resolving_dependencies",
-                    &format!("dependency `{}` unsatisfied", target.as_str()),
+                    &detail,
                     self.clock.now_unix_ms(),
                 );
                 tracing::warn!(
@@ -136,7 +159,10 @@ impl Engine {
             return true;
         }
         // Recover each unhealthy member (respecting in-flight/cooldown), then
-        // re-probe and re-judge the group.
+        // re-probe and re-judge the group. Refused recoveries are collected
+        // and reported with the unsatisfied verdict (C5) — a skipped member
+        // must be distinguishable from one whose recovery ran and failed.
+        let mut refused = Vec::new();
         for member in &members {
             let Some(managed) = self.managed.get(member) else {
                 continue;
@@ -149,7 +175,18 @@ impl Engine {
             {
                 continue;
             }
-            let _ = self.try_recover(member);
+            if let Err(err) = self.try_recover(member) {
+                tracing::warn!(
+                    target: "custos::engine",
+                    run = run.id.as_str(),
+                    resource = id.as_str(),
+                    group = group.group_id.as_str(),
+                    member = member.as_str(),
+                    error = %err,
+                    "group member recovery refused before any attempt"
+                );
+                refused.push(format!("{} ({err})", member.as_str()));
+            }
             self.probe_one(member, self.clock.now_unix_ms());
         }
         if group.satisfied_by(&|m| {
@@ -167,15 +204,19 @@ impl Engine {
                 .unwrap_or_else(|| ResourceId::new("group")),
             at_unix_ms: self.clock.now_unix_ms(),
         });
+        let mut detail = format!(
+            "alternative group `{}` unsatisfied ({required} of {} required)",
+            group.group_id,
+            members.len()
+        );
+        if !refused.is_empty() {
+            detail.push_str(&format!("; recovery refused for {}", refused.join(", ")));
+        }
         self.store.save_step(
             &run.id,
             bump(step),
             "resolving_dependencies",
-            &format!(
-                "alternative group `{}` unsatisfied ({required} of {} required)",
-                group.group_id,
-                members.len()
-            ),
+            &detail,
             self.clock.now_unix_ms(),
         );
         tracing::warn!(

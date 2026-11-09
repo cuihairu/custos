@@ -99,8 +99,17 @@ impl Engine {
                 }
                 if !cooling_down && !self.active_runs.contains(&dep) {
                     // Retry the dependency now (its own budgets still apply),
-                    // then re-evaluate on the freshest evidence.
-                    let _ = self.try_recover(&dep);
+                    // then re-evaluate on the freshest evidence. A refusal
+                    // must not vanish (C5): the parked dependents keep
+                    // waiting/burning cycles, so the reason is reported.
+                    if let Err(err) = self.try_recover(&dep) {
+                        tracing::warn!(
+                            target: "custos::engine",
+                            dependency = dep.as_str(),
+                            error = %err,
+                            "dependency retry refused; parked dependents keep waiting"
+                        );
+                    }
                     self.probe_one(&dep, self.clock.now_unix_ms());
                     healthy = self.managed[&dep].snapshot.status == HealthStatus::Healthy;
                     if !healthy {

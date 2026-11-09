@@ -1124,4 +1124,100 @@ mod tests {
         assert_eq!(app_run.status, RecoveryRunStatus::Escalated);
         assert_eq!(app_run.action_attempts.len(), 0);
     }
+
+    #[test]
+    fn dependency_recovery_refusal_is_surfaced_in_escalation() {
+        // C5: a refused dependency recovery (try_recover error) was silently
+        // dropped — the run escalated as a bare "dependency unsatisfied"
+        // with no trace of why no attempt happened. Here the dependency has
+        // no recovery plans, so try_recover refuses; the refusal reason
+        // must reach the persisted step record.
+        let app = resource(
+            "app",
+            vec![plan("restart-app", 1, RiskLevel::Low)],
+            vec![required_dep("dep")],
+        );
+        let dep = resource("dep", vec![], vec![]);
+        let (mut engine, store, _scripted) = test_engine(
+            vec![app, dep],
+            vec![
+                (ResourceId::new("dep"), vec![]),
+                (ResourceId::new("app"), vec![ResourceId::new("dep")]),
+            ],
+            vec![vec![false], vec![false]],
+            vec![],
+        );
+        engine.tick();
+        let exhausted = store
+            .events()
+            .iter()
+            .find_map(|e| match e {
+                EngineEvent::RecoveryExhausted {
+                    run_id,
+                    resource_id,
+                    ..
+                } if resource_id.as_str() == "app" => Some(run_id.clone()),
+                _ => None,
+            })
+            .expect("upstream run escalated");
+        let detail = store
+            .steps_of(&exhausted)
+            .into_iter()
+            .rev()
+            .find(|s| s.phase == "resolving_dependencies")
+            .expect("dependency step recorded")
+            .detail;
+        assert!(detail.contains("recovery refused"), "{detail}");
+    }
+
+    #[test]
+    fn group_member_recovery_refusal_is_surfaced_in_escalation() {
+        // C5 on the alternative-group path: members whose recovery is
+        // refused (no plans) must be named with the refusal reason in the
+        // persisted group-unsatisfied step, not silently skipped.
+        let group = custos_model::AlternativeGroup {
+            group_id: "egress".into(),
+            members: vec![ResourceId::new("proxy-a"), ResourceId::new("proxy-b")],
+            required_count: 2,
+        };
+        let (mut engine, store) = test_engine_with_groups(
+            vec![
+                resource("proxy-a", vec![], vec![]),
+                resource("proxy-b", vec![], vec![]),
+                resource(
+                    "app",
+                    vec![plan("restart-app", 1, RiskLevel::Low)],
+                    vec![group_dep("egress", "proxy-a")],
+                ),
+            ],
+            vec![(ResourceId::new("app"), vec![])],
+            vec![vec![false], vec![false], vec![false]],
+            vec![],
+            vec![group],
+        );
+        engine.tick();
+        let exhausted = store
+            .events()
+            .iter()
+            .find_map(|e| match e {
+                EngineEvent::RecoveryExhausted {
+                    run_id,
+                    resource_id,
+                    ..
+                } if resource_id.as_str() == "app" => Some(run_id.clone()),
+                _ => None,
+            })
+            .expect("upstream run escalated");
+        let detail = store
+            .steps_of(&exhausted)
+            .into_iter()
+            .rev()
+            .find(|s| s.phase == "resolving_dependencies")
+            .expect("group step recorded")
+            .detail;
+        assert!(
+            detail.contains("proxy-a") && detail.contains("recovery refused"),
+            "{detail}"
+        );
+    }
 }
