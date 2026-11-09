@@ -7,8 +7,8 @@ use custos_platform::windows::{
     capabilities, has_wifi_adapter, ipconfig_flushdns_argv, netsh_interface_set_admin_argv,
     netsh_wlan_connect_argv, netsh_wlan_reports_adapter, parse_default_gateway,
     parse_netsh_interfaces, parse_netsh_wlan_state, parse_sc_query, parse_tasklist_csv,
-    route_print_argv, sc_argv, tasklist_argv, tasklist_has_pid, NetshNetworkController,
-    WindowsProcessController,
+    route_print_argv, run_enable_with_retry, sc_argv, tasklist_argv, tasklist_has_pid,
+    NetshNetworkController, WindowsProcessController,
 };
 use custos_platform::{NetworkInterfaceController, PlatformError, ProcessController};
 
@@ -353,4 +353,35 @@ fn capabilities_do_not_claim_unwired_wifi_reconnect() {
             "`{operation}` must stay native; refusing wifi.reconnect must not drop wired operations"
         );
     }
+}
+
+#[test]
+fn reset_reenable_retries_then_names_the_nic_left_down() {
+    // AUD-B: a transient enable failure right after admin-down is retried
+    // (the NIC can be briefly not-ready); if it never succeeds the error
+    // must name the management-channel loss instead of a bare netsh
+    // message.
+    let mut calls = 0;
+    let recovered = run_enable_with_retry("eth0", 0, || {
+        calls += 1;
+        if calls < 3 {
+            Err("device not ready".into())
+        } else {
+            Ok(())
+        }
+    });
+    assert_eq!(recovered, Ok(()));
+    assert_eq!(calls, 3, "recovers on the third try");
+
+    let mut calls = 0;
+    let err = run_enable_with_retry("eth0", 0, || {
+        calls += 1;
+        Err::<(), String>("access denied".into())
+    })
+    .unwrap_err();
+    // 4 retries + the first attempt.
+    assert_eq!(calls, 5, "retries are bounded");
+    assert!(err.contains("eth0"), "err: {err}");
+    assert!(err.contains("administratively DOWN"), "err: {err}");
+    assert!(err.contains("access denied"), "err: {err}");
 }

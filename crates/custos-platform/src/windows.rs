@@ -455,6 +455,39 @@ pub fn ipconfig_flushdns_argv() -> Vec<String> {
     vec!["ipconfig".into(), "/flushdns".into()]
 }
 
+/// Bounded retries for the re-enable step of [`NetshNetworkController::reset`]
+/// (AUD-B): a NIC right after an admin-down transition can be briefly
+/// not-ready, and a failed enable leaves the interface administratively
+/// DOWN — management-channel loss — so exhausted retries produce an error
+/// that names that state instead of a bare netsh message.
+const ADMIN_ENABLE_RETRIES: usize = 4;
+#[cfg(windows)]
+const ADMIN_ENABLE_RETRY_PAUSE_MS: u64 = 500;
+
+/// Runs one closure with the bounded re-enable retry. Platform-independent
+/// over the run closure so the Linux suite exercises the contract.
+pub fn run_enable_with_retry(
+    name: &str,
+    pause_ms: u64,
+    mut run_once: impl FnMut() -> Result<(), String>,
+) -> Result<(), String> {
+    let mut last = String::new();
+    for attempt in 0..=ADMIN_ENABLE_RETRIES {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(pause_ms));
+        }
+        match run_once() {
+            Ok(()) => return Ok(()),
+            Err(err) => last = err,
+        }
+    }
+    Err(format!(
+        "network interface `{name}` is left administratively DOWN: \
+         re-enable failed {} times ({last})",
+        ADMIN_ENABLE_RETRIES + 1
+    ))
+}
+
 /// Windows network operations via `netsh`/`ipconfig`/`route`.
 pub struct NetshNetworkController;
 
@@ -480,11 +513,19 @@ impl NetworkInterfaceController for NetshNetworkController {
         #[cfg(windows)]
         {
             // Down then up as two calls: one `admin=` per call (R13).
-            for enabled in [false, true] {
-                let argv = netsh_interface_set_admin_argv(name, enabled);
+            {
+                let argv = netsh_interface_set_admin_argv(name, false);
                 expect_success(run(&argv.iter().map(String::as_str).collect::<Vec<_>>()))?;
             }
-            Ok(())
+            // The re-enable retries (AUD-B): right after the admin-down
+            // transition the NIC can be briefly not-ready, and a failed
+            // enable leaves the management channel cut.
+            run_enable_with_retry(name, ADMIN_ENABLE_RETRY_PAUSE_MS, || {
+                let argv = netsh_interface_set_admin_argv(name, true);
+                expect_success(run(&argv.iter().map(String::as_str).collect::<Vec<_>>()))
+                    .map_err(|err: PlatformError| err.to_string())
+            })
+            .map_err(PlatformError::Failed)
         }
         #[cfg(not(windows))]
         {
