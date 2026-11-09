@@ -1,4 +1,3 @@
-
 use super::*;
 use custos_model::{FaultCode, HealthCondition, ResourceId};
 
