@@ -50,6 +50,18 @@ impl ProcdServiceController {
     }
 }
 
+/// True when a `ubus call service list '{"name":"<unit>"}'` reply carries
+/// the unit with instances (pure; fixture-tested). A non-JSON reply is an
+/// error, never guessed as Stopped (R14): ubus error text used to become
+/// `false` via `unwrap_or`, hiding a probe/command failure as "stopped".
+fn service_list_has_instances(reply: &str, unit: &str) -> PlatformResult<bool> {
+    let value: serde_json::Value = serde_json::from_str(reply)
+        .map_err(|e| PlatformError::Failed(format!("ubus service list reply JSON: {e}")))?;
+    Ok(value
+        .get(unit)
+        .is_some_and(|svc| svc.get("instances").is_some()))
+}
+
 impl ServiceController for ProcdServiceController {
     fn status(&self, unit: &str) -> PlatformResult<ServiceState> {
         require_openwrt()?;
@@ -65,12 +77,7 @@ impl ServiceController for ProcdServiceController {
         ];
         match run(&argv) {
             ExecResult::Succeeded { stdout, .. } => {
-                let has_instances = serde_json::from_str::<serde_json::Value>(&stdout)
-                    .map(|v| {
-                        v.get(unit)
-                            .is_some_and(|svc| svc.get("instances").is_some())
-                    })
-                    .unwrap_or(false);
+                let has_instances = service_list_has_instances(&stdout, unit)?;
                 if has_instances {
                     Ok(ServiceState::Running)
                 } else {
@@ -193,6 +200,34 @@ mod tests {
         assert!(matches!(err, PlatformError::Unsupported(_)), "{err}");
         let err = ubus_call("network.interface.wan", "status", None).unwrap_err();
         assert!(matches!(err, PlatformError::Unsupported(_)), "{err}");
+    }
+
+    #[test]
+    fn non_json_service_list_reply_is_an_error_not_stopped() {
+        // R14: ubus answering with non-JSON (an error line) must not be
+        // read as a stopped service.
+        for reply in [
+            "ubus: invalid command\n",
+            "Unknown method\n",
+            "service not found\n",
+        ] {
+            let err = service_list_has_instances(reply, "firewall").unwrap_err();
+            assert!(matches!(err, PlatformError::Failed(_)), "{reply:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn service_list_reply_reads_instances() {
+        let with = service_list_has_instances(
+            r#"{"firewall": {"instances": {"firewall": {}}}}"#,
+            "firewall",
+        )
+        .unwrap();
+        assert!(with);
+        let without = service_list_has_instances(r#"{"firewall": {}}"#, "firewall").unwrap();
+        assert!(!without);
+        let absent = service_list_has_instances(r#"{}"#, "firewall").unwrap();
+        assert!(!absent, "unit not listed = stopped");
     }
 
     #[test]
