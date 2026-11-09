@@ -144,6 +144,14 @@ impl PluginSupervisor {
         let session = self.healthy_session()?;
         match session.call(method, params) {
             Err(HostError::Unavailable) => {
+                // A live plugin may also deliver Unavailable as a
+                // declarative RPC error — its verdict about its backend,
+                // not its death. Pass it through untouched: burning the
+                // crash budget here would mark a healthy process
+                // unrecoverable (C27).
+                if session.is_running() {
+                    return Err(HostError::Unavailable);
+                }
                 // The session died under us: absorb the death into the
                 // crash budget and surface it; the NEXT call decides
                 // whether a restart is still affordable.
@@ -320,11 +328,19 @@ impl PluginSupervisor {
 
     fn absorb_crash(&self) {
         let dead = lock(&self.state).session.take();
+        // Only a dead session burns the budget (C27): the same error can
+        // surface while the process is alive, and `record_crash_locked`
+        // used to count any taken session — live ones included.
+        let really_dead = dead.as_ref().is_some_and(|session| !session.is_running());
         // Dying words are captured before re-locking: the poll sleeps up
         // to 100ms.
-        let dead_words = dead.as_deref().and_then(dying_words);
+        let dead_words = if really_dead {
+            dead.as_deref().and_then(dying_words)
+        } else {
+            None
+        };
         let mut state = lock(&self.state);
-        self.record_crash_locked(&mut state, dead.is_some(), dead_words);
+        self.record_crash_locked(&mut state, really_dead, dead_words);
     }
 
     /// Crash bookkeeping under the state lock; the dying words are

@@ -138,6 +138,13 @@ fn main() {
                     eprintln!("mock plugin dying on purpose");
                     std::process::exit(3);
                 }
+                if params["unavailable"].as_bool().unwrap_or(false) {
+                    // Declarative RPC failure: the plugin reports its
+                    // backend as unavailable while the process itself
+                    // stays alive (C27).
+                    reply_error(&out, id, -32003, "declared unavailable");
+                    continue;
+                }
                 if let Some(ms) = params["hang_ms"].as_u64() {
                     // Respond from a side thread so the read loop keeps
                     // accepting work while this probe hangs.

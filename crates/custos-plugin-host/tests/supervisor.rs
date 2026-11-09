@@ -271,3 +271,31 @@ fn status_stays_responsive_while_a_call_respawns_the_plugin() {
     supervisor.shutdown();
     let _ = std::fs::remove_file(&ready);
 }
+
+#[test]
+fn declarative_unavailable_does_not_burn_the_crash_budget() {
+    // C27: a live plugin may deliver Unavailable as a declarative RPC
+    // error — its verdict about its backend, not its death. The supervisor
+    // must pass it through without spending the crash budget.
+    let supervisor = supervisor(
+        &[],
+        RestartPolicy {
+            max_restarts: 1,
+            window: Duration::from_secs(60),
+        },
+    );
+    supervisor.start().expect("start");
+
+    let err = supervisor
+        .call(
+            Method::Probe,
+            json!({"resource_id": "mock", "unavailable": true}),
+        )
+        .expect_err("the declarative failure must surface");
+    assert!(matches!(err, HostError::Unavailable), "{err:?}");
+
+    // The plugin never died: the very next call must serve normally.
+    let result = probe(&supervisor).expect("a live plugin must keep serving");
+    assert_eq!(result["healthy"], true);
+    assert_eq!(supervisor.status(), PluginStatus::Running { restarts: 0 });
+}
