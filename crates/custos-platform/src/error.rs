@@ -61,7 +61,12 @@ impl From<ExecResult> for PlatformError {
                 }
             }
             ExecResult::Succeeded { .. } => {
-                unreachable!("a successful execution is not an error")
+                // A success must never take the watchdog down with a panic,
+                // no matter how a caller wires the conversion (R17): map it
+                // to Failed with a message that names the bookkeeping bug.
+                PlatformError::Failed(
+                    "internal: a successful execution reached the error conversion".into(),
+                )
             }
         }
     }
@@ -117,6 +122,19 @@ mod tests {
             "No such file or directory (os error 2)".into(),
         ));
         assert!(matches!(err, PlatformError::Unsupported(_)), "{err}");
+    }
+
+    #[test]
+    fn success_reaching_the_conversion_never_panics() {
+        // R17: the Succeeded arm used to be unreachable!() — a wiring bug
+        // in a future caller would panic the watchdog instead of surfacing
+        // a failure.
+        let err = PlatformError::from(ExecResult::Succeeded {
+            stdout: String::new(),
+            truncated: false,
+        });
+        assert!(matches!(err, PlatformError::Failed(_)), "{err}");
+        assert!(err.to_string().contains("internal"), "{err}");
     }
 
     #[test]
