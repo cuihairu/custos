@@ -22,18 +22,32 @@ def resolve_target(params):
     A recovery plan is config data, not a shell: a raw `target` let a plan
     probe or touch any file the process can reach. Only bare relative
     names are accepted, resolved against the base directory (the
-    env-configured default's parent); absolute paths and `..` escapes are
-    refused. The env default itself stays the operator's choice (S1).
+    env-configured default's parent); absolute paths, `..` escapes,
+    backslash separators and drive letters are refused. The env default
+    itself stays the operator's choice (S1).
     """
     raw = params.get("args", {}).get("target")
     if raw is None:
         return TARGET
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError("target must be a non-empty string")
+    # Windows rules: `..\evil` normalizes to a backslash traversal the
+    # `../` check never sees, and `C:evil` is drive-relative — os.path
+    # join resolves it against the drive's CWD, discarding the base.
+    # Backslashes and drive prefixes are refused outright; the bare-name
+    # surface never needs them on any platform.
+    if "\\" in raw:
+        raise ValueError(f"target must use `/` separators, got {raw!r}")
+    if len(raw) >= 2 and raw[1] == ":" and raw[0].isalpha():
+        raise ValueError(f"target must not name a drive, got {raw!r}")
     if os.path.isabs(raw):
         raise ValueError(f"target must be a relative filename, got {raw!r}")
-    normalized = os.path.normpath(raw)
-    if normalized in ("", ".") or normalized == ".." or normalized.startswith("../"):
+    # Normalize, then refuse ANY surviving `..` segment; canonicalizing
+    # to `/` first keeps the check valid under both posixpath and ntpath.
+    normalized = os.path.normpath(raw).replace("\\", "/")
+    if normalized in ("", ".") or any(
+        part == ".." for part in normalized.split("/")
+    ):
         raise ValueError(f"target must not escape the base directory: {raw!r}")
     return os.path.join(os.path.dirname(TARGET) or ".", normalized)
 

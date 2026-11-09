@@ -61,7 +61,7 @@ title: 源码架构
 
 **职责：** 把用户可见报告从恢复中解耦，避免外发故障阻塞自愈，并让重试可审计。
 
-- **实现：** 通知引擎匹配规则、抑制重复并入队（`crates/custos-notify/src/engine.rs:137`）；后台 worker 认领到期条目并发送（`crates/custos-notify/src/engine.rs:225`）。
+- **实现：** 通知引擎匹配规则、抑制重复并入队（`crates/custos-notify/src/engine.rs:203`）；后台 worker 认领到期条目并发送（`crates/custos-notify/src/engine.rs:293`）。
 - **通道：** webhook、SMTP、Herald、Telegram 和本地日志实现 `Channel` 端口（`crates/custos-notify/src/channel.rs:49`）；webhook 出站另有 SSRF 策略边界（`crates/custos-config/src/notification/mod.rs:114`）。
 - **状态：** 通道配置是内存中的已校验配置；队列与尝试记录是 SQLite 状态。
 - **配置 schema：** 通道判别表和规则在 `crates/custos-config/src/notification/mod.rs:54` 与 `crates/custos-config/src/notification/mod.rs:33`；密钥使用脱敏包装（`crates/custos-config/src/notification/mod.rs:236`）。
@@ -95,6 +95,6 @@ title: 源码架构
 3. **原生与外部能力在同一个权限边界归一。** 内置工具和插件操作注册进一张表，拒绝发生在任一实现运行之前（`crates/custos-toolbox/src/registry.rs:181`），插件子进程无法获得未审查控制路径。
 4. **OS 执行可替换但不承载策略。** 恢复通过 `ActionExecutor` 委托执行（`crates/custos-engine/src/executor.rs:10`），具体 OS 能力声明并实现在平台契约后（`crates/custos-platform/src/controller.rs:41`；`crates/custos-platform/src/capability.rs:19`）。
 5. **风险转换前后都持久化。** 引擎不直接依赖 SQL，而是通过 `RunStore` 写入（`crates/custos-engine/src/events.rs:130`）；SQLite 在同一个文件中实现持久运行与通知队列（`crates/custos-store/src/store.rs:810`；`crates/custos-store/src/store.rs:609`）。
-6. **报告失败不进入恢复路径。** 恢复只向非阻塞通知 sink 发事件（`crates/custos-core/src/assemble.rs:23`）；通知规则入队（`crates/custos-notify/src/engine.rs:137`），后续由独立 worker 投递（`crates/custos-notify/src/engine.rs:225`）。
+6. **报告失败不进入恢复路径。** 恢复只向非阻塞通知 sink 发事件（`crates/custos-core/src/assemble.rs:30`）；通知规则入队（`crates/custos-notify/src/engine.rs:203`），后续由独立 worker 投递（`crates/custos-notify/src/engine.rs:293`）。
 7. **隔离崩溃影响范围。** 插件进程死亡由有界重启/降级监督器吸收（`crates/custos-plugin-host/src/supervisor.rs:128`）；被打断的引擎运行标记为未知，只通过显式 resume 逻辑重驱（`crates/custos-engine/src/engine.rs:1178`）。
 8. **管理面失败不影响可观测性。** 引擎循环独立于可选 CLI/dashboard/tray/Python 调用者；dashboard 只在启用时绑定（`crates/custos-cli/src/main.rs:196`），托盘读文件而不拥有引擎状态（`crates/custos-tray/src/main.rs:137`）。

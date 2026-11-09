@@ -80,6 +80,28 @@ class FileHealthProbePathSafety(unittest.TestCase):
         self.assertTrue(result["succeeded"], result)
         self.assertTrue(os.path.exists(file_health_probe.TARGET))
 
+    def test_windows_style_paths_are_refused_under_windows_semantics(self):
+        # Audit 2026-11-10: on Windows path rules `..\evil` normalizes to a
+        # backslash traversal the `../` check never sees, and `C:evil` is a
+        # drive-relative path ntpath.join resolves against the drive CWD —
+        # both escaped the base directory. Drive letters and backslashes
+        # must be refused outright; `..` checks must survive normalization
+        # on either platform.
+        import ntpath
+
+        old_path = file_health_probe.os.path
+        file_health_probe.os.path = ntpath
+        try:
+            for hostile in ("..\\evil", "C:evil", "C:\\evil", "../evil", ".."):
+                with self.assertRaises(ValueError, msg=hostile):
+                    file_health_probe.resolve_target({"args": {"target": hostile}})
+            self.assertEqual(
+                file_health_probe.resolve_target({"args": {"target": "inner.txt"}}),
+                ntpath.join(ntpath.dirname(file_health_probe.TARGET), "inner.txt"),
+            )
+        finally:
+            file_health_probe.os.path = old_path
+
 
 if __name__ == "__main__":
     unittest.main()
