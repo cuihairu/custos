@@ -93,22 +93,17 @@ impl BudgetState {
         Ok(())
     }
 
-    /// Rate-limits restart-like actions inside the sliding window.
+    /// Rate-limits restart-like actions inside the sliding window. Also
+    /// evicts the resource's timestamps outside the window (C13): the log
+    /// stays bounded no matter how long the host runs.
     pub fn check_restart_rate(
-        &self,
+        &mut self,
         resource_id: &ResourceId,
         budget: &RecoveryBudget,
         now_unix_ms: u64,
     ) -> Result<(), BudgetExceeded> {
-        let recent = self
-            .restarts
-            .get(resource_id)
-            .map(|ts| {
-                ts.iter()
-                    .filter(|t| now_unix_ms.saturating_sub(**t) < budget.restart_window_ms)
-                    .count()
-            })
-            .unwrap_or(0);
+        self.prune_restarts(resource_id, budget, now_unix_ms);
+        let recent = self.restarts.get(resource_id).map(Vec::len).unwrap_or(0);
         if recent as u32 >= budget.max_restarts_per_window {
             return Err(BudgetExceeded::RestartRate {
                 resource_id: resource_id.clone(),
@@ -128,13 +123,32 @@ impl BudgetState {
     }
 
     /// Records one executed attempt; every recorder implies a restart-like
-    /// event for the sliding-window limiter.
-    pub fn record_attempt(&mut self, resource_id: &ResourceId, now_unix_ms: u64) {
+    /// event for the sliding-window limiter. Stale timestamps are evicted
+    /// first (C13).
+    pub fn record_attempt(
+        &mut self,
+        resource_id: &ResourceId,
+        now_unix_ms: u64,
+        budget: &RecoveryBudget,
+    ) {
+        self.prune_restarts(resource_id, budget, now_unix_ms);
         *self.attempts.entry(resource_id.clone()).or_insert(0) += 1;
         self.restarts
             .entry(resource_id.clone())
             .or_default()
             .push(now_unix_ms);
+    }
+
+    /// Drops the resource's restart timestamps outside the sliding window.
+    fn prune_restarts(
+        &mut self,
+        resource_id: &ResourceId,
+        budget: &RecoveryBudget,
+        now_unix_ms: u64,
+    ) {
+        if let Some(ts) = self.restarts.get_mut(resource_id) {
+            ts.retain(|t| now_unix_ms.saturating_sub(*t) < budget.restart_window_ms);
+        }
     }
 
     pub fn record_high_risk(&mut self) {
@@ -143,6 +157,12 @@ impl BudgetState {
 
     pub fn attempts_for(&self, resource_id: &ResourceId) -> u32 {
         self.attempts.get(resource_id).copied().unwrap_or(0)
+    }
+
+    /// Diagnostic: raw restart timestamps retained for the resource (C13
+    /// keeps this bounded to the sliding window).
+    pub fn restart_history_len(&self, resource_id: &ResourceId) -> usize {
+        self.restarts.get(resource_id).map(Vec::len).unwrap_or(0)
     }
 }
 
@@ -158,8 +178,8 @@ mod tests {
         };
         let mut state = BudgetState::default();
         let id = ResourceId::new("svc");
-        state.record_attempt(&id, 0);
-        state.record_attempt(&id, 1);
+        state.record_attempt(&id, 0, &budget);
+        state.record_attempt(&id, 1, &budget);
         assert!(matches!(
             state.check_start(&id, &budget, 0),
             Err(BudgetExceeded::AttemptsPerResource { .. })
@@ -175,11 +195,38 @@ mod tests {
         };
         let mut state = BudgetState::default();
         let id = ResourceId::new("svc");
-        state.record_attempt(&id, 0);
-        state.record_attempt(&id, 500);
+        state.record_attempt(&id, 0, &budget);
+        state.record_attempt(&id, 500, &budget);
         assert!(state.check_restart_rate(&id, &budget, 600).is_err());
         // After the window slides past both, the limit frees up again.
         assert!(state.check_restart_rate(&id, &budget, 1_600).is_ok());
+    }
+
+    #[test]
+    fn restart_history_is_pruned_to_the_window() {
+        // C13: the per-resource timestamp log used to grow without bound —
+        // a long-lived flapping resource retained every record forever.
+        let budget = RecoveryBudget {
+            restart_window_ms: 1_000,
+            ..RecoveryBudget::default()
+        };
+        let mut state = BudgetState::default();
+        let id = ResourceId::new("svc");
+        for t in 0..50 {
+            state.record_attempt(&id, t, &budget);
+        }
+        state.record_attempt(&id, 5_000, &budget);
+        assert_eq!(
+            state.restart_history_len(&id),
+            1,
+            "records outside the window are evicted"
+        );
+        assert!(state.check_restart_rate(&id, &budget, 5_500).is_ok());
+        // In-window records are kept.
+        let mut state = BudgetState::default();
+        state.record_attempt(&id, 0, &budget);
+        state.record_attempt(&id, 900, &budget);
+        assert_eq!(state.restart_history_len(&id), 2);
     }
 
     #[test]

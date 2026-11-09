@@ -285,7 +285,7 @@ impl Engine {
         attempt.outcome = Some(outcome);
         attempt.finished_at_unix_ms = Some(now);
         self.store.save_attempt(&run.id, &attempt);
-        self.budget_state.record_attempt(id, now);
+        self.budget_state.record_attempt(id, now, &self.budget);
         if plan.risk_level == custos_model::RiskLevel::High {
             self.budget_state.record_high_risk();
         }
