@@ -68,19 +68,60 @@ impl DashboardServer {
     /// closed. A per-request failure never kills the server: it logs and
     /// continues, keeping the core engine unaffected.
     pub fn serve(self) -> ! {
-        for stream in self.listener.incoming() {
-            let mut stream = match stream {
-                Ok(stream) => stream,
-                Err(_) => continue,
-            };
-            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
-            let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(2)));
-            if let Err(err) = handle(&mut stream, &self.store, &self.config) {
-                tracing::warn!(target: "custos::dashboard", error = %err, "request failed");
-            }
-        }
-        unreachable!("listener closed")
+        let Self {
+            listener,
+            store,
+            config,
+        } = self;
+        serve_streams(listener.incoming(), store, config)
     }
+}
+
+/// The accept loop over any stream source, so tests can drive it with
+/// synthetic error streams (C30). Consecutive accept failures back off
+/// exponentially instead of busy-spinning (EMFILE under fd exhaustion
+/// would otherwise spin the core at full speed); any success resets the
+/// ladder.
+fn serve_streams<I>(incoming: I, store: Arc<Store>, config: ValidatedConfig) -> !
+where
+    I: Iterator<Item = std::io::Result<std::net::TcpStream>>,
+{
+    let mut consecutive_errors: u32 = 0;
+    for stream in incoming {
+        let mut stream = match stream {
+            Ok(stream) => {
+                consecutive_errors = 0;
+                stream
+            }
+            Err(err) => {
+                consecutive_errors += 1;
+                let delay = accept_backoff(consecutive_errors);
+                tracing::warn!(
+                    target: "custos::dashboard",
+                    error = %err,
+                    backoff_ms = delay.as_millis() as u64,
+                    "accept failed; backing off"
+                );
+                std::thread::sleep(delay);
+                continue;
+            }
+        };
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+        let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(2)));
+        if let Err(err) = handle(&mut stream, &store, &config) {
+            tracing::warn!(target: "custos::dashboard", error = %err, "request failed");
+        }
+    }
+    unreachable!("listener closed")
+}
+
+/// Backoff before the `consecutive_errors`-th retry: doubles from 10ms and
+/// caps at 1s (C30). A persistent accept failure idles here instead of
+/// spinning; the counter resets to zero on any successful accept.
+fn accept_backoff(consecutive_errors: u32) -> std::time::Duration {
+    let shift = consecutive_errors.saturating_sub(1).min(7);
+    let ms = 10u64.saturating_mul(1u64 << shift).min(1_000);
+    std::time::Duration::from_millis(ms)
 }
 
 /// Whole-request deadline (C23). The per-read timeout bounds silence, not
@@ -398,5 +439,47 @@ mod tests {
             .expect("handle thread")
             .expect_err("handle must fail past the deadline");
         assert_eq!(err.kind(), std::io::ErrorKind::TimedOut, "{err}");
+    }
+
+    #[test]
+    fn accept_backoff_doubles_and_caps() {
+        use std::time::Duration;
+        assert_eq!(accept_backoff(1), Duration::from_millis(10));
+        assert_eq!(accept_backoff(2), Duration::from_millis(20));
+        assert_eq!(accept_backoff(3), Duration::from_millis(40));
+        assert_eq!(accept_backoff(7), Duration::from_millis(640));
+        assert_eq!(accept_backoff(8), Duration::from_millis(1_000));
+        assert_eq!(accept_backoff(100), Duration::from_millis(1_000));
+    }
+
+    #[test]
+    fn persistent_accept_errors_back_off_instead_of_spinning() {
+        // C30: the accept loop used to `continue` on errors with no
+        // backoff — a persistent failure (EMFILE) busy-spun the core.
+        // Three consecutive errors must cost at least the scheduled
+        // 10+20+40ms of backoff.
+        use std::time::Duration;
+        let config = load_config_for_test();
+        let store = std::sync::Arc::new(dummy_store());
+        // The listener itself is irrelevant here; bind one so the test
+        // documents the real shape (a bound server loop) without needing
+        // a live client.
+        let _listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let errors: Vec<std::io::Result<std::net::TcpStream>> = vec![
+            Err(std::io::Error::other("e1")),
+            Err(std::io::Error::other("e2")),
+            Err(std::io::Error::other("e3")),
+        ];
+        let started = std::time::Instant::now();
+        // The loop hits `unreachable!("listener closed")` when the source
+        // dries up: the thread panics, which is exactly the end we want.
+        let worker = std::thread::spawn(move || serve_streams(errors.into_iter(), store, config));
+        let _ = worker.join();
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(70),
+            "three accept errors took only {elapsed:?} — the loop busy-spins"
+        );
+        assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
     }
 }
