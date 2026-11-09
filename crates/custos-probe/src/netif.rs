@@ -128,10 +128,10 @@ fn interface_state(interface: &str) -> Result<InterfaceState, String> {
     ))
 }
 
-/// True when the row for `interface` reports Enabled+Connected.
-/// Windows-only helper; the parser shape matches custos-platform's.
-#[cfg(windows)]
-fn parse_netsh_interface_state(output: &str, interface: &str) -> Option<bool> {
+/// True when the row for `interface` reports Enabled+Connected. Parser
+/// shape matches custos-platform's `parse_netsh_interfaces`; pure and
+/// always compiled so fixtures run on any host.
+pub fn parse_netsh_interface_state(output: &str, interface: &str) -> Option<bool> {
     for line in output.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with("Admin State") || trimmed.contains("Loopback")
@@ -140,7 +140,20 @@ fn parse_netsh_interface_state(output: &str, interface: &str) -> Option<bool> {
         }
         let admin_enabled = trimmed.contains("Enabled") || trimmed.contains("已启用");
         let connected = trimmed.contains("Connected") || trimmed.contains("已连接");
-        let name = trimmed.rsplit_once("  ").map(|(_, n)| n.trim())?;
+        // A row without the two-space column separator (a localized or
+        // malformed line) is skipped, not fatal: `?` here aborted the
+        // whole table and reported a live interface as NotFound (R9,
+        // openclaw audit 2026-11-05). Mirrors the platform-side
+        // parse_netsh_interfaces in custos-platform/src/windows.rs.
+        // A row without the two-space column separator (a localized or
+        // malformed line) is skipped, not fatal: `?` here aborted the
+        // whole table and reported a live interface as NotFound (R9,
+        // openclaw audit 2026-11-05). Mirrors the platform-side
+        // parse_netsh_interfaces in custos-platform/src/windows.rs.
+        let name = match trimmed.rsplit_once("  ") {
+            Some((_, name)) => name.trim(),
+            None => continue,
+        };
         if name == interface {
             return Some(admin_enabled && connected);
         }
@@ -520,6 +533,33 @@ Active Routes:
             Some("192.168.1.1"),
             "the active gateway is reported, the persistent one skipped"
         );
+    }
+
+    #[test]
+    fn netsh_interface_state_parser_skips_separatorless_rows() {
+        // A row without the two-space column separator (localized header,
+        // dashed rule or a malformed line) must be skipped — the old `?`
+        // aborted the whole table and reported a live interface as
+        // NotFound. Mirrors custos-platform's parse_netsh_interfaces.
+        let output = "\
+Admin State  State  Type  Interface Name
+===========================================================================
+some localized row without separator
+Enabled       Connected     Ethernet       Ethernet 3
+";
+        assert_eq!(
+            parse_netsh_interface_state(output, "Ethernet 3"),
+            Some(true)
+        );
+        let disabled = "\
+Enabled       Connected     Ethernet       Ethernet 3
+Disabled      Disconnected  Ethernet       Ethernet 4
+";
+        assert_eq!(
+            parse_netsh_interface_state(disabled, "Ethernet 4"),
+            Some(false)
+        );
+        assert_eq!(parse_netsh_interface_state(disabled, "Ethernet 9"), None);
     }
 
     #[test]
