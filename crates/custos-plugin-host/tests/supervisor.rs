@@ -5,7 +5,8 @@
 use custos_plugin_api::{Method, RpcError};
 use custos_plugin_host::{HostError, PluginConfig, PluginStatus, PluginSupervisor, RestartPolicy};
 use serde_json::json;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 fn mock_config(env: &[(&str, &str)]) -> PluginConfig {
     let mut config = PluginConfig::new(env!("CARGO_BIN_EXE_mock-plugin"));
@@ -158,4 +159,115 @@ fn timed_out_requests_do_not_count_as_crashes_either() {
     let result = probe(&supervisor).expect("probe");
     assert_eq!(result["healthy"], true);
     assert_eq!(supervisor.status(), PluginStatus::Running { restarts: 0 });
+}
+
+/// Waits until the slow-starting child signals it entered its stall, so
+/// the assertions below observe a spawn that is genuinely in flight.
+fn wait_slow_start_in_flight(ready: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !ready.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "child never signaled slow start at {}",
+            ready.display()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn status_stays_responsive_while_start_spawns_a_slow_plugin() {
+    // `start()` must not pin the bookkeeping lock across the process
+    // spawn + initialize round trip: status() (and every other reader)
+    // has to answer while the handshake is still in flight.
+    let ready =
+        std::env::temp_dir().join(format!("custos-mock-ready-start-{}", std::process::id()));
+    let _ = std::fs::remove_file(&ready);
+    let supervisor = Arc::new(supervisor(
+        &[
+            (
+                "MOCK_PLUGIN_READY_FILE",
+                ready.to_str().expect("utf8 temp path"),
+            ),
+            ("MOCK_PLUGIN_SLOW_START_MS", "2500"),
+        ],
+        RestartPolicy::default(),
+    ));
+
+    let starter = {
+        let supervisor = Arc::clone(&supervisor);
+        std::thread::spawn(move || supervisor.start())
+    };
+    wait_slow_start_in_flight(&ready);
+
+    let started = Instant::now();
+    let status = supervisor.status();
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "status() blocked on the in-flight spawn ({:?})",
+        started.elapsed()
+    );
+    assert_eq!(status, PluginStatus::Stopped);
+
+    starter
+        .join()
+        .expect("starter thread")
+        .expect("slow start succeeds");
+    assert_eq!(supervisor.status(), PluginStatus::Running { restarts: 0 });
+    supervisor.shutdown();
+    let _ = std::fs::remove_file(&ready);
+}
+
+#[test]
+fn status_stays_responsive_while_a_call_respawns_the_plugin() {
+    // Same contract for the call path: the first spawn dies via the
+    // latch, the next call pays for a respawn of a slow-starting plugin,
+    // and status() must not wait out those 2.5s of handshake I/O.
+    let tag = std::process::id();
+    let latch = std::env::temp_dir().join(format!("custos-mock-latch-resp-{tag}"));
+    let ready = std::env::temp_dir().join(format!("custos-mock-ready-resp-{tag}"));
+    let _ = std::fs::remove_file(&latch);
+    let _ = std::fs::remove_file(&ready);
+    std::fs::write(&latch, b"latch").expect("write latch");
+
+    let supervisor = Arc::new(supervisor(
+        &[
+            (
+                "MOCK_PLUGIN_DIE_LATCH",
+                latch.to_str().expect("utf8 temp path"),
+            ),
+            (
+                "MOCK_PLUGIN_READY_FILE",
+                ready.to_str().expect("utf8 temp path"),
+            ),
+            ("MOCK_PLUGIN_SLOW_START_MS", "2500"),
+        ],
+        RestartPolicy::default(),
+    ));
+    supervisor.start().expect_err("first spawn dies");
+    assert_eq!(supervisor.status(), PluginStatus::Stopped);
+
+    let prober = {
+        let supervisor = Arc::clone(&supervisor);
+        std::thread::spawn(move || supervisor.call(Method::Probe, json!({"resource_id": "mock"})))
+    };
+    wait_slow_start_in_flight(&ready);
+
+    let started = Instant::now();
+    let status = supervisor.status();
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "status() blocked on the in-flight respawn ({:?})",
+        started.elapsed()
+    );
+    assert_eq!(status, PluginStatus::Stopped);
+
+    let result = prober
+        .join()
+        .expect("prober thread")
+        .expect("respawned probe");
+    assert_eq!(result["healthy"], true);
+    assert_eq!(supervisor.status(), PluginStatus::Running { restarts: 1 });
+    supervisor.shutdown();
+    let _ = std::fs::remove_file(&ready);
 }

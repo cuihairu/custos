@@ -10,6 +10,9 @@
 //! - env `MOCK_PLUGIN_ALWAYS_DIE=1` — exit(3) on every spawn (crash loop);
 //! - env `MOCK_PLUGIN_STDERR_LINES=<n>` — flood stderr with n+1 lines at
 //!   startup (tests the draining reader and capped retention);
+//! - env `MOCK_PLUGIN_SLOW_START_MS=<n>` — stall before the protocol loop,
+//!   so spawn + initialize blocks that long (writes `MOCK_PLUGIN_READY_FILE`
+//!   first, so tests can tell the stall is in flight);
 //! - probe params: `die` (exit the process), `hang_ms` (delay the response
 //!   in a spawned thread so the read loop stays live), `garbage_before` /
 //!   `big_before` (emit a malformed / oversized line before the real
@@ -91,6 +94,15 @@ fn main() {
             let _ = writeln!(err, "stderr-flood {i:05} 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
         }
         let _ = writeln!(err, "stderr-flood-final");
+    }
+    if let Ok(ms) = std::env::var("MOCK_PLUGIN_SLOW_START_MS") {
+        let ms: u64 = ms.parse().unwrap_or(0);
+        if ms > 0 {
+            if let Ok(ready) = std::env::var("MOCK_PLUGIN_READY_FILE") {
+                let _ = std::fs::write(ready, b"ready");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+        }
     }
 
     let out = Arc::new(Mutex::new(std::io::stdout()));

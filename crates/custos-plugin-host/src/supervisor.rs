@@ -68,6 +68,11 @@ pub struct PluginSupervisor {
     config: PluginConfig,
     policy: RestartPolicy,
     state: Mutex<SupervisorState>,
+    /// Serializes respawns: held (while `state` is NOT held) for the whole
+    /// spawn + handshake, so the multi-second plugin I/O never pins the
+    /// bookkeeping lock that `status()` and the engine tick read through.
+    /// Lock order is always `spawn_gate` → `state`.
+    spawn_gate: Mutex<()>,
 }
 
 impl PluginSupervisor {
@@ -83,6 +88,7 @@ impl PluginSupervisor {
                 dying_stderr: None,
                 unrecoverable: None,
             }),
+            spawn_gate: Mutex::new(()),
         }
     }
 
@@ -93,16 +99,21 @@ impl PluginSupervisor {
 
     /// Spawns the plugin for the first time and runs the full handshake.
     pub fn start(&self) -> Result<(), HostError> {
-        let mut state = lock(&self.state);
-        if state
-            .session
-            .as_ref()
-            .is_some_and(|session| session.is_running())
         {
+            let mut state = lock(&self.state);
+            if live_session(&state).is_some() {
+                return Ok(());
+            }
+            self.enter_gate(&mut state)?;
+        }
+        let _spawn_gate = lock(&self.spawn_gate);
+        let mut state = lock(&self.state);
+        if live_session(&state).is_some() {
             return Ok(());
         }
         self.enter_gate(&mut state)?;
-        self.spawn_fresh(&mut state)
+        drop(state);
+        self.spawn_with_budget()
     }
 
     /// Current liveness.
@@ -169,8 +180,11 @@ impl PluginSupervisor {
     }
 
     /// Graceful shutdown; resets the crash budget so the supervisor can
-    /// be started again later.
+    /// be started again later. Takes the spawn gate first (original
+    /// semantics: an in-flight respawn finishes before the teardown) so
+    /// its install cannot land a session after the shutdown.
     pub fn shutdown(&self) {
+        let _spawn_gate = lock(&self.spawn_gate);
         let mut state = lock(&self.state);
         if let Some(session) = state.session.take() {
             let _ = session.shutdown();
@@ -180,17 +194,42 @@ impl PluginSupervisor {
     }
 
     /// Hands out a session that is running right now, respawning within
-    /// the budget when needed.
+    /// the budget when needed. The respawn I/O runs on the spawn gate
+    /// with no lock held: concurrent callers queue on the gate and
+    /// re-check the session instead of pinning `state`, so `status()`
+    /// and the engine tick never wait out a plugin handshake.
     fn healthy_session(&self) -> Result<Arc<PluginSession>, HostError> {
-        let mut state = lock(&self.state);
-        self.enter_gate(&mut state)?;
-        match &state.session {
-            Some(session) if session.is_running() => return Ok(Arc::clone(session)),
-            Some(_) => self.absorb_crash_locked(&mut state),
-            None => {}
+        {
+            let mut state = lock(&self.state);
+            self.enter_gate(&mut state)?;
+            if let Some(session) = live_session(&state) {
+                return Ok(session);
+            }
         }
-        self.spawn_fresh(&mut state)?;
-        state.session.clone().ok_or(HostError::Unavailable)
+        let _spawn_gate = lock(&self.spawn_gate);
+        // Retire the dead session with the lock released — capturing its
+        // dying words polls stderr for up to 100ms, so the guard must be
+        // gone by then.
+        let dead = {
+            let mut state = lock(&self.state);
+            self.enter_gate(&mut state)?;
+            // A concurrent caller may have respawned while we queued on
+            // the gate: reuse its work instead of spawning again.
+            if let Some(session) = live_session(&state) {
+                return Ok(session);
+            }
+            state.session.take()
+        };
+        let dead_words = dead.as_deref().and_then(dying_words);
+        {
+            let mut state = lock(&self.state);
+            self.record_crash_locked(&mut state, dead.is_some(), dead_words);
+        }
+        self.spawn_with_budget()?;
+        lock(&self.state)
+            .session
+            .clone()
+            .ok_or(HostError::Unavailable)
     }
 
     /// Fails fast while the plugin is unrecoverable — unless the crash
@@ -213,26 +252,33 @@ impl PluginSupervisor {
         Ok(())
     }
 
-    /// Spawns and handshakes a fresh session, or records a crash.
-    fn spawn_fresh(&self, state: &mut SupervisorState) -> Result<(), HostError> {
-        let now = Instant::now();
-        while state
-            .crashes
-            .front()
-            .is_some_and(|at| now.duration_since(*at) > self.policy.window)
+    /// Spawns a fresh session within the crash budget. Budget check and
+    /// result bookkeeping run under short state-lock sections; the process
+    /// spawn and the two handshake RPC round trips run with no lock held.
+    fn spawn_with_budget(&self) -> Result<(), HostError> {
         {
-            state.crashes.pop_front();
+            let mut state = lock(&self.state);
+            let now = Instant::now();
+            while state
+                .crashes
+                .front()
+                .is_some_and(|at| now.duration_since(*at) > self.policy.window)
+            {
+                state.crashes.pop_front();
+            }
+            if state.crashes.len() >= self.policy.max_restarts {
+                state.unrecoverable = Some(format!(
+                    "plugin `{}` crashed {} times within {:?}; giving up until the window expires",
+                    self.name,
+                    state.crashes.len(),
+                    self.policy.window
+                ));
+                return Err(HostError::Unavailable);
+            }
         }
-        if state.crashes.len() >= self.policy.max_restarts {
-            state.unrecoverable = Some(format!(
-                "plugin `{}` crashed {} times within {:?}; giving up until the window expires",
-                self.name,
-                state.crashes.len(),
-                self.policy.window
-            ));
-            return Err(HostError::Unavailable);
-        }
-        match Self::spawn_and_handshake(&self.config) {
+        let spawned = Self::spawn_and_handshake(&self.config);
+        let mut state = lock(&self.state);
+        match spawned {
             Ok(session) => {
                 state.session = Some(Arc::new(session));
                 Ok(())
@@ -273,19 +319,39 @@ impl PluginSupervisor {
     }
 
     fn absorb_crash(&self) {
+        let dead = lock(&self.state).session.take();
+        // Dying words are captured before re-locking: the poll sleeps up
+        // to 100ms.
+        let dead_words = dead.as_deref().and_then(dying_words);
         let mut state = lock(&self.state);
-        self.absorb_crash_locked(&mut state);
+        self.record_crash_locked(&mut state, dead.is_some(), dead_words);
     }
 
-    fn absorb_crash_locked(&self, state: &mut SupervisorState) {
-        if let Some(session) = state.session.take() {
-            if let Some(tail) = dying_words(&session) {
-                state.dying_stderr = Some(tail);
-            }
+    /// Crash bookkeeping under the state lock; the dying words are
+    /// captured by the caller while no lock is held.
+    fn record_crash_locked(
+        &self,
+        state: &mut SupervisorState,
+        dead: bool,
+        dead_words: Option<String>,
+    ) {
+        if let Some(tail) = dead_words {
+            state.dying_stderr = Some(tail);
+        }
+        if dead {
             state.crashes.push_back(Instant::now());
             state.crashes_total += 1;
         }
     }
+}
+
+/// The current session, if it is running right now.
+fn live_session(state: &SupervisorState) -> Option<Arc<PluginSession>> {
+    state
+        .session
+        .as_ref()
+        .filter(|session| session.is_running())
+        .cloned()
 }
 
 /// The last stderr output of a dying session. A process's final stderr
