@@ -430,17 +430,23 @@ pub fn has_wifi_adapter() -> bool {
     }
 }
 
-/// Builds the interface reset argv (HIGH RISK: may cut the management
-/// channel — callers must gate and mark interrupts_remote_admin).
-pub fn netsh_interface_reset_argv(name: &str) -> Vec<String> {
+/// Builds one `netsh interface set interface` argv with a single `admin=`
+/// state. `netsh` accepts exactly one `admin=` per call (R13): down and up
+/// are two argv sets run as sequential calls by the controller. HIGH RISK:
+/// disabling may cut the management channel — callers must gate and mark
+/// interrupts_remote_admin.
+pub fn netsh_interface_set_admin_argv(name: &str, enabled: bool) -> Vec<String> {
     vec![
         "netsh".into(),
         "interface".into(),
         "set".into(),
         "interface".into(),
         format!("name={name}"),
-        "admin=disabled".into(),
-        "admin=enabled".into(),
+        if enabled {
+            "admin=enabled".into()
+        } else {
+            "admin=disabled".into()
+        },
     ]
 }
 
@@ -473,8 +479,12 @@ impl NetworkInterfaceController for NetshNetworkController {
     fn reset(&self, name: &str) -> PlatformResult<()> {
         #[cfg(windows)]
         {
-            let argv = netsh_interface_reset_argv(name);
-            expect_success(run(&argv.iter().map(String::as_str).collect::<Vec<_>>()))
+            // Down then up as two calls: one `admin=` per call (R13).
+            for enabled in [false, true] {
+                let argv = netsh_interface_set_admin_argv(name, enabled);
+                expect_success(run(&argv.iter().map(String::as_str).collect::<Vec<_>>()))?;
+            }
+            Ok(())
         }
         #[cfg(not(windows))]
         {

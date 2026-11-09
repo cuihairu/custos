@@ -4,7 +4,7 @@
 //! (x86_64-pc-windows-gnu) — never guessed on a non-Windows host.
 
 use custos_platform::windows::{
-    capabilities, has_wifi_adapter, ipconfig_flushdns_argv, netsh_interface_reset_argv,
+    capabilities, has_wifi_adapter, ipconfig_flushdns_argv, netsh_interface_set_admin_argv,
     netsh_wlan_connect_argv, netsh_wlan_reports_adapter, parse_default_gateway,
     parse_netsh_interfaces, parse_netsh_wlan_state, parse_sc_query, parse_tasklist_csv,
     route_print_argv, sc_argv, tasklist_argv, tasklist_has_pid, NetshNetworkController,
@@ -148,16 +148,28 @@ fn wlan_and_reset_argv_are_explicit() {
         vec!["netsh", "wlan", "connect", "name=HomeNet"]
     );
     // Reset is admin=disabled then admin=enabled: explicit down+up, never a
-    // blanket reset (todo.md P3 风险控制).
+    // blanket reset (todo.md P3 风险控制). A single `netsh interface set
+    // interface` call accepts exactly one admin= (R13): the two states are
+    // two argv sets, run as sequential calls by the controller.
     assert_eq!(
-        netsh_interface_reset_argv("Wi-Fi"),
+        netsh_interface_set_admin_argv("Wi-Fi", false),
         vec![
             "netsh",
             "interface",
             "set",
             "interface",
             "name=Wi-Fi",
-            "admin=disabled",
+            "admin=disabled"
+        ]
+    );
+    assert_eq!(
+        netsh_interface_set_admin_argv("Wi-Fi", true),
+        vec![
+            "netsh",
+            "interface",
+            "set",
+            "interface",
+            "name=Wi-Fi",
             "admin=enabled"
         ]
     );
