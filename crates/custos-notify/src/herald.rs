@@ -111,20 +111,40 @@ impl HeraldChannel {
 
     /// A 2xx response must carry herald's `{"code":0}` acceptance envelope;
     /// anything else (herald writes `code` = HTTP status on error) is a
-    /// failure.
+    /// failure. The 2xx body cases are distinguished (§8.2): an unreadable
+    /// body is a transport problem (retryable), a readable body without the
+    /// envelope is a contract mismatch (terminal — retrying cannot fix it).
     fn classify_response(
         &self,
         mut response: ureq::http::Response<ureq::Body>,
     ) -> Result<(), ChannelError> {
         let status = response.status().as_u16();
-        let code = response
-            .body_mut()
-            .read_to_string()
-            .ok()
-            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-            .and_then(|value| value.get("code").and_then(|c| c.as_i64()));
+        let code = match response.body_mut().read_to_string() {
+            Err(err) => {
+                if (200..300).contains(&status) {
+                    return Err(ChannelError::new(
+                        ChannelErrorKind::Transport,
+                        format!("herald HTTP {status} body unreadable: {err}"),
+                    ));
+                }
+                // Non-2xx with an unreadable body: the status still decides.
+                None
+            }
+            Ok(text) => serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .and_then(|value| value.get("code").and_then(|c| c.as_i64())),
+        };
         if (200..300).contains(&status) && code == Some(0) {
             return Ok(());
+        }
+        if (200..300).contains(&status) {
+            // 2xx without a readable acceptance envelope: the peer answered
+            // at the HTTP level but did not confirm dispatch — retrying an
+            // identical request cannot fix that (C4).
+            return Err(ChannelError::new(
+                ChannelErrorKind::Rejected,
+                format!("herald answered HTTP {status} without an acceptance envelope"),
+            ));
         }
         let message = format!("herald rejected: HTTP {status}, code {code:?}");
         let kind = match status {
@@ -505,5 +525,44 @@ mod tests {
             .deliver(&event(EventType::ResourceUnhealthy, Severity::Critical))
             .unwrap_err();
         assert_eq!(err.kind, ChannelErrorKind::Transport);
+    }
+
+    #[test]
+    fn two_hundred_without_envelope_is_rejected_not_retried() {
+        // C4: a 2xx whose body is not herald's {"code":0} acceptance
+        // envelope is a contract mismatch — the peer answered at the HTTP
+        // level but did not confirm dispatch. Retrying cannot fix it, so it
+        // is terminal and no identical re-POSTs happen.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let captured = Arc::new(Mutex::new(0usize));
+        let cap = captured.clone();
+        std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let _ = crate::test_http::read_full_request(&mut stream);
+                *cap.lock().unwrap() += 1;
+                let body = "<html>gateway blurb</html>";
+                let response = format!(
+                    "HTTP/1.1 200 X\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        let mut cfg = config();
+        cfg.base_url = format!("http://{addr}");
+        cfg.retries = 3;
+        let channel = HeraldChannel::new("herald", cfg).unwrap();
+        let err = channel
+            .deliver(&event(EventType::ResourceUnhealthy, Severity::Critical))
+            .unwrap_err();
+        assert_eq!(err.kind, ChannelErrorKind::Rejected, "{err}");
+        assert_eq!(
+            *captured.lock().unwrap(),
+            1,
+            "no retry on contract mismatch"
+        );
     }
 }
