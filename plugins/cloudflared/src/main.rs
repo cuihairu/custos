@@ -49,20 +49,32 @@ fn fetch(path: &str) -> Result<String, String> {
 /// down even when the process runs (todo.md P3: 服务在但隧道断 → 真故障).
 fn tunnel_health(metrics: &str) -> (bool, String) {
     let mut connections: Option<f64> = None;
+    let mut unparsable: Option<String> = None;
     for line in metrics.lines() {
         if let Some(rest) = line.strip_prefix("cloudflared_tunnel_ha_connections") {
-            if let Some(value) = rest.rsplit(' ').next().and_then(|v| v.trim().parse().ok()) {
-                connections = Some(value);
+            let value = rest.rsplit(' ').next().unwrap_or("").trim();
+            match value.parse::<f64>() {
+                Ok(count) => connections = Some(count),
+                Err(_) => unparsable = Some(value.to_owned()),
             }
         }
     }
-    match connections {
-        Some(count) if count > 0.0 => (true, format!("tunnel up with {count} edge connection(s)")),
-        Some(count) => (
+    match (connections, unparsable) {
+        (Some(count), _) if count > 0.0 => {
+            (true, format!("tunnel up with {count} edge connection(s)"))
+        }
+        (Some(count), _) => (
             false,
             format!("process serves metrics but the tunnel has {count} edge connections"),
         ),
-        None => (
+        // A gauge line with an unreadable value is not "no gauge": it is
+        // ambiguous output and must not be reported healthy, which masked a
+        // down tunnel (R11, openclaw audit 2026-11-05).
+        (None, Some(bad)) => (
+            false,
+            format!("tunnel gauge present but value {bad:?} is unparsable"),
+        ),
+        (None, None) => (
             true,
             "metrics served; no ha_connections gauge exposed".into(),
         ),
@@ -146,4 +158,34 @@ fn main() {
         "custos/v1/shutdown" => Reply::Exit(json!({ "ok": true })),
         other => Reply::Error(-32601, format!("unknown method: {other}")),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gauge_counts_are_interpreted() {
+        assert!(tunnel_health("cloudflared_tunnel_ha_connections 3\n").0);
+        let (healthy, obs) = tunnel_health("cloudflared_tunnel_ha_connections 0\n");
+        assert!(!healthy, "{obs}");
+        // A line carrying labels still parses the trailing value.
+        let (healthy, _) = tunnel_health("cloudflared_tunnel_ha_connections{edge=\"us\"} 2\n");
+        assert!(healthy);
+    }
+
+    #[test]
+    fn unparsable_gauge_is_not_healthy() {
+        // A gauge line whose value cannot be parsed must not fall through
+        // to the "no gauge exposed" branch and report healthy — that masks
+        // a down tunnel (R11).
+        for metrics in [
+            "cloudflared_tunnel_ha_connections\n",
+            "cloudflared_tunnel_ha_connections not_a_number\n",
+            "cloudflared_tunnel_ha_connections  \n",
+        ] {
+            let (healthy, obs) = tunnel_health(metrics);
+            assert!(!healthy, "unparsable gauge must be unhealthy: {obs}");
+        }
+    }
 }
