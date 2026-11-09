@@ -509,7 +509,7 @@
 ### P3
 
 - [x] R17 [P3] `platform/error.rs:63-64` `From<ExecResult> for PlatformError` 内对 `Succeeded` 变体 `unreachable!()`。 `6184053`（Succeeded 臂改为 `PlatformError::Failed("internal: a successful execution reached the error conversion")`——当前生产路径（exec_tool.rs 自行 match，从不转换 Succeeded）确实不可达，但未来调用方接线错误会让看门狗 panic 而非暴露失败；恒不 panic 原则下归入 Failed 并注明 internal。红测试 `success_reaching_the_conversion_never_panics`（对旧代码实测 RED：panic at error.rs:64 `unreachable!`；修复后返回 Failed 且消息含 internal）；`cargo test --workspace` 579 通过 0 失败）
-- [ ] R18 [P3] `http.rs:120,127` `JsonOp::Exists` 分支 `unreachable!()`（当前结构上不可达，一次重构后即可达）。
+- [x] R18 [P3] `http.rs:120,127` `JsonOp::Exists` 分支 `unreachable!()`（当前结构上不可达，一次重构后即可达）。 `6d6c1af`（json.rs 两处平行 match 的 `JsonOp::Exists => unreachable!()` 合并为单一全操算符 match：`Exists => ("exists", true)`（路径缺失由统一 `let ... else` 报 missing），删除两条 landmine 臂，行为对所有操算符逐一等价。红测试 `exists_assertion_survives_the_shared_evaluation_path`（对旧代码重构模拟——把 Exists 折入共享求值路径——实测 RED：panic at json.rs:75 `internal error: entered unreachable code`，证实「一次重构后即可达」；修复后 GREEN）；`cargo test --workspace` 580 通过 0 失败）
 - [ ] S1 [P3] `plugins/python/examples/file_health_probe.py:20,31` `target` 取自 params 直接用于 `os.path.getmtime` / `open(..., "a")`，无规范化和 `..`、绝对路径拒绝。
 - [ ] C6 [P3] `notify engine.rs:274-277` 投递后队列写失败只记日志，无对账（行停在 `sending` 直至过期回收）。
 - [ ] C9 [P3] `platform_tools.rs` `std::sync::MutexGuard` 跨慢速平台 I/O 持有；`try_lock` 把竞争表现为静默跳过的操作而非等待。
