@@ -214,6 +214,93 @@ fn serve_once(listener: &TcpListener) -> usize {
     }
 }
 
+/// Delegates everything to a [`TimeAwareQueue`] but fails the first N
+/// outcome writes, simulating a transient store error after the external
+/// delivery already happened (C6).
+#[derive(Clone)]
+struct FlakyMarkQueue {
+    inner: TimeAwareQueue,
+    remaining_failures: Arc<Mutex<u32>>,
+}
+
+impl NotificationQueue for FlakyMarkQueue {
+    fn enqueue(
+        &self,
+        channel: &str,
+        event: &NotificationEvent,
+        now_unix_ms: u64,
+    ) -> Result<u64, QueueError> {
+        self.inner.enqueue(channel, event, now_unix_ms)
+    }
+
+    fn claim_due(
+        &self,
+        now_unix_ms: u64,
+        limit: u32,
+        lease_ms: u64,
+    ) -> Result<Vec<QueuedNotification>, QueueError> {
+        self.inner.claim_due(now_unix_ms, limit, lease_ms)
+    }
+
+    fn mark_delivered(&self, id: u64, at_unix_ms: u64) -> Result<(), QueueError> {
+        let mut left = self.remaining_failures.lock().unwrap();
+        if *left > 0 {
+            *left -= 1;
+            return Err(QueueError::new("store busy (simulated)"));
+        }
+        drop(left);
+        self.inner.mark_delivered(id, at_unix_ms)
+    }
+
+    fn mark_retry(
+        &self,
+        id: u64,
+        next: u64,
+        error: &str,
+        now_unix_ms: u64,
+    ) -> Result<(), QueueError> {
+        self.inner.mark_retry(id, next, error, now_unix_ms)
+    }
+
+    fn mark_dead(&self, id: u64, error: &str, now_unix_ms: u64) -> Result<(), QueueError> {
+        self.inner.mark_dead(id, error, now_unix_ms)
+    }
+}
+
+#[test]
+fn outcome_write_failures_are_retried_instead_of_stranding_the_row() {
+    // C6: the webhook call succeeded, then the queue write failed — the
+    // outcome used to be logged and dropped, stranding the row in
+    // `sending` until the stale lease reclaimed it and the webhook got
+    // the event a second time. The write must be retried until it lands.
+    let (port, _guard) = {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        (port, Some(listener))
+    };
+    drop(_guard);
+
+    let queue = TimeAwareQueue::new();
+    let flaky = FlakyMarkQueue {
+        inner: queue.clone(),
+        remaining_failures: Arc::new(Mutex::new(2)),
+    };
+    let engine = NotificationEngine::new(config_for(webhook_url(port)), flaky);
+    engine.dispatch(&event(), 1_000);
+
+    let listener = TcpListener::bind(("127.0.0.1", port)).expect("rebind the port");
+    std::thread::spawn(move || serve_once(&listener));
+    std::thread::sleep(Duration::from_millis(50));
+
+    let report = engine.deliver_due(1_000, 10);
+    assert_eq!(
+        report.delivered, 1,
+        "the outcome write must be retried to success"
+    );
+    assert_eq!(report.failed, 0);
+    assert_eq!(queue.state_of(1), NotificationState::Delivered);
+}
+
 #[test]
 fn outage_keeps_entries_queued_and_delivers_after_network_returns() {
     // Reserve a port, then drop the listener to simulate a dead upstream.

@@ -16,7 +16,7 @@
 
 use crate::channel::{Channel, ChannelError, ChannelErrorKind};
 use crate::local_log::LocalLogChannel;
-use crate::queue::NotificationQueue;
+use crate::queue::{NotificationQueue, QueueError};
 use crate::smtp::SmtpChannel;
 use crate::webhook::WebhookChannel;
 use custos_config::{ChannelConfig, NotificationConfig};
@@ -67,6 +67,57 @@ enum OutcomeTransition {
     Retried,
     Dead,
 }
+
+/// One queue outcome write, described as data so [`NotificationEngine::
+/// record_outcome`] can retry it without re-running the (already
+/// completed) delivery (C6).
+enum OutcomeWrite {
+    Delivered {
+        id: u64,
+        now: u64,
+    },
+    Retry {
+        id: u64,
+        next: u64,
+        error: String,
+        now: u64,
+    },
+    Dead {
+        id: u64,
+        error: String,
+        now: u64,
+    },
+}
+
+impl OutcomeWrite {
+    fn id(&self) -> u64 {
+        match self {
+            Self::Delivered { id, .. } | Self::Retry { id, .. } | Self::Dead { id, .. } => *id,
+        }
+    }
+
+    fn apply<Q: NotificationQueue>(&self, queue: &Q) -> Result<(), QueueError> {
+        match self {
+            Self::Delivered { id, now } => queue.mark_delivered(*id, *now),
+            Self::Retry {
+                id,
+                next,
+                error,
+                now,
+            } => queue.mark_retry(*id, *next, error, *now),
+            Self::Dead { id, error, now } => queue.mark_dead(*id, error, *now),
+        }
+    }
+}
+
+/// Outcome-write retry ladder (C6): the delivery already happened — losing
+/// the outcome write over a transient store error would leave the row in
+/// `sending` until the stale lease reclaims it and send the event again
+/// (duplicate webhook/mail). A few short retries reconcile almost every
+/// transient window; a store down across all of them falls back to the
+/// §8.6 stale-lease recovery, which is at-least-once.
+const OUTCOME_WRITE_RETRIES: u32 = 3;
+const OUTCOME_WRITE_RETRY_BASE_MS: u64 = 25;
 
 /// Same-fault dedup state (docs/guide/notification.md §8.5 聚合并抑制重复通知):
 /// a fault key is suppressed until its window expires; repeats during the
@@ -259,10 +310,13 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
             };
             // Error strings are persisted as queue `last_error` (and would be
             // logged below): scrub configured secrets out first (§8.7).
-            let (transition, record) = match &outcome {
+            let (transition, write) = match &outcome {
                 Ok(()) => (
                     OutcomeTransition::Delivered,
-                    self.queue.mark_delivered(row.id, now_unix_ms),
+                    OutcomeWrite::Delivered {
+                        id: row.id,
+                        now: now_unix_ms,
+                    },
                 ),
                 Err(err)
                     if matches!(
@@ -273,7 +327,11 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
                     let scrubbed = self.scrubber.scrub(&err.to_string());
                     (
                         OutcomeTransition::Dead,
-                        self.queue.mark_dead(row.id, &scrubbed, now_unix_ms),
+                        OutcomeWrite::Dead {
+                            id: row.id,
+                            error: scrubbed,
+                            now: now_unix_ms,
+                        },
                     )
                 }
                 Err(err) if row.attempts >= MAX_QUEUE_ATTEMPTS => {
@@ -286,7 +344,11 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
                     let scrubbed = self.scrubber.scrub(&err.to_string());
                     (
                         OutcomeTransition::Dead,
-                        self.queue.mark_dead(row.id, &scrubbed, now_unix_ms),
+                        OutcomeWrite::Dead {
+                            id: row.id,
+                            error: scrubbed,
+                            now: now_unix_ms,
+                        },
                     )
                 }
                 Err(err) => {
@@ -294,11 +356,16 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
                     let scrubbed = self.scrubber.scrub(&err.to_string());
                     (
                         OutcomeTransition::Retried,
-                        self.queue.mark_retry(row.id, next, &scrubbed, now_unix_ms),
+                        OutcomeWrite::Retry {
+                            id: row.id,
+                            next,
+                            error: scrubbed,
+                            now: now_unix_ms,
+                        },
                     )
                 }
             };
-            match record {
+            match self.record_outcome(&write) {
                 Ok(()) => match transition {
                     OutcomeTransition::Delivered => report.delivered += 1,
                     OutcomeTransition::Retried => report.retried += 1,
@@ -311,6 +378,32 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
             }
         }
         report
+    }
+
+    /// Records one delivery outcome with a bounded retry (C6). The
+    /// side effect already happened, so the write is retried rather than
+    /// abandoned — an unrecorded outcome is indistinguishable from an
+    /// unclaimed row and double-sends after lease expiry.
+    fn record_outcome(&self, write: &OutcomeWrite) -> Result<(), QueueError> {
+        let mut attempt: u32 = 0;
+        loop {
+            match write.apply(&self.queue) {
+                Ok(()) => return Ok(()),
+                Err(err) if attempt < OUTCOME_WRITE_RETRIES => {
+                    attempt += 1;
+                    tracing::warn!(
+                        id = write.id(),
+                        attempt,
+                        error = %err,
+                        "notification outcome write failed; retrying"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        OUTCOME_WRITE_RETRY_BASE_MS * u64::from(attempt),
+                    ));
+                }
+                Err(err) => return Err(err),
+            }
+        }
     }
 }
 
