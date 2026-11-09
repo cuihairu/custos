@@ -52,7 +52,9 @@ pub struct Engine {
     probe_order: Vec<ResourceId>,
     probes: HashMap<ResourceId, Box<dyn Probe>>,
     tracker: ProbeDueTracker,
-    executor: Box<dyn ActionExecutor>,
+    /// Shared so the watchdog (C20) can run the executor on a worker thread
+    /// while the tick thread waits with a deadline.
+    executor: Arc<dyn ActionExecutor>,
     store: Arc<dyn RunStore>,
     clock: Arc<dyn Clock>,
     budget: RecoveryBudget,
@@ -131,7 +133,9 @@ impl Engine {
             managed,
             probes,
             tracker: ProbeDueTracker::default(),
-            executor,
+            // Box keeps the public signature cheap to build by hand; the
+            // engine only ever needs a shared handle (watchdog, C20).
+            executor: Arc::from(executor),
             store,
             clock,
             budget: RecoveryBudget::default(),
@@ -764,6 +768,78 @@ mod tests {
         assert_eq!(runs[0].status, RecoveryRunStatus::Escalated);
         // Plan allows 3 attempts; the budget stops it after the first.
         assert_eq!(runs[0].action_attempts.len(), 1);
+    }
+
+    #[test]
+    fn hung_action_cannot_stall_the_tick_past_the_watchdog() {
+        // C20: actions run on the tick thread, and an executor that ignores
+        // its deadline (a plugin, or a builtin whose tree kill missed a
+        // daemon holding the pipes open) used to hang every tick forever.
+        // The watchdog must declare the outcome unknown (§6.6), record the
+        // attempt, and let the tick thread live on.
+        let mut hung = plan("hang", 1, RiskLevel::Low);
+        hung.timeout_ms = 100;
+        let (gate_tx, gate_rx) = std::sync::mpsc::channel::<()>();
+        let gate_rx = std::sync::Mutex::new(gate_rx);
+        let executor: Box<dyn ActionExecutor> = Box::new(
+            move |_action: &custos_model::ActionSpec, _timeout: Duration| -> ActionOutcome {
+                // Parked until the test drops the gate: an executor that
+                // never returns. Releasing it afterwards also exercises the
+                // late-result path (the watchdog already gave up).
+                let _ = gate_rx.lock().unwrap_or_else(|e| e.into_inner()).recv();
+                ActionOutcome::Succeeded
+            },
+        );
+        let store = Arc::new(crate::MemoryStore::default());
+        let mut probes = HashMap::new();
+        probes.insert(
+            ResourceId::new("app"),
+            Box::new(ScriptedProbe::new(vec![false, false, true])) as Box<dyn Probe>,
+        );
+        let config = ValidatedConfig {
+            resources: vec![resource("app", vec![hung], vec![])],
+            alternative_groups: vec![],
+            graph: DependencyGraph::build(vec![(ResourceId::new("app"), vec![])]).expect("graph"),
+            permissions: Default::default(),
+            notification: Default::default(),
+            dashboard: Default::default(),
+        };
+        let mut engine = Engine::new(
+            &config,
+            probes,
+            executor,
+            store,
+            Arc::new(crate::clock::FakeClock::new(1_000)),
+        );
+        let started = std::time::Instant::now();
+        let runs = engine.tick();
+        // 100ms plan timeout + the watchdog grace; a full hang never gets
+        // here at all.
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "tick blocked past the watchdog: {:?}",
+            started.elapsed()
+        );
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].action_attempts.len(), 1);
+        // The watchdog, not the executor, decided the outcome.
+        assert_eq!(
+            runs[0].action_attempts[0].outcome,
+            Some(ActionOutcome::OutcomeUnknown)
+        );
+        assert_eq!(runs[0].status, RecoveryRunStatus::Escalated);
+        // The tick thread is alive again: the next tick returns promptly
+        // even though the action executor is still parked on the gate.
+        let started = std::time::Instant::now();
+        let next = engine.tick();
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "the tick thread stayed blocked: {:?}",
+            started.elapsed()
+        );
+        assert!(next.is_empty());
+        // Release the parked executor; its late result must not panic.
+        drop(gate_tx);
     }
 
     #[test]

@@ -256,7 +256,10 @@ impl Engine {
             finished_at_unix_ms: None,
         };
         self.store.save_attempt(&run.id, &attempt);
-        run.action_attempts.push(attempt.clone());
+        // §7.3: the attempt is persisted as `Executing` BEFORE the external
+        // action runs. The in-memory run only gets the attempt once its
+        // outcome is known — pushing the `outcome: None` skeleton here and
+        // never updating it left every in-memory attempt outcome blank.
         // §6.1 path: Planning -> ResolvingDependencies -> Executing. Both hops
         // are no-ops when the run already sits in the later state.
         run.transition_to(RecoveryRunStatus::ResolvingDependencies)
@@ -278,13 +281,20 @@ impl Engine {
             run.incident_id.as_ref(),
         );
 
-        let outcome = self
-            .executor
-            .execute(&plan.action, Duration::from_millis(plan.timeout_ms));
+        // Watchdog-bounded (C20): the executor's own `timeout` is a promise,
+        // not a guarantee — a hung executor must not take the tick thread
+        // down with it. Past the deadline the attempt records
+        // OutcomeUnknown (§6.6).
+        let outcome = crate::executor::execute_with_watchdog(
+            std::sync::Arc::clone(&self.executor),
+            &plan.action,
+            Duration::from_millis(plan.timeout_ms),
+        );
         let now = self.clock.now_unix_ms();
         attempt.outcome = Some(outcome);
         attempt.finished_at_unix_ms = Some(now);
         self.store.save_attempt(&run.id, &attempt);
+        run.action_attempts.push(attempt);
         self.budget_state.record_attempt(id, now, &self.budget);
         if plan.risk_level == custos_model::RiskLevel::High {
             self.budget_state.record_high_risk();
