@@ -419,13 +419,11 @@ mod tests {
                 (ResourceId::new("app2"), vec![ResourceId::new("db")]),
             ],
             // db: observe fail, verify fail (action 1 fails), two dep checks
-            // by app1/app2, tick1-end wake observe fail, tick2 wake observe
-            // fail, retry-verify true, re-probe true, dep checks by both
-            // redriven apps.
+            // by app1/app2, retry-verify true, re-probe true, dep checks by
+            // both redriven apps. The wake pass itself probes nothing (C15):
+            // it retries on the snapshot the observation pass wrote.
             vec![
-                vec![
-                    false, false, false, false, false, false, true, true, true, true,
-                ],
+                vec![false, false, false, false, true, true, true, true],
                 // app1: observe fail, verify true (after its own action).
                 vec![false, true],
                 // app2: observe fail, verify true.
@@ -1218,6 +1216,78 @@ mod tests {
         assert!(
             detail.contains("proxy-a") && detail.contains("recovery refused"),
             "{detail}"
+        );
+    }
+
+    #[test]
+    fn waiter_dependency_probes_respect_the_probe_interval() {
+        // C15: a parked waiter re-probed its dependency on EVERY tick,
+        // bypassing ProbeDueTracker — one probe_results row per tick
+        // instead of one per probe interval.
+        let mut dep = resource("dep", vec![plan("restart-dep", 1, RiskLevel::Low)], vec![]);
+        dep.config = serde_json::json!({"interval_ms": 60_000});
+        let app = resource(
+            "app",
+            vec![plan("restart-app", 1, RiskLevel::Low)],
+            vec![required_dep("dep")],
+        );
+        let (mut engine, store, _exec, clock) = test_engine_with_clock(
+            vec![dep, app],
+            vec![
+                (ResourceId::new("dep"), vec![]),
+                (ResourceId::new("app"), vec![ResourceId::new("dep")]),
+            ],
+            // dep keeps failing (the waiter stays parked); app fails once.
+            vec![
+                vec![false, false, false, false, false, false, false, false],
+                vec![false],
+            ],
+            vec![ActionOutcome::Failed],
+        );
+        let dep_id = ResourceId::new("dep");
+        let dep_rows = |store: &Arc<crate::MemoryStore>| -> usize {
+            store
+                .evidence()
+                .iter()
+                .filter(|e| e.resource_id == dep_id)
+                .count()
+        };
+
+        engine.tick();
+        // The first tick legitimately touches dep several times (observation,
+        // its own recovery, app's dependency resolution); capture that
+        // baseline and demand ZERO new dep probes afterwards.
+        let baseline = dep_rows(&store);
+        let parked_on = |engine: &Engine| {
+            engine
+                .waiters
+                .get(&ResourceId::new("dep"))
+                .is_some_and(|runs| {
+                    runs.iter().any(|r| {
+                        r.resource_id.as_str() == "app" && r.status == RecoveryRunStatus::Waiting
+                    })
+                })
+        };
+        assert!(
+            parked_on(&engine),
+            "app run must be parked on the dependency"
+        );
+        // Five sub-interval ticks: the dependency's 60s probe interval has
+        // not elapsed and its recovery is cooling down, so no NEW dep
+        // evidence may appear — the waiter loop must not probe per tick.
+        for _ in 0..5 {
+            clock.advance_ms(100);
+            engine.tick();
+        }
+        assert_eq!(
+            dep_rows(&store),
+            baseline,
+            "dep must gain no per-tick waiter probes between intervals"
+        );
+        // The waiter really is parked throughout.
+        assert!(
+            parked_on(&engine),
+            "app run must still be waiting on the dependency"
         );
     }
 }

@@ -85,7 +85,12 @@ impl Engine {
             .collect();
         for dep in deps {
             let now = self.clock.now_unix_ms();
-            self.probe_one(&dep, now);
+            // The observation pass at the top of `tick` probes every due
+            // resource through ProbeDueTracker; re-probing here bypassed the
+            // tracker (C15) and wrote one probe_results row per tick for
+            // every parked waiter. The snapshot that pass wrote IS the
+            // freshest evidence — at most one probe interval old — and the
+            // retry below probes again right after its attempt.
             let mut healthy = self.managed[&dep].snapshot.status == HealthStatus::Healthy;
             if !healthy {
                 let cooling_down = now_lt(now, self.managed[&dep].cooldown_until_ms);

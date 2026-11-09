@@ -461,6 +461,7 @@ dependencies = [
  "custos-model",
  "custos-probe",
  "custos-store",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
