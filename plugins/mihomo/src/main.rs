@@ -118,7 +118,9 @@ fn next_plain_member(members: &[String], current: &str) -> Option<String> {
     let start = members.iter().position(|m| m == current).unwrap_or(0);
     for step in 1..=n {
         let candidate = &members[(start + step) % n];
-        if !candidate.contains("自动") && candidate != current {
+        // Selector members come in both zh-CN (自动) and zh-TW (自動)
+        // spellings — neither is a real node (AUD-C).
+        if !candidate.contains("自动") && !candidate.contains("自動") && candidate != current {
             return Some(candidate.clone());
         }
     }
@@ -284,5 +286,16 @@ mod tests {
         assert_eq!(next_plain_member(&single, "A"), None);
         // Empty member list -> no alternative.
         assert_eq!(next_plain_member(&[], "A"), None);
+    }
+
+    #[test]
+    fn next_plain_member_skips_traditional_selectors_too() {
+        // AUD-C: zh-TW selector members use 自動; the doc always promised
+        // skipping both spellings — a traditional selector must never be
+        // picked as the switch target.
+        let members = vec!["X".to_owned(), "自動選擇".to_owned(), "Y".to_owned()];
+        assert_eq!(next_plain_member(&members, "X").as_deref(), Some("Y"));
+        // Wrapping skips the traditional selector.
+        assert_eq!(next_plain_member(&members, "Y").as_deref(), Some("X"));
     }
 }
