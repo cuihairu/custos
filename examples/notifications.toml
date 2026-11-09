@@ -86,3 +86,10 @@ token = "CHANGE_ME_trigger_scope"
 auth = "api-key"        # or "bearer"
 category = "alerts"
 audiences = ["log"]     # bare channel names, "user:<id>", "group:<id>"
+
+# Same SSRF policy as the webhook channel; allowlist herald here when it
+# legitimately runs on a private/loopback address.
+[notification.channels.herald-alerts.ssrf]
+block_private = true
+block_loopback = true
+block_redirects = true

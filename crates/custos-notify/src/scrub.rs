@@ -140,6 +140,7 @@ mod tests {
                 timeout_ms: 1000,
                 retries: 0,
                 backoff_ms: 1,
+                ssrf: SsrfPolicy::default_blocking(),
             }),
         );
         NotificationConfig {

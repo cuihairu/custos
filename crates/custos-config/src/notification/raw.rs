@@ -132,6 +132,8 @@ struct RawHerald {
     retries: u32,
     #[serde(default = "default_backoff_ms")]
     backoff_ms: u64,
+    #[serde(default)]
+    ssrf: Option<RawSsrfPolicy>,
 }
 
 fn default_herald_category() -> String {
@@ -382,6 +384,14 @@ fn build_channel(id: &str, mut table: toml::Table) -> Result<ChannelConfig, Stri
                 timeout_ms: raw.timeout_ms,
                 retries: raw.retries,
                 backoff_ms: raw.backoff_ms,
+                ssrf: raw
+                    .ssrf
+                    .map_or_else(SsrfPolicy::default_blocking, |p| SsrfPolicy {
+                        block_private: p.block_private,
+                        block_loopback: p.block_loopback,
+                        block_redirects: p.block_redirects,
+                        allowlist: p.allowlist,
+                    }),
             }))
         }
         "telegram" => {

@@ -184,6 +184,8 @@ pub struct HeraldConfig {
     pub retries: u32,
     /// Base retry backoff; the channel doubles it per attempt.
     pub backoff_ms: u64,
+    /// SSRF policy applied to `base_url` (same rules as the webhook channel).
+    pub ssrf: SsrfPolicy,
 }
 
 impl std::fmt::Debug for HeraldConfig {
@@ -198,6 +200,7 @@ impl std::fmt::Debug for HeraldConfig {
             .field("timeout_ms", &self.timeout_ms)
             .field("retries", &self.retries)
             .field("backoff_ms", &self.backoff_ms)
+            .field("ssrf", &self.ssrf)
             .finish()
     }
 }

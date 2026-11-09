@@ -3,6 +3,11 @@
 //! the app dispatch endpoint `/api/v1/apps/{app}/dispatch` with the app
 //! token (`X-API-Key` or `Authorization: Bearer`).
 //!
+//! SSRF protection mirrors the webhook channel (docs/guide/notification.md
+//! §8.2): `base_url` is validated against the configured `SsrfPolicy` at
+//! construction and re-checked before every send; redirects are disabled
+//! when the policy blocks them.
+//!
 //! Mapping: Custos severity → herald urgency (`info→normal`,
 //! `warning→urgent`, `critical→critical`); fault-type events carry herald's
 //! `state = "down"` and `recovery.succeeded` carries `state = "ok"`, so
@@ -29,14 +34,26 @@ pub struct HeraldChannel {
 }
 
 impl HeraldChannel {
+    /// Builds the HTTP agent from the validated config. The SSRF policy is
+    /// enforced at construction and again before every send (fresh DNS
+    /// resolution, same as the webhook channel), and redirects are disabled
+    /// when the policy blocks them.
     pub fn new(id: impl Into<String>, config: HeraldConfig) -> Result<Self, ChannelError> {
+        // Fail fast on a policy-violating target at construction time.
+        crate::webhook_ssrf::validate_target(&config.base_url, &config.ssrf).map_err(|block| {
+            ChannelError::new(
+                ChannelErrorKind::Config,
+                format!("herald target blocked by SSRF policy: {}", block.describe()),
+            )
+        })?;
         let timeout = Duration::from_millis(config.timeout_ms);
-        let agent = ureq::Agent::new_with_config(
-            ureq::config::Config::builder()
-                .timeout_global(Some(timeout))
-                .timeout_connect(Some(timeout))
-                .build(),
-        );
+        let mut builder = ureq::config::Config::builder()
+            .timeout_global(Some(timeout))
+            .timeout_connect(Some(timeout));
+        if config.ssrf.block_redirects {
+            builder = builder.max_redirects(0);
+        }
+        let agent = ureq::Agent::new_with_config(builder.build());
         Ok(Self {
             id: id.into(),
             config,
@@ -52,8 +69,17 @@ impl HeraldChannel {
         )
     }
 
-    /// One attempt: POST the pre-built dispatch payload.
+    /// One attempt: re-check the SSRF policy against the target, then POST
+    /// the pre-built dispatch payload.
     fn send_once(&self, payload: &str) -> Result<(), ChannelError> {
+        crate::webhook_ssrf::validate_target(&self.config.base_url, &self.config.ssrf).map_err(
+            |block| {
+                ChannelError::new(
+                    ChannelErrorKind::Config,
+                    format!("herald target blocked by SSRF policy: {}", block.describe()),
+                )
+            },
+        )?;
         let mut request = self
             .agent
             .post(self.endpoint())
@@ -238,6 +264,11 @@ mod tests {
     }
 
     fn config() -> HeraldConfig {
+        // The transport tests talk to a loopback responder, so the SSRF
+        // policy must permit loopback there; the blocked-target behavior is
+        // covered by the SSRF tests below.
+        let mut ssrf = custos_config::SsrfPolicy::default_blocking();
+        ssrf.block_loopback = false;
         HeraldConfig {
             base_url: "http://127.0.0.1:8080".into(),
             app: "custos".into(),
@@ -248,6 +279,7 @@ mod tests {
             timeout_ms: 2000,
             retries: 1,
             backoff_ms: 1,
+            ssrf,
         }
     }
 
@@ -434,5 +466,44 @@ mod tests {
             .deliver(&event(EventType::ResourceUnhealthy, Severity::Critical))
             .unwrap_err();
         assert_eq!(err.kind, ChannelErrorKind::Http);
+    }
+
+    #[test]
+    fn construction_rejects_ssrf_blocked_target() {
+        // Default policy blocks loopback; construction must fail fast
+        // instead of POSTing dispatch payloads at internal addresses.
+        let cfg = HeraldConfig {
+            base_url: "http://127.0.0.1:8080".into(),
+            app: "custos".into(),
+            token: None,
+            auth: HeraldAuth::ApiKey,
+            category: "alerts".into(),
+            audiences: vec!["log".into()],
+            timeout_ms: 2000,
+            retries: 0,
+            backoff_ms: 1,
+            ssrf: custos_config::SsrfPolicy::default_blocking(),
+        };
+        let err = match HeraldChannel::new("herald", cfg) {
+            Err(e) => e,
+            Ok(_) => panic!("expected construction to be rejected"),
+        };
+        assert_eq!(err.kind, ChannelErrorKind::Config);
+        assert!(err.to_string().contains("SSRF"), "{err}");
+    }
+
+    #[test]
+    fn allowlisted_herald_host_bypasses_ssrf() {
+        // An allowlisted host name is accepted even though it resolves to
+        // loopback; the channel then fails on connect (refused port) rather
+        // than on the SSRF policy.
+        let mut cfg = config();
+        cfg.base_url = "http://localhost:9".into();
+        cfg.ssrf.allowlist = vec!["localhost".into()];
+        let channel = HeraldChannel::new("herald", cfg).unwrap();
+        let err = channel
+            .deliver(&event(EventType::ResourceUnhealthy, Severity::Critical))
+            .unwrap_err();
+        assert_eq!(err.kind, ChannelErrorKind::Transport);
     }
 }
