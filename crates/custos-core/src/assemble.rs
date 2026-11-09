@@ -18,21 +18,22 @@ pub struct Assembled {
     pub notification: Arc<NotificationEngine<Arc<Store>>>,
 }
 
+/// Spool capacity: pending events the dispatch worker can absorb before
+/// the emitter degrades to inline dispatch (backpressure, no loss).
+const DISPATCH_SPOOL_CAPACITY: usize = 256;
+
 /// Wires the notification sink into the engine: dispatch enqueues to the
-/// queue, never blocking recovery (§8.1).
+/// queue, never blocking recovery (§8.1). The emitter runs on the tick
+/// thread and dispatch does synchronous SQLite inserts, so events are
+/// spooled to a dedicated worker instead of serializing fsyncs on the one
+/// tick (C18).
 fn attach_notifications(engine: &mut Engine, notification: Arc<NotificationEngine<Arc<Store>>>) {
-    let sink = notification.clone();
+    let sink = Arc::new(custos_notify::SpooledDispatch::spawn(
+        notification,
+        DISPATCH_SPOOL_CAPACITY,
+    ));
     engine.set_event_emitter(Arc::new(move |event| {
-        let report = sink.dispatch(event, event.occurred_at_unix_ms);
-        if report.enqueued > 0 || report.suppressed > 0 {
-            tracing::debug!(
-                target: "custos::runtime",
-                event = event.event_type.as_str(),
-                enqueued = report.enqueued,
-                suppressed = report.suppressed,
-                "notification dispatched"
-            );
-        }
+        sink.dispatch(event);
     }));
 }
 
