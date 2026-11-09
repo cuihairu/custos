@@ -506,8 +506,110 @@ impl NetworkInterfaceController for NetshNetworkController {
     }
 }
 
+/// Localized `Admin State` values that mean enabled, `netsh interface show
+/// interface` (R12). Values are single column cells; multi-word locales keep
+/// the internal space in one cell.
+const NETSH_ADMIN_ENABLED: [&str; 12] = [
+    "Enabled",
+    "已启用",
+    "有効",
+    "Activé",
+    "Aktiviert",
+    "Habilitado",
+    "Включено",
+    "Abilitato",
+    "Ativado",
+    "사용",
+    "Włączone",
+    "Etkin",
+];
+
+/// Localized `Admin State` values that mean disabled.
+const NETSH_ADMIN_DISABLED: [&str; 12] = [
+    "Disabled",
+    "已禁用",
+    "無効",
+    "Désactivé",
+    "Deaktiviert",
+    "Deshabilitado",
+    "Отключено",
+    "Disabilitato",
+    "Desativado",
+    "사용 안 함",
+    "Wyłączone",
+    "Devre dışı",
+];
+
+/// Localized `State` values that mean connected.
+const NETSH_STATE_CONNECTED: [&str; 12] = [
+    "Connected",
+    "已连接",
+    "接続済み",
+    "Connecté",
+    "Verbunden",
+    "Conectado",
+    "Подключено",
+    "Connesso",
+    "Conectado",
+    "연결됨",
+    "Połączone",
+    "Bağlı",
+];
+
+/// Localized `State` values that mean disconnected.
+const NETSH_STATE_DISCONNECTED: [&str; 12] = [
+    "Disconnected",
+    "已断开",
+    "切断済み",
+    "Déconnecté",
+    "Getrennt",
+    "Desconectado",
+    "Отключено",
+    "Disconnesso",
+    "Desconectado",
+    "연결 안 됨",
+    "Rozłączone",
+    "Bağlantı kesildi",
+];
+
+/// Splits a `netsh interface show interface` row into column cells. A run
+/// of two or more spaces separates cells; a single space stays inside a
+/// cell so localized multi-word values (ko 「사용 안 함」, tr 「Devre dışı」)
+/// are one cell. The table is column-aligned, so this is
+/// language-independent. Same shape as custos-probe/src/netif.rs.
+fn netsh_cells(line: &str) -> Vec<String> {
+    let mut cells = Vec::new();
+    let mut current = String::new();
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == ' ' {
+            let mut run = 1;
+            while let Some(&' ') = chars.peek() {
+                chars.next();
+                run += 1;
+            }
+            if run >= 2 {
+                if !current.is_empty() {
+                    cells.push(std::mem::take(&mut current));
+                }
+            } else if !current.is_empty() {
+                current.push(' ');
+            }
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        cells.push(current);
+    }
+    cells
+}
+
 /// Parses `netsh interface show interface` rows:
 /// `Admin State  State  Type  Interface Name` — enabled + connected = up.
+/// Admin State and State are matched per column (never guessed, §11.1); a
+/// row whose cells are not recognized is skipped rather than reported down
+/// (R12: en/zh-CN-only matching left every interface down on ja/fr/de/ko).
 pub fn parse_netsh_interfaces(output: &str) -> Vec<InterfaceStatus> {
     let mut interfaces = Vec::new();
     for line in output.lines() {
@@ -520,14 +622,34 @@ pub fn parse_netsh_interfaces(output: &str) -> Vec<InterfaceStatus> {
         {
             continue;
         }
-        let admin_enabled = trimmed.contains("Enabled") || trimmed.contains("已启用");
-        let connected = trimmed.contains("Connected") || trimmed.contains("已连接");
-        let name = match trimmed.rsplit_once("  ") {
-            Some((_left, name)) => name.trim().to_owned(),
-            None => continue,
+        let cells = netsh_cells(trimmed);
+        let (Some(admin), Some(state)) = (cells.first(), cells.get(1)) else {
+            continue;
         };
+        let admin_enabled = match (
+            NETSH_ADMIN_ENABLED.contains(&admin.as_str()),
+            NETSH_ADMIN_DISABLED.contains(&admin.as_str()),
+        ) {
+            (true, _) => true,
+            (_, true) => false,
+            (false, false) => continue,
+        };
+        let connected = match (
+            NETSH_STATE_CONNECTED.contains(&state.as_str()),
+            NETSH_STATE_DISCONNECTED.contains(&state.as_str()),
+        ) {
+            (true, _) => true,
+            (_, true) => false,
+            (false, false) => continue,
+        };
+        let Some(name) = cells.last() else {
+            continue;
+        };
+        if name.is_empty() {
+            continue;
+        }
         interfaces.push(InterfaceStatus {
-            name,
+            name: name.clone(),
             up: admin_enabled && connected,
             addresses: Vec::new(),
         });

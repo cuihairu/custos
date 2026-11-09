@@ -128,6 +128,98 @@ fn interface_state(interface: &str) -> Result<InterfaceState, String> {
     ))
 }
 
+/// Localized `Admin State` / `State` values, kept in sync with
+/// custos-platform/src/windows.rs (R12: en/zh-CN-only matching reported
+/// every interface down on ja/fr/de/ko systems).
+const NETSH_ADMIN_ENABLED: [&str; 12] = [
+    "Enabled",
+    "已启用",
+    "有効",
+    "Activé",
+    "Aktiviert",
+    "Habilitado",
+    "Включено",
+    "Abilitato",
+    "Ativado",
+    "사용",
+    "Włączone",
+    "Etkin",
+];
+const NETSH_ADMIN_DISABLED: [&str; 12] = [
+    "Disabled",
+    "已禁用",
+    "無効",
+    "Désactivé",
+    "Deaktiviert",
+    "Deshabilitado",
+    "Отключено",
+    "Disabilitato",
+    "Desativado",
+    "사용 안 함",
+    "Wyłączone",
+    "Devre dışı",
+];
+const NETSH_STATE_CONNECTED: [&str; 12] = [
+    "Connected",
+    "已连接",
+    "接続済み",
+    "Connecté",
+    "Verbunden",
+    "Conectado",
+    "Подключено",
+    "Connesso",
+    "Conectado",
+    "연결됨",
+    "Połączone",
+    "Bağlı",
+];
+const NETSH_STATE_DISCONNECTED: [&str; 12] = [
+    "Disconnected",
+    "已断开",
+    "切断済み",
+    "Déconnecté",
+    "Getrennt",
+    "Desconectado",
+    "Отключено",
+    "Disconnesso",
+    "Desconectado",
+    "연결 안 됨",
+    "Rozłączone",
+    "Bağlantı kesildi",
+];
+
+/// Splits a `netsh interface show interface` row into column cells. A run
+/// of two or more spaces separates cells; a single space stays inside a
+/// cell so localized multi-word values (ko 「사용 안 함」, tr 「Devre dışı」)
+/// are one cell. Same shape as custos-platform/src/windows.rs.
+fn netsh_cells(line: &str) -> Vec<String> {
+    let mut cells = Vec::new();
+    let mut current = String::new();
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == ' ' {
+            let mut run = 1;
+            while let Some(&' ') = chars.peek() {
+                chars.next();
+                run += 1;
+            }
+            if run >= 2 {
+                if !current.is_empty() {
+                    cells.push(std::mem::take(&mut current));
+                }
+            } else if !current.is_empty() {
+                current.push(' ');
+            }
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        cells.push(current);
+    }
+    cells
+}
+
 /// True when the row for `interface` reports Enabled+Connected. Parser
 /// shape matches custos-platform's `parse_netsh_interfaces`; pure and
 /// always compiled so fixtures run on any host.
@@ -138,21 +230,32 @@ pub fn parse_netsh_interface_state(output: &str, interface: &str) -> Option<bool
         {
             continue;
         }
-        let admin_enabled = trimmed.contains("Enabled") || trimmed.contains("已启用");
-        let connected = trimmed.contains("Connected") || trimmed.contains("已连接");
-        // A row without the two-space column separator (a localized or
-        // malformed line) is skipped, not fatal: `?` here aborted the
-        // whole table and reported a live interface as NotFound (R9,
-        // openclaw audit 2026-11-05). Mirrors the platform-side
-        // parse_netsh_interfaces in custos-platform/src/windows.rs.
-        // A row without the two-space column separator (a localized or
-        // malformed line) is skipped, not fatal: `?` here aborted the
-        // whole table and reported a live interface as NotFound (R9,
-        // openclaw audit 2026-11-05). Mirrors the platform-side
-        // parse_netsh_interfaces in custos-platform/src/windows.rs.
-        let name = match trimmed.rsplit_once("  ") {
-            Some((_, name)) => name.trim(),
-            None => continue,
+        // Admin State and State are matched per column (never guessed);
+        // a row whose cells are not recognized is skipped, not fatal:
+        // the old `?`/contains form reported a live interface as NotFound
+        // on a malformed row and down on every localized one (R9 + R12).
+        let cells = netsh_cells(trimmed);
+        let (Some(admin), Some(state)) = (cells.first(), cells.get(1)) else {
+            continue;
+        };
+        let admin_enabled = match (
+            NETSH_ADMIN_ENABLED.contains(&admin.as_str()),
+            NETSH_ADMIN_DISABLED.contains(&admin.as_str()),
+        ) {
+            (true, _) => true,
+            (_, true) => false,
+            (false, false) => continue,
+        };
+        let connected = match (
+            NETSH_STATE_CONNECTED.contains(&state.as_str()),
+            NETSH_STATE_DISCONNECTED.contains(&state.as_str()),
+        ) {
+            (true, _) => true,
+            (_, true) => false,
+            (false, false) => continue,
+        };
+        let Some(name) = cells.last() else {
+            continue;
         };
         if name == interface {
             return Some(admin_enabled && connected);
@@ -532,6 +635,30 @@ Active Routes:
             parse_route_print_default_gateway(zh_active).as_deref(),
             Some("192.168.1.1"),
             "the active gateway is reported, the persistent one skipped"
+        );
+    }
+
+    #[test]
+    fn netsh_interface_state_recognizes_localized_states() {
+        // R12: ja/fr/de/ko localize the Admin State and State values; only
+        // matching en/zh-CN reported every interface down on those systems.
+        let output = "\
+有効        接続済み    有線     イーサネット 2
+Activé      Connecté    Ethernet  Ethernet 4
+사용 안 함   연결 안 됨   유선      이더넷 6
+";
+        assert_eq!(
+            parse_netsh_interface_state(output, "イーサネット 2"),
+            Some(true)
+        );
+        assert_eq!(
+            parse_netsh_interface_state(output, "Ethernet 4"),
+            Some(true)
+        );
+        assert_eq!(
+            parse_netsh_interface_state(output, "이더넷 6"),
+            Some(false),
+            "ko disabled form stays disabled"
         );
     }
 

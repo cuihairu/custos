@@ -107,6 +107,34 @@ fn netsh_interface_list_parses_states() {
 }
 
 #[test]
+fn netsh_interface_list_recognizes_localized_states() {
+    // R12: ja/fr/de/ko/tr localize the Admin State and State values; only
+    // matching en/zh-CN left every interface down on those systems. The
+    // multi-word disabled forms (ko 「사용 안 함」, tr 「Devre dışı」) stay one
+    // column cell and must not be misread as enabled.
+    let output = "\
+有効        接続済み    有線     イーサネット 2
+有効        切断済み    有線     イーサネット 3
+Activé      Connecté    Ethernet  Ethernet 4
+Aktiviert   Getrennt    Ethernet  Ethernet 5
+사용 안 함   연결 안 됨   유선      이더넷 6
+사용        연결됨       유선      이더넷 7
+";
+    let interfaces = parse_netsh_interfaces(output);
+    let state = |name: &str| interfaces.iter().find(|i| i.name == name).map(|i| i.up);
+    assert_eq!(state("イーサネット 2"), Some(true));
+    assert_eq!(state("イーサネット 3"), Some(false));
+    assert_eq!(state("Ethernet 4"), Some(true));
+    assert_eq!(state("Ethernet 5"), Some(false));
+    assert_eq!(
+        state("이더넷 6"),
+        Some(false),
+        "ko disabled form stays disabled"
+    );
+    assert_eq!(state("이더넷 7"), Some(true));
+}
+
+#[test]
 fn netsh_wlan_state_extracts_connection_and_ssid() {
     let (connected, ssid) = parse_netsh_wlan_state(NETSH_WLAN);
     assert!(connected);
