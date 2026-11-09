@@ -87,17 +87,28 @@ pub enum Connectivity {
     Unreachable(String),
 }
 
-/// Resolves a connectivity target to its first `SocketAddr`. Uses the tuple
-/// form of `ToSocketAddrs`: the `format!("{}:{}", host, port).parse()`
-/// string form rejects a bare IPv6 literal (ambiguous colon split), leaving
-/// IPv6 targets structurally unreachable (R16, openclaw audit 2026-11-05).
+/// Resolves a connectivity target to its first `SocketAddr`. IP literals —
+/// bare or bracketed — are parsed directly and never hit DNS; a hostname
+/// falls back to the tuple form of `ToSocketAddrs` (the string
+/// `format!("{}:{}", host, port).parse()` form rejects any bare IPv6
+/// literal: ambiguous colon split; R16). A lookup failure is reported as
+/// "unresolved", distinct from an unusable target (AUD-A).
 pub fn resolve_target(host: &str, port: u16) -> PlatformResult<std::net::SocketAddr> {
-    use std::net::ToSocketAddrs;
-    (host, port)
+    use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+    // "[2001:db8::1]" is the canonical user-facing IPv6 notation; strip
+    // the brackets so both notations take the literal path.
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = bare.parse::<IpAddr>() {
+        return Ok(SocketAddr::new(ip, port));
+    }
+    let unresolved = |detail: String| {
+        PlatformError::Failed(format!("target host unresolved: {host} ({detail})"))
+    };
+    (bare, port)
         .to_socket_addrs()
-        .map_err(|_| PlatformError::Failed("invalid target".into()))?
+        .map_err(|err| unresolved(err.to_string()))?
         .next()
-        .ok_or_else(|| PlatformError::Failed("invalid target".into()))
+        .ok_or_else(|| unresolved("empty answer".into()))
 }
 
 /// Checks network connectivity using this platform's primitives.

@@ -447,6 +447,31 @@ mod tests {
     }
 
     #[test]
+    fn resolve_target_accepts_bracketed_ipv6_literal() {
+        // AUD-A: "[2001:db8::1]" is the canonical user-facing IPv6
+        // notation; the pre-R16 string parse accepted it and the tuple
+        // form must not regress it.
+        let addr = crate::controller::resolve_target("[2001:db8::1]", 443).unwrap();
+        assert!(addr.is_ipv6());
+        assert_eq!(addr.port(), 443);
+        let loopback = crate::controller::resolve_target("[::1]", 8080).unwrap();
+        assert_eq!(loopback.ip().to_string(), "::1");
+    }
+
+    #[test]
+    fn resolve_target_labels_dns_failure_distinctly() {
+        // A syntactically fine name that cannot resolve is not an
+        // "invalid target": the observation must say what failed. The
+        // overlong name fails inside getaddrinfo deterministically — no
+        // network involved (this box's resolver fake-answers real names).
+        let err = crate::controller::resolve_target(&"a".repeat(1100), 443).unwrap_err();
+        assert!(
+            err.to_string().contains("unresolved"),
+            "lookup failure must be labeled as unresolved, got: {err}"
+        );
+    }
+
+    #[test]
     fn route_table_default_gateway_parsing() {
         let table = "\
 Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT
