@@ -10,8 +10,8 @@ title: 源码分层术语表
 |---|---|---|---|
 | 配置边界 | Validated configuration | 启动前解析并校验的 TOML 输入：禁止未知字段、重复 ID、悬空依赖和依赖环，输出资源、替代组、图、权限、通知与仪表盘配置 | `crates/custos-config/src/lib.rs:320` |
 | 探测规则 | Probe schema | 每类资源探测参数的严格输入契约，原样进入 `Resource.config`，运行期由探测工厂解释 | `crates/custos-config/src/lib.rs:56` |
-| 通知规则 | Notification rule | 按事件、最低严重级、资源、通道与去重窗口筛选通知的声明式规则 | `crates/custos-config/src/notification.rs:34` |
-| 通知通道 | Notification channel | local-log、webhook、SMTP、Herald 或 Telegram 的类型化外发通道，以及超时、重试、退避和密钥策略 | `crates/custos-config/src/notification.rs:55` |
+| 通知规则 | Notification rule | 按事件、最低严重级、资源、通道与去重窗口筛选通知的声明式规则 | `crates/custos-config/src/notification/mod.rs:33` |
+| 通知通道 | Notification channel | local-log、webhook、SMTP、Herald 或 Telegram 的类型化外发通道，以及超时、重试、退避和密钥策略 | `crates/custos-config/src/notification/mod.rs:54` |
 | 资源 | Resource | 被管理的可观测对象，携带类型、健康策略、恢复策略和探测配置 | `crates/custos-model/src/resource.rs:45` |
 | 依赖 | Dependency | 一个资源对另一个资源的关系声明，包含满足条件、等待策略和激活模式 | `crates/custos-model/src/dependency.rs:56` |
 | 替代组 | Alternative group | 一组可互换资源的最小健康数量约束，例如任一可用代理或两个可用出口 | `crates/custos-model/src/dependency.rs:102` |

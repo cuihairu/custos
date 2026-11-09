@@ -62,9 +62,9 @@ title: 源码架构
 **职责：** 把用户可见报告从恢复中解耦，避免外发故障阻塞自愈，并让重试可审计。
 
 - **实现：** 通知引擎匹配规则、抑制重复并入队（`crates/custos-notify/src/engine.rs:137`）；后台 worker 认领到期条目并发送（`crates/custos-notify/src/engine.rs:225`）。
-- **通道：** webhook、SMTP、Herald、Telegram 和本地日志实现 `Channel` 端口（`crates/custos-notify/src/channel.rs:49`）；webhook 出站另有 SSRF 策略边界（`crates/custos-config/src/notification.rs:115`）。
+- **通道：** webhook、SMTP、Herald、Telegram 和本地日志实现 `Channel` 端口（`crates/custos-notify/src/channel.rs:49`）；webhook 出站另有 SSRF 策略边界（`crates/custos-config/src/notification/mod.rs:114`）。
 - **状态：** 通道配置是内存中的已校验配置；队列与尝试记录是 SQLite 状态。
-- **配置 schema：** 通道判别表和规则在 `crates/custos-config/src/notification.rs:55` 与 `crates/custos-config/src/notification.rs:34`；密钥使用脱敏包装（`crates/custos-config/src/notification.rs:234`）。
+- **配置 schema：** 通道判别表和规则在 `crates/custos-config/src/notification/mod.rs:54` 与 `crates/custos-config/src/notification/mod.rs:33`；密钥使用脱敏包装（`crates/custos-config/src/notification/mod.rs:236`）。
 - **文案挂载：** `docs/zh/guide/notification.md` 与 `docs/zh/adr/ADR-0009-why-notification-decoupled.md`。
 
 ## 7. 运行时装配与进程生命周期层

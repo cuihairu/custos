@@ -62,9 +62,9 @@ This is the implementation map behind Custos. Layers are responsibilities: a lay
 **Responsibility:** decouple user-visible reporting from recovery, keep outages from blocking self-healing, and make retries auditable.
 
 - **Implementation:** the engine matches rules, suppresses repeats and enqueues (`crates/custos-notify/src/engine.rs:137`); a background worker claims due entries and sends them (`crates/custos-notify/src/engine.rs:225`).
-- **Channels:** webhook, SMTP, Herald, Telegram and local log implement the `Channel` port (`crates/custos-notify/src/channel.rs:49`); webhook egress additionally has an SSRF policy boundary (`crates/custos-config/src/notification.rs:115`).
+- **Channels:** webhook, SMTP, Herald, Telegram and local log implement the `Channel` port (`crates/custos-notify/src/channel.rs:49`); webhook egress additionally has an SSRF policy boundary (`crates/custos-config/src/notification/mod.rs:114`).
 - **State:** channel settings are memory-resident validated config; queue and attempts are SQLite state.
-- **Configuration schema:** channel discriminated tables and rules are in `crates/custos-config/src/notification.rs:55` and `crates/custos-config/src/notification.rs:34`; secrets use a redacted wrapper (`crates/custos-config/src/notification.rs:234`).
+- **Configuration schema:** channel discriminated tables and rules are in `crates/custos-config/src/notification/mod.rs:54` and `crates/custos-config/src/notification/mod.rs:33`; secrets use a redacted wrapper (`crates/custos-config/src/notification/mod.rs:236`).
 - **Copy attachment:** `docs/guide/notification.md` and `docs/adr/ADR-0009-why-notification-decoupled.md`.
 
 ## 7. Runtime assembly and process lifecycle layer
