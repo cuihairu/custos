@@ -104,6 +104,27 @@ fn probe() -> (bool, String) {
     }
 }
 
+/// The next plain member after `current`, wrapping around the list (pure).
+/// Selectors (members containing 自動/自动) and `current` itself are
+/// skipped. Taking the *first* non-current member bounced repeated
+/// recovery between two nodes (R15): after switching A→B the next recovery
+/// picked A again. Walking from the position after `current` advances the
+/// rotation A→B→C→A.
+fn next_plain_member(members: &[String], current: &str) -> Option<String> {
+    let n = members.len();
+    if n == 0 {
+        return None;
+    }
+    let start = members.iter().position(|m| m == current).unwrap_or(0);
+    for step in 1..=n {
+        let candidate = &members[(start + step) % n];
+        if !candidate.contains("自动") && candidate != current {
+            return Some(candidate.clone());
+        }
+    }
+    None
+}
+
 /// Recovery plan 1: switch the group to its next member (no restart).
 /// Requires the controller; refuses when no group is configured.
 fn switch_node() -> Result<String, String> {
@@ -124,14 +145,7 @@ fn switch_node() -> Result<String, String> {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_owned();
-    // The next node after the current one (wrap); skip groups and DIRECT
-    // candidates we cannot distinguish — pick the next plain member.
-    let plain: Vec<&String> = members
-        .iter()
-        .filter(|m| !m.contains("自动") && *m != &current)
-        .collect();
-    let next = plain
-        .first()
+    let next = next_plain_member(&members, &current)
         .ok_or_else(|| "no alternative node available".to_owned())?;
     put(&format!("/proxies/{group}"), json!({ "name": next }))?;
     Ok(format!("switched {group} from {current} to {next}"))
@@ -235,4 +249,40 @@ fn main() {
         "custos/v1/shutdown" => Reply::Exit(json!({ "ok": true })),
         other => Reply::Error(-32601, format!("unknown method: {other}")),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_plain_member_walks_rotation() {
+        let members = vec!["A".to_owned(), "B".to_owned(), "C".to_owned()];
+        // current=A -> next=B; current=B -> next=C; current=C -> next=A (wrap).
+        assert_eq!(next_plain_member(&members, "A").as_deref(), Some("B"));
+        assert_eq!(next_plain_member(&members, "B").as_deref(), Some("C"));
+        assert_eq!(next_plain_member(&members, "C").as_deref(), Some("A"));
+        // Repeated recovery advances the rotation instead of bouncing
+        // A<->B on the first non-current member (R15).
+        let a = next_plain_member(&members, "A").unwrap();
+        let b = next_plain_member(&members, &a).unwrap();
+        let c = next_plain_member(&members, &b).unwrap();
+        assert_eq!((a.as_str(), b.as_str(), c.as_str()), ("B", "C", "A"));
+    }
+
+    #[test]
+    fn next_plain_member_skips_selectors_and_self() {
+        let members = vec!["自动".to_owned(), "X".to_owned(), "Y".to_owned()];
+        assert_eq!(next_plain_member(&members, "X").as_deref(), Some("Y"));
+        // Wrapping skips the leading selector.
+        assert_eq!(next_plain_member(&members, "Y").as_deref(), Some("X"));
+        // Only selectors left -> no alternative.
+        let only = vec!["自动".to_owned()];
+        assert_eq!(next_plain_member(&only, "自动"), None);
+        // The current node is the only plain member -> never switch to self.
+        let single = vec!["A".to_owned()];
+        assert_eq!(next_plain_member(&single, "A"), None);
+        // Empty member list -> no alternative.
+        assert_eq!(next_plain_member(&[], "A"), None);
+    }
 }
