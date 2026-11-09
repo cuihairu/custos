@@ -59,43 +59,28 @@ pub fn json_path<'a>(root: &'a serde_json::Value, path: &str) -> Option<&'a serd
 }
 
 pub fn check_json_assertion(root: &serde_json::Value, assertion: &JsonAssertion) -> Option<String> {
-    let found = json_path(root, &assertion.path);
-    match assertion.op {
-        JsonOp::Exists => {
-            if found.is_some() {
-                None
-            } else {
-                Some(format!("json path {} missing", assertion.path))
-            }
-        }
-        JsonOp::Equals | JsonOp::NotEquals | JsonOp::GreaterThan | JsonOp::LessThan => {
-            let Some(actual) = found else {
-                return Some(format!("json path {} missing", assertion.path));
-            };
-            let equal = json_values_equal(actual, &assertion.value);
-            let op_symbol = match assertion.op {
-                JsonOp::Equals => "==",
-                JsonOp::NotEquals => "!=",
-                JsonOp::GreaterThan => ">",
-                JsonOp::LessThan => "<",
-                JsonOp::Exists => unreachable!(),
-            };
-            let ok = match assertion.op {
-                JsonOp::Equals => equal,
-                JsonOp::NotEquals => !equal,
-                JsonOp::GreaterThan => json_greater(actual, &assertion.value),
-                JsonOp::LessThan => json_less(actual, &assertion.value),
-                JsonOp::Exists => unreachable!(),
-            };
-            if ok {
-                None
-            } else {
-                Some(format!(
-                    "json path {} = {actual} does not satisfy {op_symbol} {}",
-                    assertion.path, assertion.value
-                ))
-            }
-        }
+    let Some(actual) = json_path(root, &assertion.path) else {
+        return Some(format!("json path {} missing", assertion.path));
+    };
+    // One total match over every operator (R18): the old pair of parallel
+    // matches with `JsonOp::Exists => unreachable!()` was a landmine —
+    // dead only while a dedicated outer arm intercepted `Exists` first,
+    // a panic away under any refactor that shared the evaluation path.
+    let equal = json_values_equal(actual, &assertion.value);
+    let (op_symbol, ok) = match assertion.op {
+        JsonOp::Exists => ("exists", true),
+        JsonOp::Equals => ("==", equal),
+        JsonOp::NotEquals => ("!=", !equal),
+        JsonOp::GreaterThan => (">", json_greater(actual, &assertion.value)),
+        JsonOp::LessThan => ("<", json_less(actual, &assertion.value)),
+    };
+    if ok {
+        None
+    } else {
+        Some(format!(
+            "json path {} = {actual} does not satisfy {op_symbol} {}",
+            assertion.path, assertion.value
+        ))
     }
 }
 

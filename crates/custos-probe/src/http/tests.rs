@@ -129,6 +129,30 @@ fn json_assertion_operators_cover_the_matrix() {
 }
 
 #[test]
+fn exists_assertion_survives_the_shared_evaluation_path() {
+    // R18: the shared evaluation path used `unreachable!()` for `Exists`
+    // in two parallel matches — dead only while a dedicated outer arm
+    // intercepted `Exists` first, one refactor away from a panic. The
+    // evaluation must be total over every operator.
+    let body = serde_json::json!({ "status": "ok" });
+    let check = |path: &str| {
+        check_json_assertion(
+            &body,
+            &JsonAssertion {
+                path: path.into(),
+                op: JsonOp::Exists,
+                value: String::new(),
+            },
+        )
+    };
+    assert_eq!(check("$.status"), None);
+    assert_eq!(
+        check("$.ghost"),
+        Some("json path $.ghost missing".to_owned())
+    );
+}
+
+#[test]
 fn from_config_parses_json_assertions_and_rejects_bad_ops() {
     let config = serde_json::json!({
         "url": "http://x/",
