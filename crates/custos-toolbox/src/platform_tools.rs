@@ -9,9 +9,41 @@
 /// AT MOST ONE network operation (reset, reboot, any future
 /// network-affecting action) may run at a time, regardless of which
 /// resource requested it — concurrent interface changes would race with
-/// each other. A second caller gets a concrete error immediately (never
-/// queues and surprises later).
+/// each other. A contender waits (bounded, C9) for the in-flight one
+/// instead of being reported as a failed operation; only a contender
+/// that outlives [`NETWORK_OPS_WAIT_MS`] gets a concrete error.
 static NETWORK_OPS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// How long a contending network operation waits for the in-flight one
+/// before refusing (C9). Interface bounces and Wi-Fi reconnects are slow
+/// platform I/O; contention must not surface as a failed attempt that
+/// burns the engine's ladder. The bound keeps a wedged in-flight
+/// operation from hanging the contender forever (the wedged side is the
+/// executor watchdog's problem, C20).
+const NETWORK_OPS_WAIT_MS: u64 = 30_000;
+
+/// Locks the global network-operations mutex, waiting up to `wait_ms`
+/// for the in-flight operation to finish (C9). `std::sync::Mutex` has no
+/// timed lock, so this polls short try-lock sleeps; the error case means
+/// the wait ran out, not that the operation failed.
+fn lock_network_ops(wait_ms: u64) -> Result<std::sync::MutexGuard<'static, ()>, ()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
+    loop {
+        match NETWORK_OPS.try_lock() {
+            Ok(guard) => return Ok(guard),
+            // A panic inside a platform adapter poisons the guard. The
+            // panicking operation is dead and the guard carries no state,
+            // so recovering the unit lock is safe.
+            Err(std::sync::TryLockError::Poisoned(err)) => return Ok(err.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if std::time::Instant::now() >= deadline {
+                    return Err(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+    }
+}
 
 use crate::registry::{BuiltinTool, ToolOutcome, ToolboxError, ToolboxErrorKind};
 use custos_plugin_api::{AffectedScope, Capability, CapabilityKind, OperationParams};
@@ -55,15 +87,15 @@ impl BuiltinTool for RebootTool {
                 "reboot requires confirm=\"reboot\" (a second, explicit gate)",
             ));
         }
-        let _guard = match NETWORK_OPS.try_lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                return Err(ToolboxError::new(
-                    ToolboxErrorKind::Failed,
-                    "another network operation is already running; refusing to race it",
-                ))
-            }
-        };
+        let _guard = lock_network_ops(NETWORK_OPS_WAIT_MS).map_err(|()| {
+            ToolboxError::new(
+                ToolboxErrorKind::Failed,
+                format!(
+                    "another network operation is still running after \
+                     {NETWORK_OPS_WAIT_MS} ms; refusing to race it"
+                ),
+            )
+        })?;
         self.controller
             .reboot()
             .map(|_| ToolOutcome::Action {
@@ -123,15 +155,15 @@ impl BuiltinTool for InterfaceResetTool {
                     "`interface` must be a non-empty interface name",
                 )
             })?;
-        let _guard = match NETWORK_OPS.try_lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                return Err(ToolboxError::new(
-                    ToolboxErrorKind::Failed,
-                    "another network operation is already running; refusing to race it",
-                ))
-            }
-        };
+        let _guard = lock_network_ops(NETWORK_OPS_WAIT_MS).map_err(|()| {
+            ToolboxError::new(
+                ToolboxErrorKind::Failed,
+                format!(
+                    "another network operation is still running after \
+                     {NETWORK_OPS_WAIT_MS} ms; refusing to race it"
+                ),
+            )
+        })?;
         self.controller
             .reset(name)
             .map(|_| ToolOutcome::Action {
@@ -194,15 +226,15 @@ impl BuiltinTool for WifiReconnectTool {
                     "`profile` must be a non-empty Wi-Fi profile name",
                 )
             })?;
-        let _guard = match NETWORK_OPS.try_lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                return Err(ToolboxError::new(
-                    ToolboxErrorKind::Failed,
-                    "another network operation is already running; refusing to race it",
-                ))
-            }
-        };
+        let _guard = lock_network_ops(NETWORK_OPS_WAIT_MS).map_err(|()| {
+            ToolboxError::new(
+                ToolboxErrorKind::Failed,
+                format!(
+                    "another network operation is still running after \
+                     {NETWORK_OPS_WAIT_MS} ms; refusing to race it"
+                ),
+            )
+        })?;
         self.controller
             .connect_wifi(profile)
             .map(|_| ToolOutcome::Action {
@@ -284,28 +316,14 @@ mod tests {
 
     #[test]
     fn concurrent_network_operations_never_race() {
-        struct SlowReset;
-        impl custos_platform::NetworkInterfaceController for SlowReset {
-            fn list(&self) -> PlatformResult<Vec<custos_platform::InterfaceStatus>> {
-                Ok(vec![])
-            }
-            fn reset(&self, _name: &str) -> PlatformResult<()> {
-                std::thread::sleep(std::time::Duration::from_millis(200));
-                Ok(())
-            }
-        }
-        // Hold the global network mutex like an in-flight operation.
+        // Hold the global network mutex like an in-flight operation, then
+        // exercise the timeout refusal through the lock helper with a
+        // zero wait (a full execute() would block for NETWORK_OPS_WAIT_MS).
         let guard = NETWORK_OPS.try_lock().expect("mutex free at test start");
-        let tool = InterfaceResetTool::new(std::sync::Arc::new(SlowReset));
-        let err = tool
-            .execute(&OperationParams {
-                operation_id: "network.interface.reset".into(),
-                resource_id: "wan".into(),
-                run_id: None,
-                args: [("interface".into(), serde_json::json!("eth0"))].into(),
-            })
-            .unwrap_err();
-        assert!(err.message.contains("already running"), "{err}");
+        assert!(
+            lock_network_ops(0).is_err(),
+            "a held mutex must refuse a zero-wait contender"
+        );
         drop(guard);
         // With the mutex free the same call succeeds.
         struct FastReset;
@@ -333,6 +351,72 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn contending_network_operation_waits_for_the_in_flight_one() {
+        // C9: with another network operation in flight, a contender used
+        // to be refused instantly — the engine recorded a failed attempt
+        // (burning the ladder) for what is only contention. It must wait,
+        // bounded, for the in-flight operation to finish.
+        struct SlowReset;
+        impl custos_platform::NetworkInterfaceController for SlowReset {
+            fn list(&self) -> PlatformResult<Vec<custos_platform::InterfaceStatus>> {
+                Ok(vec![])
+            }
+            fn reset(&self, _name: &str) -> PlatformResult<()> {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                Ok(())
+            }
+        }
+        let slow = std::sync::Arc::new(InterfaceResetTool::new(std::sync::Arc::new(SlowReset)));
+        let worker = std::thread::spawn(move || {
+            slow.execute(&OperationParams {
+                operation_id: "network.interface.reset".into(),
+                resource_id: "wan".into(),
+                run_id: None,
+                args: [("interface".into(), serde_json::json!("eth0"))].into(),
+            })
+        });
+        // Let the worker claim the global network mutex first.
+        std::thread::sleep(std::time::Duration::from_millis(80));
+
+        struct QuickReset;
+        impl custos_platform::NetworkInterfaceController for QuickReset {
+            fn list(&self) -> PlatformResult<Vec<custos_platform::InterfaceStatus>> {
+                Ok(vec![])
+            }
+            fn reset(&self, _name: &str) -> PlatformResult<()> {
+                Ok(())
+            }
+        }
+        let tool = InterfaceResetTool::new(std::sync::Arc::new(QuickReset));
+        let started = std::time::Instant::now();
+        let outcome = tool.execute(&OperationParams {
+            operation_id: "network.interface.reset".into(),
+            resource_id: "lan".into(),
+            run_id: None,
+            args: [("interface".into(), serde_json::json!("eth1"))].into(),
+        });
+        let elapsed = started.elapsed();
+        assert!(
+            matches!(
+                outcome,
+                Ok(ToolOutcome::Action {
+                    succeeded: true,
+                    ..
+                })
+            ),
+            "contender must wait for the in-flight operation, got {outcome:?}"
+        );
+        assert!(
+            elapsed >= std::time::Duration::from_millis(60),
+            "contender returned in {elapsed:?} — it did not wait"
+        );
+        assert!(
+            worker.join().expect("worker").is_ok(),
+            "in-flight operation must succeed"
+        );
     }
 
     #[test]
