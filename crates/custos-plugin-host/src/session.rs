@@ -242,10 +242,27 @@ impl PluginSession {
 
     /// Sends a request and returns a handle that can be waited on or
     /// cancelled. This is the only way to cancel an in-flight request.
+    /// The write-confirm wait runs on the session default deadline; use
+    /// [`PluginSession::spawn_call_with_deadline`] when the caller granted
+    /// a longer one.
     pub fn spawn_call(
         &self,
         method: Method,
         params: serde_json::Value,
+    ) -> Result<CallHandle, HostError> {
+        let timeout = self.default_timeout();
+        self.spawn_call_with_deadline(method, params, timeout)
+    }
+
+    /// Like [`PluginSession::spawn_call`], but the write-confirm wait runs
+    /// under `deadline` — the caller's budget — instead of the session
+    /// default, so a request parked behind a slow write is not silently
+    /// truncated at the default (C24).
+    pub fn spawn_call_with_deadline(
+        &self,
+        method: Method,
+        params: serde_json::Value,
+        deadline: Duration,
     ) -> Result<CallHandle, HostError> {
         if !self.is_running() {
             return Err(HostError::Unavailable);
@@ -281,7 +298,7 @@ impl PluginSession {
             .map_err(|_| HostError::Unavailable)?;
 
         let id_key = RequestId::Number(id);
-        match ack_rx.recv_timeout(self.default_timeout()) {
+        match ack_rx.recv_timeout(deadline) {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
                 lock(&self.shared.pending).remove(&id_key);
@@ -308,14 +325,17 @@ impl PluginSession {
         })
     }
 
-    /// Sends a request and waits up to `timeout` for the result.
+    /// Sends a request and waits up to `timeout` for the result. The same
+    /// budget covers the write-confirm phase — a caller-granted deadline
+    /// must not be silently truncated at the session default (C24).
     pub fn call_with_timeout(
         &self,
         method: Method,
         params: serde_json::Value,
         timeout: Duration,
     ) -> Result<serde_json::Value, HostError> {
-        self.spawn_call(method, params)?.wait(timeout)
+        self.spawn_call_with_deadline(method, params, timeout)?
+            .wait(timeout)
     }
 
     /// Sends a request using the session's default deadline.

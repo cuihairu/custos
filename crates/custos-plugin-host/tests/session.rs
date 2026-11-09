@@ -252,3 +252,37 @@ fn chatty_stderr_is_drained_and_capped_never_parsed() {
         session.faults()
     );
 }
+
+#[test]
+fn write_confirm_uses_the_callers_deadline_not_the_default() {
+    // C24: the write-confirm wait ran on the session default timeout even
+    // when the caller granted a longer deadline. A request parked behind a
+    // slow write (pipe-blocked writer) was silently truncated at the
+    // default instead of living out the caller's budget.
+    let mut config = mock_config(&[("MOCK_PLUGIN_SLOW_START_MS", "1500")]);
+    config.request_timeout = Duration::from_millis(400);
+    let session = PluginSession::start(&config).expect("spawn");
+    // No handshake: the plugin stalls 1.5s before its read loop, so every
+    // byte written now queues behind a full pipe.
+
+    // A 200 KiB request: beyond the 64 KiB pipe buffer, so the serial
+    // writer stays parked inside its write_all until the plugin wakes.
+    // Its own ack waits the default deadline and fails — that is fine,
+    // the pending entry is dropped; the WRITER stays parked regardless.
+    let big = "x".repeat(200_000);
+    let _ = session.spawn_call(Method::Probe, json!({"resource_id": "mock", "pad": big}));
+
+    // The caller grants 10s. The write can only complete after the
+    // plugin's 1.5s stall ends — well past the 400ms default.
+    let started = Instant::now();
+    let probe = session
+        .call_with_timeout(
+            Method::Probe,
+            json!({"resource_id": "mock"}),
+            Duration::from_secs(10),
+        )
+        .expect("caller deadline must cover the write-confirm phase");
+    assert_eq!(probe["healthy"], true);
+    // The plugin cannot have answered before its stall ended.
+    assert!(started.elapsed() < Duration::from_secs(10), "{started:?}");
+}
