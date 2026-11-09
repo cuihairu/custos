@@ -83,6 +83,13 @@ impl DashboardServer {
     }
 }
 
+/// Whole-request deadline (C23). The per-read timeout bounds silence, not
+/// total time: a slow-drip client that sends one byte just under the read
+/// timeout resets the window on every fragment and would otherwise hold the
+/// single-threaded accept loop hostage forever. Idle peers still exit via
+/// the read timeout; this bounds the drip case.
+const REQUEST_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Handles one HTTP request with a read-only JSON or HTML response.
 fn handle(
     stream: &mut std::net::TcpStream,
@@ -93,6 +100,7 @@ fn handle(
     let mut raw = Vec::new();
     // Read until the request-head terminator or the buffer cap; TCP may
     // deliver the request in fragments, so accumulate rather than read once.
+    let started = std::time::Instant::now();
     loop {
         let n = stream.read(&mut buf)?;
         if n == 0 {
@@ -101,6 +109,12 @@ fn handle(
         raw.extend_from_slice(&buf[..n]);
         if raw.windows(4).any(|w| w == b"\r\n\r\n") || raw.len() > 64 * 1024 {
             break;
+        }
+        if started.elapsed() >= REQUEST_DEADLINE {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "request did not complete within the whole-request deadline",
+            ));
         }
     }
     let request = String::from_utf8_lossy(&raw).to_string();
@@ -338,5 +352,51 @@ mod tests {
         // Open an in-memory store; Store::open requires a path, so use a
         // temp file. This is only for routing tests that don't hit SQL.
         Store::open(":memory:").unwrap()
+    }
+
+    #[test]
+    fn slow_drip_client_cannot_hold_the_request_open_past_the_deadline() {
+        // C23: the per-read timeout bounds silence, not total time. A
+        // client that drips one byte every 300ms (well under the 2s read
+        // timeout) resets the read window on every fragment and used to
+        // hold the single-threaded accept loop hostage forever.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = std::net::TcpStream::connect(addr).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        server
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        // Drip forever from a detached thread: the request head never
+        // completes, so only a whole-request deadline can end it.
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let mut client = client;
+            loop {
+                if client.write_all(b"x").is_err() {
+                    return;
+                }
+                let _ = client.flush();
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+        });
+        let store = dummy_store();
+        let config = load_config_for_test();
+        let worker = std::thread::spawn(move || handle(&mut server, &store, &config));
+        for _ in 0..40 {
+            if worker.is_finished() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        assert!(
+            worker.is_finished(),
+            "handle still blocked after 20s: a slow drip holds the accept loop"
+        );
+        let err = worker
+            .join()
+            .expect("handle thread")
+            .expect_err("handle must fail past the deadline");
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut, "{err}");
     }
 }
