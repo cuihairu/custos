@@ -87,6 +87,19 @@ pub enum Connectivity {
     Unreachable(String),
 }
 
+/// Resolves a connectivity target to its first `SocketAddr`. Uses the tuple
+/// form of `ToSocketAddrs`: the `format!("{}:{}", host, port).parse()`
+/// string form rejects a bare IPv6 literal (ambiguous colon split), leaving
+/// IPv6 targets structurally unreachable (R16, openclaw audit 2026-11-05).
+pub fn resolve_target(host: &str, port: u16) -> PlatformResult<std::net::SocketAddr> {
+    use std::net::ToSocketAddrs;
+    (host, port)
+        .to_socket_addrs()
+        .map_err(|_| PlatformError::Failed("invalid target".into()))?
+        .next()
+        .ok_or_else(|| PlatformError::Failed("invalid target".into()))
+}
+
 /// Checks network connectivity using this platform's primitives.
 pub trait NetworkConnectivityProbe: Send + Sync {
     fn probe_tcp(&self, target: &ConnectivityTarget) -> PlatformResult<Connectivity>;

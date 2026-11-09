@@ -328,12 +328,10 @@ impl NetworkConnectivityProbe for SysnetInterfaceController {
     fn probe_tcp(&self, target: &ConnectivityTarget) -> PlatformResult<Connectivity> {
         use std::net::TcpStream;
         let start = std::time::Instant::now();
-        match TcpStream::connect_timeout(
-            &format!("{}:{}", target.host, target.port)
-                .parse()
-                .map_err(|_| PlatformError::Failed("invalid target".into()))?,
-            TOOL_TIMEOUT,
-        ) {
+        // Bare IPv6 literals resolve via the tuple form (R16); the old
+        // `format!("{}:{}", ...).parse()` string form rejected them.
+        let addr = crate::controller::resolve_target(&target.host, target.port)?;
+        match TcpStream::connect_timeout(&addr, TOOL_TIMEOUT) {
             Ok(_) => Ok(Connectivity::Reachable {
                 latency_ms: start.elapsed().as_millis() as u64,
             }),
@@ -434,6 +432,19 @@ pub fn capabilities() -> PlatformCapabilitySet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_target_handles_bare_ipv6_literal() {
+        // R16: the string form "2001:db8::1:443" is an ambiguous colon
+        // split; a bare IPv6 target must still resolve via the tuple form.
+        let addr = crate::controller::resolve_target("2001:db8::1", 443).unwrap();
+        assert!(addr.is_ipv6());
+        assert_eq!(addr.port(), 443);
+        let v4 = crate::controller::resolve_target("192.168.1.1", 80).unwrap();
+        assert!(v4.is_ipv4());
+        assert_eq!(v4.port(), 80);
+        assert!(crate::controller::resolve_target("", 80).is_err());
+    }
 
     #[test]
     fn route_table_default_gateway_parsing() {

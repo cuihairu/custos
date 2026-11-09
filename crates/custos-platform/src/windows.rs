@@ -671,12 +671,10 @@ impl NetworkConnectivityProbe for NetshNetworkController {
     fn probe_tcp(&self, target: &ConnectivityTarget) -> PlatformResult<Connectivity> {
         use std::net::TcpStream;
         let start = std::time::Instant::now();
-        match TcpStream::connect_timeout(
-            &format!("{}:{}", target.host, target.port)
-                .parse()
-                .map_err(|_| PlatformError::Failed("invalid target".into()))?,
-            TOOL_TIMEOUT,
-        ) {
+        // Bare IPv6 literals resolve via the tuple form (R16); the old
+        // `format!("{}:{}", ...).parse()` string form rejected them.
+        let addr = crate::controller::resolve_target(&target.host, target.port)?;
+        match TcpStream::connect_timeout(&addr, TOOL_TIMEOUT) {
             Ok(_) => Ok(Connectivity::Reachable {
                 latency_ms: start.elapsed().as_millis() as u64,
             }),
