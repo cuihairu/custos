@@ -16,6 +16,12 @@ pub enum ActionOutcome {
     TimedOut,
     Cancelled,
     OutcomeUnknown,
+    /// The action never ran: it could not be started at all (missing
+    /// binary, permission denied). Unlike `Failed` this is permanent for
+    /// the plan — repeating the same start would fail identically, so the
+    /// engine stops the attempt ladder and lets `failure_handling` decide
+    /// (§6.3, C21).
+    NotStarted,
 }
 
 /// Explicit, parameterized action input (docs/guide/plugins.md §4.3: no
@@ -368,6 +374,7 @@ mod tests {
             ActionOutcome::TimedOut,
             ActionOutcome::Cancelled,
             ActionOutcome::OutcomeUnknown,
+            ActionOutcome::NotStarted,
         ] {
             let json = serde_json::to_string(&outcome).unwrap();
             let back: ActionOutcome = serde_json::from_str(&json).unwrap();

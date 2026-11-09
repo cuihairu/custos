@@ -843,6 +843,92 @@ mod tests {
     }
 
     #[test]
+    fn missing_binary_does_not_burn_the_whole_attempt_ladder() {
+        // C21: a start failure (permanently missing binary) is not a
+        // transient failure — re-executing the same doomed start cannot
+        // succeed, so it must not consume the plan's whole attempt ladder
+        // (§6.6: never repeat blindly).
+        let mut broken = plan("broken", 3, RiskLevel::Low);
+        broken.action = ActionSpec {
+            program: "/nonexistent-custos-c21-binary".to_owned(),
+            args: vec![],
+        };
+        let store = Arc::new(crate::MemoryStore::default());
+        let mut probes = HashMap::new();
+        probes.insert(
+            ResourceId::new("app"),
+            Box::new(ScriptedProbe::new(vec![false, false])) as Box<dyn Probe>,
+        );
+        let config = ValidatedConfig {
+            resources: vec![resource("app", vec![broken], vec![])],
+            alternative_groups: vec![],
+            graph: DependencyGraph::build(vec![(ResourceId::new("app"), vec![])]).expect("graph"),
+            permissions: Default::default(),
+            notification: Default::default(),
+            dashboard: Default::default(),
+        };
+        let mut engine = Engine::new(
+            &config,
+            probes,
+            Box::new(crate::executor::BuiltinExecExecutor),
+            store,
+            Arc::new(crate::clock::FakeClock::new(1_000)),
+        );
+        let runs = engine.tick();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, RecoveryRunStatus::Escalated);
+        // The ladder is 3 deep; the missing binary stops it after one.
+        assert_eq!(runs[0].action_attempts.len(), 1);
+        // And the recorded outcome says the action never ran — not `Failed`,
+        // which would read as a retryable transient failure.
+        assert_eq!(
+            runs[0].action_attempts[0].outcome,
+            Some(ActionOutcome::NotStarted)
+        );
+    }
+
+    #[test]
+    fn start_failure_hands_over_to_the_next_plan() {
+        // C21: failure_handling still applies — a plan whose action cannot
+        // start hands over to the next candidate plan instead of blocking
+        // recovery entirely.
+        let mut broken = plan("broken", 3, RiskLevel::Low);
+        broken.action = ActionSpec {
+            program: "/nonexistent-custos-c21-binary".to_owned(),
+            args: vec![],
+        };
+        let fix = plan("fix", 1, RiskLevel::Low);
+        let store = Arc::new(crate::MemoryStore::default());
+        let mut probes = HashMap::new();
+        probes.insert(
+            ResourceId::new("app"),
+            Box::new(ScriptedProbe::new(vec![false, true])) as Box<dyn Probe>,
+        );
+        let config = ValidatedConfig {
+            resources: vec![resource("app", vec![broken, fix], vec![])],
+            alternative_groups: vec![],
+            graph: DependencyGraph::build(vec![(ResourceId::new("app"), vec![])]).expect("graph"),
+            permissions: Default::default(),
+            notification: Default::default(),
+            dashboard: Default::default(),
+        };
+        let mut engine = Engine::new(
+            &config,
+            probes,
+            Box::new(crate::executor::BuiltinExecExecutor),
+            store,
+            Arc::new(crate::clock::FakeClock::new(1_000)),
+        );
+        let runs = engine.tick();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, RecoveryRunStatus::Recovered);
+        // One doomed attempt on `broken`, then `fix` runs and verifies.
+        assert_eq!(runs[0].action_attempts.len(), 2);
+        assert_eq!(runs[0].action_attempts[0].plan_id, "broken");
+        assert_eq!(runs[0].action_attempts[1].plan_id, "fix");
+    }
+
+    #[test]
     fn busy_mutex_rejects_second_run() {
         let (mut engine, _store, _) = test_engine(
             vec![resource(

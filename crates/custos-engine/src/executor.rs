@@ -96,7 +96,10 @@ impl ActionExecutor for BuiltinExecExecutor {
                 ActionOutcome::Failed
             }
             custos_probe::exec::ExecResult::TimedOut => ActionOutcome::TimedOut,
-            custos_probe::exec::ExecResult::StartFailed(_) => ActionOutcome::Failed,
+            // A start failure is permanent for the plan (§6.6): the action
+            // never ran, so `Failed` would let the engine retry the same
+            // doomed start until the ladder ran dry (C21).
+            custos_probe::exec::ExecResult::StartFailed(_) => ActionOutcome::NotStarted,
         }
     }
 }

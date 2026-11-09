@@ -153,7 +153,27 @@ impl Engine {
                     &format!("plan `{}` attempt {attempt_no}", plan.plan_id),
                     self.clock.now_unix_ms(),
                 );
-                self.execute_attempt(id, plan, attempt_no, &mut run);
+                let outcome = self.execute_attempt(id, plan, attempt_no, &mut run);
+                // A start failure is permanent for this plan (§6.6, C21):
+                // the action never ran, so re-executing the same doomed
+                // start would fail identically and only burn the ladder.
+                // Stop the ladder here; `failure_handling` decides whether
+                // a different plan still applies or the run escalates.
+                if outcome == ActionOutcome::NotStarted {
+                    run.transition_to(RecoveryRunStatus::Verifying).ok();
+                    run.transition_to(RecoveryRunStatus::Diagnosing).ok();
+                    self.store.save_step(
+                        &run.id,
+                        bump(step),
+                        "start_failed",
+                        &format!(
+                            "plan `{}` action did not start; ladder stopped",
+                            plan.plan_id
+                        ),
+                        self.clock.now_unix_ms(),
+                    );
+                    break;
+                }
                 run.transition_to(RecoveryRunStatus::Verifying).ok();
                 if self.verify(id, plan, &mut run) {
                     run.transition_to(RecoveryRunStatus::Recovered).ok();
@@ -309,12 +329,18 @@ impl Engine {
         });
         // A failed action is a notification event; a successful one is not
         // (§8.4 has no recovery.action_succeeded — the verified recovery
-        // itself is the success signal).
-        if outcome == ActionOutcome::Failed {
+        // itself is the success signal). An action that never started is
+        // reported too — a permanently broken plan must stay visible.
+        if outcome == ActionOutcome::Failed || outcome == ActionOutcome::NotStarted {
+            let summary = if outcome == ActionOutcome::NotStarted {
+                format!("plan `{}` attempt {attempt_no} did not start", plan.plan_id)
+            } else {
+                format!("plan `{}` attempt {attempt_no} failed", plan.plan_id)
+            };
             self.emit_notification(
                 custos_model::EventType::RecoveryActionFailed,
                 custos_model::Severity::Warning,
-                format!("plan `{}` attempt {attempt_no} failed", plan.plan_id),
+                summary,
                 id,
                 Some(&run.id),
                 run.incident_id.as_ref(),
