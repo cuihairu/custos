@@ -7,9 +7,10 @@
 //! bot_token = "123456:ABC-DEF..."
 //! chat_id = "-1001234567890"
 //! timeout_ms = 5000
-//! retries = 3
-//! backoff_ms = 30000
 //! ```
+//! One attempt per deliver: the queue engine owns retry and backoff
+//! (§8.6, C19/C22); the parsed `retries`/`backoff_ms` fields are accepted
+//! for config compatibility but no longer drive an in-channel ladder.
 //! A Telegram bot token and a chat ID (or channel name) are required; the
 //! bot must be a member of the target chat. Messages are truncated to the
 //! Telegram 4096-character limit.
@@ -29,8 +30,6 @@ pub struct TelegramChannel {
     chat_id: String,
     agent: ureq::Agent,
     api_base: String,
-    retries: u32,
-    backoff_ms: u64,
 }
 
 impl TelegramChannel {
@@ -38,8 +37,6 @@ impl TelegramChannel {
         id: impl Into<String>,
         bot_token: impl Into<String>,
         chat_id: impl Into<String>,
-        retries: u32,
-        backoff_ms: u64,
         timeout_ms: u64,
     ) -> Self {
         let agent = ureq::Agent::new_with_config(
@@ -53,8 +50,6 @@ impl TelegramChannel {
             chat_id: chat_id.into(),
             agent,
             api_base: TG_API_BASE.to_owned(),
-            retries,
-            backoff_ms,
         }
     }
 
@@ -124,38 +119,6 @@ impl TelegramChannel {
             )),
         }
     }
-
-    fn deliver_with_retry(&self, event: &NotificationEvent) -> Result<(), ChannelError> {
-        let message = Self::build_message(event);
-        let payload = json!({
-            "chat_id": self.chat_id,
-            "text": message,
-        })
-        .to_string();
-        let mut retried = 0u32;
-        let mut delay = Duration::from_millis(self.backoff_ms);
-        loop {
-            match self.send_once(payload.clone()) {
-                Ok(()) => return Ok(()),
-                Err(e)
-                    if matches!(
-                        e.kind,
-                        ChannelErrorKind::Rejected | ChannelErrorKind::Config
-                    ) =>
-                {
-                    return Err(e);
-                }
-                Err(e) => {
-                    if retried >= self.retries {
-                        return Err(e);
-                    }
-                    retried += 1;
-                    std::thread::sleep(delay);
-                    delay = delay.saturating_mul(2);
-                }
-            }
-        }
-    }
 }
 
 impl Channel for TelegramChannel {
@@ -163,8 +126,15 @@ impl Channel for TelegramChannel {
         &self.id
     }
 
+    /// One attempt; the queue engine schedules any retry (§8.6, C19/C22).
     fn deliver(&self, event: &NotificationEvent) -> Result<(), ChannelError> {
-        self.deliver_with_retry(event)
+        let message = Self::build_message(event);
+        let payload = json!({
+            "chat_id": self.chat_id,
+            "text": message,
+        })
+        .to_string();
+        self.send_once(payload)
     }
 }
 
@@ -209,7 +179,7 @@ mod tests {
     }
 
     fn channel_with_addr(addr: &str) -> TelegramChannel {
-        TelegramChannel::new("tg", "123456:TEST-TOKEN", "-1001234567890", 0, 1, 2000)
+        TelegramChannel::new("tg", "123456:TEST-TOKEN", "-1001234567890", 2000)
             .with_api_base(format!("http://{addr}"))
     }
 
@@ -249,8 +219,7 @@ mod tests {
     #[test]
     fn http_4xx_is_rejected_without_retry() {
         let (addr, captured) = responder(400, r#"{"ok":false,"error_code":400}"#);
-        let mut cfg = channel_with_addr(&addr.to_string());
-        cfg.retries = 3;
+        let cfg = channel_with_addr(&addr.to_string());
         let err = cfg.deliver(&event()).unwrap_err();
         assert_eq!(err.kind, ChannelErrorKind::Rejected);
         let _ = captured; // the responder served one request; single-shot means one attempt

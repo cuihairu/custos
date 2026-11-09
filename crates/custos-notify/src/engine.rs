@@ -116,8 +116,6 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
                     id.clone(),
                     cfg.bot_token.expose(),
                     cfg.chat_id.clone(),
-                    cfg.retries,
-                    cfg.backoff_ms,
                     cfg.timeout_ms,
                 )) as Box<dyn Channel>),
             };
@@ -317,43 +315,25 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
 }
 
 /// Claim-lease floor: the pre-lease staleness window (§8.6 crash recovery
-/// latency for channels without an internal retry ladder).
+/// latency; also covers any sane single-attempt delivery, C19).
 const DEFAULT_LEASE_MS: u64 = 60_000;
 /// Claim-lease cap: bounds the crash-recovery reclaim latency even for an
-/// absurd retry configuration, while exceeding any sane delivery ladder.
+/// absurd timeout configuration.
 const MAX_LEASE_MS: u64 = 3_600_000;
 
 /// One channel's delivery upper bound (C7): the claim lease must outlive
-/// the channel's own retry ladder — `retries` extra attempts with a
-/// doubling backoff in between, each attempt bounded by its timeout — or
-/// the next claim pass reclaims the row mid-delivery and sends it
-/// concurrently.
+/// the longest legitimate delivery across the configured channels, so a
+/// live delivery is never reclaimed and sent concurrently. Every remote
+/// channel makes one attempt per deliver (C19/C22: the queue owns
+/// retries), so each budget is that channel's own send timeout.
 fn channel_delivery_budget_ms(config: &ChannelConfig) -> u64 {
     match config {
         ChannelConfig::LocalLog { .. } => 0,
-        // Retry/backoff is left to the queue engine (§8.6): one pass is one
-        // connect + send.
         ChannelConfig::Smtp(cfg) => cfg.connect_timeout_ms.saturating_add(cfg.send_timeout_ms),
-        ChannelConfig::Webhook(cfg) => {
-            remote_retry_budget(cfg.retries, cfg.backoff_ms, cfg.timeout_ms)
-        }
-        ChannelConfig::Herald(cfg) => {
-            remote_retry_budget(cfg.retries, cfg.backoff_ms, cfg.timeout_ms)
-        }
-        ChannelConfig::Telegram(cfg) => {
-            remote_retry_budget(cfg.retries, cfg.backoff_ms, cfg.timeout_ms)
-        }
+        ChannelConfig::Webhook(cfg) => cfg.timeout_ms,
+        ChannelConfig::Herald(cfg) => cfg.timeout_ms,
+        ChannelConfig::Telegram(cfg) => cfg.timeout_ms,
     }
-}
-
-/// The retry ladder of a remote HTTP-shaped channel: `backoff *
-/// (2^retries - 1)` plus `(retries + 1)` timeouts.
-fn remote_retry_budget(retries: u32, backoff_ms: u64, timeout_ms: u64) -> u64 {
-    let ladder = backoff_ms.saturating_mul((1u64 << retries.min(31)).saturating_sub(1));
-    let timeouts = (retries as u64)
-        .saturating_add(1)
-        .saturating_mul(timeout_ms);
-    ladder.saturating_add(timeouts)
 }
 
 /// The lease for one claim batch: the longest configured channel's
@@ -1002,13 +982,13 @@ mod tests {
     }
 
     #[test]
-    fn claim_lease_outlives_channel_retry_ladder() {
-        // A webhook with a full ladder: 6 retries, 30s backoff, 10s timeout
-        // -> 30_000 * (2^6 - 1) + 7 * 10_000 = 1_960_000, and the lease for
-        // such a config is exactly that bound.
+    fn delivery_lease_floors_and_caps_per_attempt() {
+        // C19/C22: channels make one attempt per deliver, so the budget is
+        // the send timeout — a webhook with a 10s timeout sits at the
+        // staleness-window floor.
         let mut ssrf = SsrfPolicy::default_blocking();
         ssrf.block_loopback = false;
-        let ladder = ChannelConfig::Webhook(WebhookConfig {
+        let webhook = ChannelConfig::Webhook(WebhookConfig {
             url: "http://127.0.0.1:9/hook".into(),
             timeout_ms: 10_000,
             retries: 6,
@@ -1018,12 +998,12 @@ mod tests {
             tls_verify: true,
             ssrf,
         });
-        assert_eq!(channel_delivery_budget_ms(&ladder), 1_960_000);
-        let ladder_config = NotificationConfig {
+        assert_eq!(channel_delivery_budget_ms(&webhook), 10_000);
+        let webhook_config = NotificationConfig {
             rules: Vec::new(),
-            channels: [("wh".into(), ladder)].into(),
+            channels: [("wh".into(), webhook)].into(),
         };
-        assert_eq!(delivery_lease_ms(&ladder_config), 1_960_000);
+        assert_eq!(delivery_lease_ms(&webhook_config), 60_000);
 
         // Local-log-only: no remote budget, so the lease sits at the
         // staleness-window floor.
@@ -1033,14 +1013,15 @@ mod tests {
         };
         assert_eq!(delivery_lease_ms(&local_only), 60_000);
 
-        // An absurd ladder is capped so crash-recovery latency stays bounded.
+        // An absurd timeout is capped so crash-recovery latency stays
+        // bounded.
         let mut ssrf = SsrfPolicy::default_blocking();
         ssrf.block_loopback = false;
         let absurd = ChannelConfig::Webhook(WebhookConfig {
             url: "http://127.0.0.1:9/hook".into(),
-            timeout_ms: 10_000,
-            retries: 31,
-            backoff_ms: 1_000_000_000,
+            timeout_ms: 10_000_000_000,
+            retries: 0,
+            backoff_ms: 1,
             headers: Default::default(),
             hmac_secret: None,
             tls_verify: true,

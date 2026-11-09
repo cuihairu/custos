@@ -59,6 +59,9 @@ log = true
 type = "webhook"
 url = "https://ops.example.com/custos/hook"
 timeout_ms = 5000
+# Retries are owned by the queue engine (notification.md §8.6): one attempt
+# per deliver, backoff at the queue level. These fields are kept for config
+# compatibility and no longer drive an in-channel retry ladder.
 retries = 3
 backoff_ms = 30000
 headers = { Authorization = "Bearer CHANGE_ME" }

@@ -153,35 +153,6 @@ impl HeraldChannel {
         };
         Err(ChannelError::new(kind, message))
     }
-
-    /// Sends with `retries` retries of transient failures, doubling the
-    /// backoff each time. Terminal errors return immediately.
-    fn deliver_with_retry(&self, event: &NotificationEvent) -> Result<(), ChannelError> {
-        let payload = dispatch_payload(event, &self.config).to_string();
-        let mut retried = 0u32;
-        let mut delay = Duration::from_millis(self.config.backoff_ms);
-        loop {
-            match self.send_once(&payload) {
-                Ok(()) => return Ok(()),
-                Err(e)
-                    if matches!(
-                        e.kind,
-                        ChannelErrorKind::Rejected | ChannelErrorKind::Config
-                    ) =>
-                {
-                    return Err(e);
-                }
-                Err(e) => {
-                    if retried >= self.config.retries {
-                        return Err(e);
-                    }
-                    retried += 1;
-                    std::thread::sleep(delay);
-                    delay = delay.saturating_mul(2);
-                }
-            }
-        }
-    }
 }
 
 impl Channel for HeraldChannel {
@@ -189,8 +160,10 @@ impl Channel for HeraldChannel {
         &self.id
     }
 
+    /// One attempt; the queue engine schedules any retry (§8.6, C19/C22).
     fn deliver(&self, event: &NotificationEvent) -> Result<(), ChannelError> {
-        self.deliver_with_retry(event)
+        let payload = dispatch_payload(event, &self.config).to_string();
+        self.send_once(&payload)
     }
 }
 
@@ -443,7 +416,7 @@ mod tests {
         let err = channel
             .deliver(&event(EventType::ResourceUnhealthy, Severity::Critical))
             .unwrap_err();
-        // Terminal: Rejected means deliver_with_retry returns immediately.
+        // Terminal: Rejected returns immediately (no in-channel retries).
         assert_eq!(err.kind, ChannelErrorKind::Rejected);
     }
 
@@ -463,21 +436,24 @@ mod tests {
     }
 
     #[test]
-    fn server_errors_retry_then_fail() {
+    fn server_5xx_is_one_attempt_the_queue_retries() {
+        // C19/C22: no in-channel retry ladder — a 5xx fails this deliver
+        // and the queue engine owns the backoff.
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
+        let captured = Arc::new(Mutex::new(0usize));
+        let cap = captured.clone();
         std::thread::spawn(move || {
-            for _ in 0..2 {
-                let (mut stream, _) = listener.accept().unwrap();
-                let _ = crate::test_http::read_full_request(&mut stream);
-                let envelope = r#"{"code":500,"message":"boom"}"#;
-                let response = format!(
-                    "HTTP/1.1 500 X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{envelope}",
-                    envelope.len()
-                );
-                let _ = stream.write_all(response.as_bytes());
-                let _ = stream.flush();
-            }
+            let (mut stream, _) = listener.accept().unwrap();
+            let _ = crate::test_http::read_full_request(&mut stream);
+            *cap.lock().unwrap() += 1;
+            let envelope = r#"{"code":500,"message":"boom"}"#;
+            let response = format!(
+                "HTTP/1.1 500 X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{envelope}",
+                envelope.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
         });
         let mut cfg = config();
         cfg.base_url = format!("http://{addr}");
@@ -486,6 +462,7 @@ mod tests {
             .deliver(&event(EventType::ResourceUnhealthy, Severity::Critical))
             .unwrap_err();
         assert_eq!(err.kind, ChannelErrorKind::Http);
+        assert_eq!(*captured.lock().unwrap(), 1, "one deliver is one request");
     }
 
     #[test]

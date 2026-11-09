@@ -1,8 +1,9 @@
 //! Webhook channel (docs/guide/notification.md §8.2) — the generic remote
 //! channel. POSTs each event as JSON to a configured URL with a request
 //! timeout, configurable auth headers, optional HMAC-SHA256 request signing
-//! and TLS verification control, and retries transient transport/5xx
-//! failures with exponential backoff.
+//! and TLS verification control. One attempt per `deliver`: the queue
+//! engine owns retry and backoff (§8.6), so no in-channel sleep chain can
+//! stall the serial delivery pass (C19) or double-schedule retries (C22).
 //!
 //! Error classification distinguishes the failure kinds the doc asks for:
 //! transport problems (connect/DNS/timeout) → `Transport` (retryable),
@@ -127,36 +128,6 @@ impl WebhookChannel {
             )),
         }
     }
-
-    /// Sends with `retries` retries of transient failures, doubling the
-    /// backoff each time. Terminal errors (`Rejected`, `Config`) return
-    /// immediately.
-    fn deliver_with_retry(&self, event: &NotificationEvent) -> Result<(), ChannelError> {
-        let body = format_event(event);
-        let mut retried = 0u32;
-        let mut delay = Duration::from_millis(self.config.backoff_ms);
-        loop {
-            match self.send_once(event, &body) {
-                Ok(()) => return Ok(()),
-                Err(e)
-                    if matches!(
-                        e.kind,
-                        ChannelErrorKind::Rejected | ChannelErrorKind::Config
-                    ) =>
-                {
-                    return Err(e);
-                }
-                Err(e) => {
-                    if retried >= self.config.retries {
-                        return Err(e);
-                    }
-                    retried += 1;
-                    std::thread::sleep(delay);
-                    delay = delay.saturating_mul(2);
-                }
-            }
-        }
-    }
 }
 
 impl Channel for WebhookChannel {
@@ -164,8 +135,10 @@ impl Channel for WebhookChannel {
         &self.id
     }
 
+    /// One attempt; the queue engine schedules any retry (§8.6, C19/C22).
     fn deliver(&self, event: &NotificationEvent) -> Result<(), ChannelError> {
-        self.deliver_with_retry(event)
+        let body = format_event(event);
+        self.send_once(event, &body)
     }
 }
 
@@ -336,28 +309,19 @@ mod tests {
     }
 
     #[test]
-    fn retries_transient_then_succeeds() {
-        // First two attempts fail with 500, third succeeds.
-        let (addr, captured) = responder_seq(vec![500, 500, 200]);
-        let mut cfg = config(format!("http://{addr}/hook"));
-        cfg.retries = 2;
-        cfg.backoff_ms = 1;
-        let channel = WebhookChannel::new("wh", cfg).unwrap();
-        channel.deliver(&event()).unwrap();
-        assert_eq!(captured.lock().unwrap().len(), 3);
-    }
-
-    #[test]
-    fn gives_up_after_retries_on_transient() {
-        let (addr, captured) = responder_seq(vec![500, 500, 500]);
-        let mut cfg = config(format!("http://{addr}/hook"));
-        cfg.retries = 1;
-        cfg.backoff_ms = 1;
-        let channel = WebhookChannel::new("wh", cfg).unwrap();
+    fn transient_5xx_is_one_attempt_the_queue_retries() {
+        // C19/C22: no in-channel retry ladder. A 5xx fails this deliver
+        // immediately; the queue engine owns the retry backoff, so exactly
+        // ONE request is sent even though the peer would accept more.
+        let (addr, captured) = responder_seq(vec![500, 200]);
+        let channel = WebhookChannel::new("wh", config(format!("http://{addr}/hook"))).unwrap();
         let err = channel.deliver(&event()).unwrap_err();
         assert_eq!(err.kind, ChannelErrorKind::Http);
-        // First attempt + one retry.
-        assert_eq!(captured.lock().unwrap().len(), 2);
+        assert_eq!(
+            captured.lock().unwrap().len(),
+            1,
+            "one deliver is one request; the queue owns retries"
+        );
     }
 
     #[test]

@@ -165,6 +165,8 @@ DeadLetter
 
 The queue-level retry ladder is capped: after `MAX_QUEUE_ATTEMPTS` prior attempts a transient failure dead-letters instead of retrying forever (the channel is surfaced to the human as `DeadLetter` rather than churning silently; the attempts counter and retry schedule stay bounded).
 
+Retry and backoff are owned by the queue end to end: every channel makes one attempt per deliver — no in-channel sleep chain — so a slow channel cannot stall the serial delivery pass and retries are scheduled exactly once. The per-channel `retries`/`backoff_ms` settings are still accepted for config compatibility but no longer drive an in-channel ladder.
+
 ## 8.7 Security requirements
 
 - Never log tokens, passwords, private keys or full authentication headers.
