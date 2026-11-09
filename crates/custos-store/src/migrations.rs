@@ -15,7 +15,22 @@ pub struct Migration {
 }
 
 /// Ordered list of all known schema versions.
-pub const MIGRATIONS: &[Migration] = &[V1, V2, V3];
+pub const MIGRATIONS: &[Migration] = &[V1, V2, V3, V4];
+
+/// V4 — delivery lease for the notification queue (C7): a claimed
+/// (`sending`) entry carries an explicit lease deadline. The next claim
+/// pass may only reclaim it after the lease lapses, so a live delivery
+/// whose channel is inside its own retry ladder (which can exceed the old
+/// fixed 60s staleness window) is never stolen and delivered concurrently.
+/// Rows with a NULL lease (pre-V4) keep the old `updated_at` staleness
+/// rule as the fallback.
+const V4: Migration = Migration {
+    version: 4,
+    name: "notification-lease",
+    sql: "
+ALTER TABLE notification_queue ADD COLUMN lease_until_unix_ms INTEGER;
+",
+};
 
 /// V3 — stateful notification queue (docs/guide/notification.md §8.6).
 /// Upgrades the V2 `notification_queue` (a bare insert log) to the

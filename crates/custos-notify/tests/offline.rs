@@ -90,6 +90,7 @@ impl NotificationQueue for TimeAwareQueue {
         &self,
         now_unix_ms: u64,
         limit: u32,
+        _lease_ms: u64,
     ) -> Result<Vec<QueuedNotification>, QueueError> {
         let mut claimed = Vec::new();
         let mut rows = self.inner.rows.lock().unwrap();

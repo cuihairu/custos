@@ -35,23 +35,32 @@ impl Store {
         .map_err(Into::into)
     }
     /// Claims due queue entries for delivery: `pending`/`retry_scheduled`
-    /// entries whose `next_attempt_at` is due, plus `sending` entries that
-    /// went stale (crash mid-delivery). Claimed entries move to `sending`.
+    /// entries whose `next_attempt_at` is due, plus `sending` entries whose
+    /// delivery lease has lapsed (crash mid-delivery). Claimed entries move
+    /// to `sending` with a fresh lease of `lease_ms` — sized by the caller
+    /// to outlive the channel's own retry ladder, so a live delivery is
+    /// never reclaimed and delivered concurrently (C7). Pre-lease rows
+    /// (NULL lease) fall back to the old staleness window.
     pub fn claim_due_notifications(
         &self,
         now_unix_ms: u64,
         limit: u32,
+        lease_ms: u64,
     ) -> Result<Vec<NotificationQueueRow>, StoreError> {
         self.block(move |pool| async move {
             let mut tx = pool.begin().await?;
             let stale_before = (now_unix_ms as i64) - STALE_SENDING_MS;
+            let lease_until = (now_unix_ms as i64).saturating_add(lease_ms as i64);
             let ids: Vec<i64> = query(
                 "SELECT id FROM notification_queue \
                  WHERE (state IN ('pending', 'retry_scheduled') \
                         AND (next_attempt_at_unix_ms IS NULL OR next_attempt_at_unix_ms <= ?)) \
-                    OR (state = 'sending' AND updated_at_unix_ms < ?) \
+                    OR (state = 'sending' AND ( \
+                        (lease_until_unix_ms IS NOT NULL AND lease_until_unix_ms < ?) \
+                        OR (lease_until_unix_ms IS NULL AND updated_at_unix_ms < ?))) \
                  ORDER BY id LIMIT ?",
             )
+            .bind(now_unix_ms as i64)
             .bind(now_unix_ms as i64)
             .bind(stale_before)
             .bind(limit)
@@ -63,9 +72,10 @@ impl Store {
             for id in &ids {
                 query(
                     "UPDATE notification_queue SET state = 'sending', \
-                     updated_at_unix_ms = ? WHERE id = ?",
+                     updated_at_unix_ms = ?, lease_until_unix_ms = ? WHERE id = ?",
                 )
                 .bind(now_unix_ms as i64)
+                .bind(lease_until)
                 .bind(id)
                 .execute(&mut *tx)
                 .await?;
@@ -229,8 +239,9 @@ impl custos_notify::NotificationQueue for Store {
         &self,
         now_unix_ms: u64,
         limit: u32,
+        lease_ms: u64,
     ) -> Result<Vec<custos_notify::QueuedNotification>, custos_notify::QueueError> {
-        self.claim_due_notifications(now_unix_ms, limit)
+        self.claim_due_notifications(now_unix_ms, limit, lease_ms)
             .map(|rows| {
                 rows.into_iter()
                     .map(|r| custos_notify::QueuedNotification {

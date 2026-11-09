@@ -30,11 +30,15 @@ pub trait NotificationQueue {
         now_unix_ms: u64,
     ) -> Result<u64, QueueError>;
 
-    /// Claims due entries (see `custos-store`) and moves them to `sending`.
+    /// Claims due entries (see `custos-store`) and moves them to `sending`
+    /// with a delivery lease of `lease_ms`. The lease must outlive the
+    /// longest legitimate delivery (the channel's own retry ladder) so the
+    /// next claim pass never reclaims a live row mid-delivery (C7).
     fn claim_due(
         &self,
         now_unix_ms: u64,
         limit: u32,
+        lease_ms: u64,
     ) -> Result<Vec<QueuedNotification>, QueueError>;
 
     fn mark_delivered(&self, id: u64, at_unix_ms: u64) -> Result<(), QueueError>;
@@ -80,8 +84,9 @@ impl<T: NotificationQueue + ?Sized> NotificationQueue for std::sync::Arc<T> {
         &self,
         now_unix_ms: u64,
         limit: u32,
+        lease_ms: u64,
     ) -> Result<Vec<QueuedNotification>, QueueError> {
-        (**self).claim_due(now_unix_ms, limit)
+        (**self).claim_due(now_unix_ms, limit, lease_ms)
     }
 
     fn mark_delivered(&self, id: u64, at_unix_ms: u64) -> Result<(), QueueError> {

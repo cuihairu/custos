@@ -396,7 +396,9 @@ fn notification_queue_lifecycle() {
     assert!(id > 0);
 
     // Nothing due before the next attempt time... it's pending, so due now.
-    let due = store.claim_due_notifications(1_000, 10).expect("claim");
+    let due = store
+        .claim_due_notifications(1_000, 10, DEFAULT_LEASE)
+        .expect("claim");
     assert_eq!(due.len(), 1);
     assert_eq!(due[0].id, id);
     assert_eq!(due[0].channel, "ops-webhook");
@@ -408,7 +410,10 @@ fn notification_queue_lifecycle() {
     );
 
     // A second claim at the same time must not re-claim the sending row.
-    assert!(store.claim_due_notifications(1_000, 10).unwrap().is_empty());
+    assert!(store
+        .claim_due_notifications(1_000, 10, DEFAULT_LEASE)
+        .unwrap()
+        .is_empty());
 
     // Deliver it.
     store
@@ -428,7 +433,9 @@ fn notification_queue_retry_and_dead_letter() {
     let id = store
         .enqueue_notification("mail", &event, 1_000)
         .expect("enqueue");
-    store.claim_due_notifications(1_000, 10).unwrap();
+    store
+        .claim_due_notifications(1_000, 10, DEFAULT_LEASE)
+        .unwrap();
     store
         .mark_notification_retry(id, 5_000, "smtp: transient", 1_000)
         .expect("retry");
@@ -442,8 +449,17 @@ fn notification_queue_retry_and_dead_letter() {
     assert_eq!(rows[0].last_error.as_deref(), Some("smtp: transient"));
 
     // Not due until 5000.
-    assert!(store.claim_due_notifications(4_999, 10).unwrap().is_empty());
-    assert_eq!(store.claim_due_notifications(5_000, 10).unwrap().len(), 1);
+    assert!(store
+        .claim_due_notifications(4_999, 10, DEFAULT_LEASE)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        store
+            .claim_due_notifications(5_000, 10, DEFAULT_LEASE)
+            .unwrap()
+            .len(),
+        1
+    );
 
     // Exhaust: mark dead.
     store
@@ -470,7 +486,9 @@ fn notification_counts_aggregate_per_state() {
     let b = store
         .enqueue_notification("c2", &notification_event("evt-b"), 1_000)
         .unwrap();
-    store.claim_due_notifications(1_000, 10).unwrap();
+    store
+        .claim_due_notifications(1_000, 10, DEFAULT_LEASE)
+        .unwrap();
     store.mark_notification_delivered(a, 1_100).unwrap();
     store
         .mark_notification_retry(b, 9_000, "timeout", 1_100)
@@ -491,7 +509,9 @@ fn delivered_notification_is_not_flipped_back_by_stale_retry() {
     let id = store
         .enqueue_notification("mail", &notification_event("evt-3"), 1_000)
         .unwrap();
-    store.claim_due_notifications(1_000, 10).unwrap();
+    store
+        .claim_due_notifications(1_000, 10, DEFAULT_LEASE)
+        .unwrap();
     store.mark_notification_delivered(id, 1_100).unwrap();
     // The losing pass of a duplicate delivery tries to retry the row.
     store
@@ -504,4 +524,54 @@ fn delivered_notification_is_not_flipped_back_by_stale_retry() {
         "delivered row must not flip back to retry"
     );
     assert_eq!(rows[0].attempts, 0, "no extra attempt counted");
+}
+
+/// The engine-sized claim lease floor, mirroring `custos-notify`.
+const DEFAULT_LEASE: u64 = 60_000;
+
+#[test]
+fn live_lease_blocks_reclaim_but_lapsed_lease_reclaims() {
+    // C7: a claim pass must not steal a row whose delivery is still inside
+    // its lease (a long channel retry ladder exceeds the old fixed 60s
+    // staleness window — the steal meant concurrent duplicate delivery).
+    // A LAPSED lease is reclaimed (crash recovery), and a pre-lease row
+    // (NULL lease) still reclaims by the old staleness rule.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("q.db")).expect("open");
+    let id = store
+        .enqueue_notification("web", &notification_event("evt-c7"), 1_000)
+        .unwrap();
+    // Claimed with a 120s lease (a long retry ladder) at t=1000.
+    let claimed = store
+        .claim_due_notifications(1_000, 10, 120_000)
+        .expect("claim");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].id, id);
+    // 69s later: past the old 60s staleness window, inside the lease.
+    let stolen = store
+        .claim_due_notifications(70_000, 10, 120_000)
+        .expect("second claim");
+    assert!(stolen.is_empty(), "live lease must not be reclaimed");
+    // 199s later: the lease (until 121_000) has lapsed — crash recovery.
+    let reclaimed = store
+        .claim_due_notifications(200_000, 10, 120_000)
+        .expect("third claim");
+    assert_eq!(reclaimed.len(), 1);
+    assert_eq!(reclaimed[0].id, id);
+    // A legacy pre-lease row (NULL lease, stale `updated_at`) still
+    // reclaims; the lapsed-lease row (until 320_000) stays put.
+    let event = serde_json::to_string(&notification_event("evt-legacy")).unwrap();
+    exec(
+        &store,
+        &format!(
+            "INSERT INTO notification_queue \
+             (id, channel, payload, created_at_unix_ms, updated_at_unix_ms, state) \
+             VALUES (99, 'web', '{event}', 1000, 1000, 'sending')"
+        ),
+    );
+    let legacy = store
+        .claim_due_notifications(300_000, 10, 120_000)
+        .expect("legacy claim");
+    assert_eq!(legacy.len(), 1, "legacy NULL-lease row must reclaim");
+    assert_eq!(legacy[0].id, 99);
 }
