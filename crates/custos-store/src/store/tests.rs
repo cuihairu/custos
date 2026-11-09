@@ -128,6 +128,33 @@ fn engine_round_trip_through_store() {
 }
 
 #[test]
+fn corrupt_outcome_text_is_an_error_not_silent_none() {
+    // C2: an outcome cell that is present but unparsable is a corrupt row,
+    // not "no outcome recorded". The typed read reports it like a corrupt
+    // run payload; the crash-recovery input keeps the conservative None
+    // (OutcomeUnknown downstream) with the raw text logged, never silent.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("custos.db")).expect("open");
+    store.save_run(&run("run-c2", RecoveryRunStatus::Executing));
+    exec(
+        &store,
+        "INSERT INTO action_attempts \
+         (run_id, action_id, plan_id, attempt_no, outcome, started_at_unix_ms, finished_at_unix_ms) \
+         VALUES ('run-c2', 'action-x', 'restart', 1, 'not-json{\"', 1000, 1100)",
+    );
+    let err = store
+        .run(&RecoveryRunId::new("run-c2"))
+        .expect_err("corrupt outcome must surface");
+    assert!(err.to_string().contains("corrupt row"), "{err}");
+    // Crash-recovery input: the run is not dropped; the corrupt attempt
+    // reads as unknown (the legal conservative transition) with the raw
+    // text reported, never silently confused with a crash mid-run.
+    let unfinished = store.unfinished_runs();
+    assert_eq!(unfinished.len(), 1);
+    assert_eq!(unfinished[0].action_attempts[0].outcome, None);
+}
+
+#[test]
 fn migrations_apply_once_and_are_recorded() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("custos.db");

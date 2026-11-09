@@ -49,9 +49,22 @@ impl RunStore for Store {
     }
 
     fn save_attempt(&self, run_id: &RecoveryRunId, attempt: &ActionAttempt) {
-        let outcome = attempt
-            .outcome
-            .map(|o| serde_json::to_string(&o).unwrap_or_default());
+        // A serialization failure must not fabricate an empty (corrupt)
+        // outcome row (C2): store NULL — no outcome recorded — and report.
+        let outcome = attempt.outcome.and_then(|o| {
+            serde_json::to_string(&o)
+                .map_err(|err| {
+                    tracing::error!(
+                        target: "custos::store",
+                        run = run_id.as_str(),
+                        action = attempt.action_id.as_str(),
+                        error = %err,
+                        "serialize attempt outcome failed; persisting NULL"
+                    );
+                    err
+                })
+                .ok()
+        });
         if let Err(err) = self.block(|pool| {
             let outcome = outcome.clone();
             let attempt = attempt.clone();
@@ -262,11 +275,30 @@ impl RunStore for Store {
                 run.action_attempts = attempts
                     .into_iter()
                     .map(|(action_id, plan_id, attempt_no, outcome, started, finished)| {
+                        // The RunStore contract is fire-and-forget, so a
+                        // corrupt outcome cell cannot propagate here (C2):
+                        // report the raw text and keep None — the engine's
+                        // conservative OutcomeUnknown marking, never a
+                        // silent crash-mid-run assumption.
+                        let outcome = match parse_outcome(outcome.as_deref()) {
+                            Ok(outcome) => outcome,
+                            Err((text, err)) => {
+                                tracing::error!(
+                                    target: "custos::store",
+                                    run = %id,
+                                    action = %action_id,
+                                    outcome = %text,
+                                    error = %err,
+                                    "corrupt attempt outcome; treating as unknown"
+                                );
+                                None
+                            }
+                        };
                         ActionAttempt {
                             action_id: action_id.into(),
                             plan_id,
                             attempt_no: attempt_no as u32,
-                            outcome: outcome.as_deref().and_then(|o| serde_json::from_str(o).ok()),
+                            outcome,
                             started_at_unix_ms: started as u64,
                             finished_at_unix_ms: finished.map(|t| t as u64),
                         }

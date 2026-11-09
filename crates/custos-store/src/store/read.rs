@@ -131,33 +131,46 @@ impl Store {
     }
     fn attempts_of(&self, run_id: &str) -> Result<Vec<ActionAttempt>, StoreError> {
         let run_id = run_id.to_owned();
+        let bound = run_id.clone();
         let rows = self.block(|pool| async move {
             let rows: Vec<AttemptRow> = query_as(
                 "SELECT action_id, plan_id, attempt_no, outcome, started_at_unix_ms, finished_at_unix_ms \
                  FROM action_attempts WHERE run_id = ? ORDER BY started_at_unix_ms, attempt_no",
             )
-            .bind(&run_id)
+            .bind(&bound)
             .fetch_all(&pool)
             .await?;
             sqlx::Result::Ok(rows)
         })?;
-        Ok(rows
-            .into_iter()
+        rows.into_iter()
             .map(
-                |(action_id, plan_id, attempt_no, outcome, started, finished)| ActionAttempt {
-                    action_id: action_id.into(),
-                    plan_id,
-                    attempt_no: attempt_no as u32,
+                |(action_id, plan_id, attempt_no, outcome, started, finished)| {
                     // NULL outcome = persisted as Executing, then the process
-                    // died: the real outcome is unknown (§7.3 step 6).
-                    outcome: outcome
-                        .as_deref()
-                        .and_then(|o| serde_json::from_str(o).ok()),
-                    started_at_unix_ms: started as u64,
-                    finished_at_unix_ms: finished.map(|t| t as u64),
+                    // died: the real outcome is unknown (§7.3 step 6). A
+                    // present-but-unparsable cell is corrupt data, not a
+                    // crash: report it like a corrupt run payload (C2).
+                    let outcome = parse_outcome(outcome.as_deref()).map_err(|(text, err)| {
+                        tracing::error!(
+                            target: "custos::store",
+                            run = %run_id,
+                            action = %action_id,
+                            outcome = %text,
+                            error = %err,
+                            "corrupt attempt outcome"
+                        );
+                        StoreError::Corrupt(run_id.clone(), err)
+                    })?;
+                    Ok(ActionAttempt {
+                        action_id: action_id.into(),
+                        plan_id,
+                        attempt_no: attempt_no as u32,
+                        outcome,
+                        started_at_unix_ms: started as u64,
+                        finished_at_unix_ms: finished.map(|t| t as u64),
+                    })
                 },
             )
-            .collect())
+            .collect()
     }
     /// Recent probe evidence, newest first.
     pub fn recent_probe_results(&self, limit: u32) -> Result<Vec<ProbeRow>, StoreError> {

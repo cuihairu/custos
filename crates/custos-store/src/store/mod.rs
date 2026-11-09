@@ -36,6 +36,21 @@ pub enum StoreError {
 
 type AttemptRow = (String, String, i64, Option<String>, i64, Option<i64>);
 
+/// Parses a persisted `outcome` cell. A present-but-unparsable value is a
+/// corrupt row (C2), not "no outcome recorded": the raw text is returned
+/// with the error so callers can report it — NULL alone means the attempt
+/// was persisted before the outcome existed (crashed mid-run, §7.3).
+pub(super) fn parse_outcome(
+    cell: Option<&str>,
+) -> Result<Option<custos_model::ActionOutcome>, (String, serde_json::Error)> {
+    match cell {
+        None => Ok(None),
+        Some(text) => serde_json::from_str(text)
+            .map(Some)
+            .map_err(|err| (text.to_owned(), err)),
+    }
+}
+
 const TERMINAL: &str =
     "('recovered','escalated','suppressed','cancelled','interrupted','outcome_unknown')";
 
