@@ -163,6 +163,8 @@ DeadLetter
 
 `Delivered` only means the channel returned whatever it defines as success; unless the peer provides a confirmation mechanism, Custos cannot claim the end user actually saw the notification.
 
+The queue-level retry ladder is capped: after `MAX_QUEUE_ATTEMPTS` prior attempts a transient failure dead-letters instead of retrying forever (the channel is surfaced to the human as `DeadLetter` rather than churning silently; the attempts counter and retry schedule stay bounded).
+
 ## 8.7 Security requirements
 
 - Never log tokens, passwords, private keys or full authentication headers.

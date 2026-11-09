@@ -27,6 +27,13 @@ use std::sync::Mutex;
 /// Base retry backoff; the queue engine doubles it per attempt, capped.
 const BASE_RETRY_MS: u64 = 30_000;
 const MAX_RETRY_MS: u64 = 3_600_000;
+/// Queue-level attempt cap (C16/C17): a transient failure past this many
+/// prior attempts dead-letters instead of scheduling yet another retry.
+/// Keeps the attempts counter and the retry schedule bounded; a channel
+/// down past the cap surfaces as DeadLetter to the human. 8 aligns with
+/// the backoff ladder, which saturates at this many shifts (~2 h of
+/// backoff before the terminal state).
+const MAX_QUEUE_ATTEMPTS: u32 = 8;
 
 /// Result of one dispatch (enqueue) pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -49,6 +56,16 @@ pub struct DeliverReport {
     pub dead: u32,
     /// Delivery attempts that could not even be recorded (queue error).
     pub failed: u32,
+}
+
+/// The transition one claim pass records; drives the report counters so a
+/// dead-lettered row is counted as `dead` regardless of which arm produced
+/// the terminal state (config/rejected vs retry-ladder exhaustion).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OutcomeTransition {
+    Delivered,
+    Retried,
+    Dead,
 }
 
 /// Same-fault dedup state (docs/guide/notification.md §8.5 聚合并抑制重复通知):
@@ -244,8 +261,11 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
             };
             // Error strings are persisted as queue `last_error` (and would be
             // logged below): scrub configured secrets out first (§8.7).
-            let record = match &outcome {
-                Ok(()) => self.queue.mark_delivered(row.id, now_unix_ms),
+            let (transition, record) = match &outcome {
+                Ok(()) => (
+                    OutcomeTransition::Delivered,
+                    self.queue.mark_delivered(row.id, now_unix_ms),
+                ),
                 Err(err)
                     if matches!(
                         err.kind,
@@ -253,26 +273,38 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
                     ) =>
                 {
                     let scrubbed = self.scrubber.scrub(&err.to_string());
-                    self.queue.mark_dead(row.id, &scrubbed, now_unix_ms)
+                    (
+                        OutcomeTransition::Dead,
+                        self.queue.mark_dead(row.id, &scrubbed, now_unix_ms),
+                    )
+                }
+                Err(err) if row.attempts >= MAX_QUEUE_ATTEMPTS => {
+                    // The queue-level retry ladder is exhausted (C16/C17): a
+                    // channel down past the cap dead-letters instead of
+                    // retrying forever. The attempts counter and the retry
+                    // schedule stay bounded; the terminal DeadLetter state is
+                    // surfaced to the human (notify status counts) rather
+                    // than churning silently.
+                    let scrubbed = self.scrubber.scrub(&err.to_string());
+                    (
+                        OutcomeTransition::Dead,
+                        self.queue.mark_dead(row.id, &scrubbed, now_unix_ms),
+                    )
                 }
                 Err(err) => {
                     let next = retry_at(now_unix_ms, row.attempts);
                     let scrubbed = self.scrubber.scrub(&err.to_string());
-                    self.queue.mark_retry(row.id, next, &scrubbed, now_unix_ms)
+                    (
+                        OutcomeTransition::Retried,
+                        self.queue.mark_retry(row.id, next, &scrubbed, now_unix_ms),
+                    )
                 }
             };
             match record {
-                Ok(()) => match &outcome {
-                    Ok(()) => report.delivered += 1,
-                    Err(err)
-                        if matches!(
-                            err.kind,
-                            ChannelErrorKind::Rejected | ChannelErrorKind::Config
-                        ) =>
-                    {
-                        report.dead += 1;
-                    }
-                    Err(_) => report.retried += 1,
+                Ok(()) => match transition {
+                    OutcomeTransition::Delivered => report.delivered += 1,
+                    OutcomeTransition::Retried => report.retried += 1,
+                    OutcomeTransition::Dead => report.dead += 1,
                 },
                 Err(err) => {
                     report.failed += 1;
@@ -693,6 +725,56 @@ mod tests {
             .ops()
             .iter()
             .any(|o| o.starts_with(&format!("dead:{id2}:"))));
+    }
+
+    #[test]
+    fn transient_failures_dead_letter_at_the_attempt_cap() {
+        // C16/C17: a transient failure always called mark_retry with no
+        // attempt cap — a permanently-down channel retried forever, its
+        // attempts counter and retry schedule growing without bound. At the
+        // cap the row must dead-letter (terminal, surfaced to the human)
+        // instead of scheduling a retry.
+        let queue = MemQueue::default();
+        let config = NotificationConfig {
+            rules: vec![],
+            channels: [("wh".into(), webhook_channel_config())].into(),
+        };
+        let engine = NotificationEngine::new(config, queue);
+        let event = event(EventType::ResourceUnhealthy, Severity::Critical);
+        let id = engine.queue.enqueue("wh", &event, 1_000).unwrap();
+
+        // At the cap: the failure must dead-letter, not schedule retry N+1.
+        {
+            let mut rows = engine.queue.rows.borrow_mut();
+            let row = rows.iter_mut().find(|r| r.id == id).unwrap();
+            row.state = NotificationState::Pending;
+            row.attempts = MAX_QUEUE_ATTEMPTS;
+        }
+        let report = engine.deliver_due(1_000, 10);
+        assert_eq!(report.dead, 1, "a channel down past the cap dead-letters");
+        assert!(engine
+            .queue
+            .ops()
+            .iter()
+            .any(|o| o.starts_with(&format!("dead:{id}:"))));
+
+        // One under the cap: still retried.
+        {
+            let mut rows = engine.queue.rows.borrow_mut();
+            let row = rows.iter_mut().find(|r| r.id == id).unwrap();
+            row.state = NotificationState::Pending;
+            row.attempts = MAX_QUEUE_ATTEMPTS - 1;
+        }
+        let report = engine.deliver_due(2_000, 10);
+        assert_eq!(
+            report.retried, 1,
+            "under the cap the transient failure retries"
+        );
+        assert!(engine
+            .queue
+            .ops()
+            .iter()
+            .any(|o| o.starts_with(&format!("retry:{id}:"))));
     }
 
     #[test]
