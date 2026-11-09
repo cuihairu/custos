@@ -470,7 +470,7 @@
 ### P2
 
 - [x] R9 [P2] `netif.rs:143` 路由解析遇到首个缺少双空格分隔符的行即 `?` 中断，本地化或畸形行使整表报 NotFound 而非跳过该行。✅ commit 904434a，`parse_netsh_interface_state` 改为跳过无分隔符行（对齐平台侧 parse_netsh_interfaces），红先测试 `netsh_interface_state_parser_skips_separatorless_rows` 验证旧行为整表 None；另 commit b73bb3c 补提 ef1226b 漏掉的旧 notification.rs 删除；测试 538 通过/0 失败
-- [ ] R10 [P2] `docker.rs:121` `restarts.parse::<u64>().unwrap_or(0)` 把解析失败当成 0，掩盖崩溃循环。
+- [x] R10 [P2] `docker.rs:121` `restarts.parse::<u64>().unwrap_or(0)` 把解析失败当成 0，掩盖崩溃循环。✅ commit 88a1220，不可解析的 RestartCount 改为 Unreachable（与 status/running 一致），红先测试 `unparsable_restart_count_is_unreachable_not_zero` 验证旧行为返回 Healthy；测试 539 通过/0 失败
 - [ ] R11 [P2] `plugins/cloudflared/src/main.rs:54,59-69` `cloudflared_tunnel_ha_connections` 解析失败时 `connections = None`，匹配分支判 HEALTHY——想探测的故障在解析失败后反被当成健康。
 - [ ] R12 [P2] `windows.rs:523-524` `parse_netsh_interfaces` 只识别英文/zh-CN 词元，ja/fr/de 等系统语言下所有接口判 down。
 - [ ] R13 [P2] `windows.rs:435-444` `netsh_interface_reset_argv` 把 `admin=disabled` 与 `admin=enabled` 塞进同一条 `netsh interface set interface`，单次调用只接受一个 `admin=`。
