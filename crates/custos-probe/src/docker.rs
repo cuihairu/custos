@@ -116,17 +116,22 @@ impl DockerProbe {
             "unknown",
         ];
         let mut fields = stdout.split_whitespace();
-        let (status, running, restarts) = match (fields.next(), fields.next(), fields.next()) {
-            (Some(status), Some(running), Some(restarts)) => {
-                (status, running, restarts.parse::<u64>().unwrap_or(0))
-            }
-            _ => {
-                return report(
-                    false,
-                    HealthStatus::Unreachable,
-                    format!("unexpected docker inspect output: {stdout:?}"),
-                );
-            }
+        let unexpected = || {
+            report(
+                false,
+                HealthStatus::Unreachable,
+                format!("unexpected docker inspect output: {stdout:?}"),
+            )
+        };
+        let (status, running) = match (fields.next(), fields.next()) {
+            (Some(status), Some(running)) => (status, running),
+            _ => return unexpected(),
+        };
+        let restarts = match fields.next().map(str::parse::<u64>) {
+            Some(Ok(restarts)) => restarts,
+            // A corrupt RestartCount silently defaulted to 0 and masked a
+            // crash loop as Healthy (R10, openclaw audit 2026-11-05).
+            _ => return unexpected(),
         };
         if !KNOWN_STATUSES.contains(&status) {
             return report(
@@ -234,6 +239,25 @@ mod tests {
     fn garbage_output_is_unreachable() {
         let report = evaluate("some docker warning\nthen nothing", None);
         assert_eq!(report.status, HealthStatus::Unreachable);
+    }
+
+    #[test]
+    fn unparsable_restart_count_is_unreachable_not_zero() {
+        // A corrupt RestartCount must not silently become 0 — that masks a
+        // crash loop as Healthy. It is unexpected output, like a bad
+        // status or a bad running flag.
+        for stdout in [
+            "running true bogus",
+            "running true -1",
+            "running true 99999999999999999999",
+        ] {
+            let report = evaluate(stdout, Some(1));
+            assert_eq!(
+                report.status,
+                HealthStatus::Unreachable,
+                "unparsable restart count {stdout:?} must be Unreachable"
+            );
+        }
     }
 
     #[test]
