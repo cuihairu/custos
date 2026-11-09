@@ -97,10 +97,63 @@ class FileHealthProbePathSafety(unittest.TestCase):
                     file_health_probe.resolve_target({"args": {"target": hostile}})
             self.assertEqual(
                 file_health_probe.resolve_target({"args": {"target": "inner.txt"}}),
-                ntpath.join(ntpath.dirname(file_health_probe.TARGET), "inner.txt"),
+                # The contract returns the symlink-resolved path.
+                ntpath.realpath(
+                    ntpath.join(ntpath.dirname(file_health_probe.TARGET), "inner.txt")
+                ),
             )
         finally:
             file_health_probe.os.path = old_path
+
+
+    def test_symlink_inside_base_is_resolved_and_contained(self):
+        # Audit 2026-11-10b: lexical validation never resolved symlinks —
+        # a link inside the base pointing at a file outside it let probe
+        # stat (and recover touch) that outside file through the link.
+        with tempfile.TemporaryDirectory() as parent:
+            base = os.path.join(parent, "base")
+            os.makedirs(base)
+            victim = os.path.join(parent, "victim.txt")
+            with open(victim, "w"):
+                pass
+            old_target = file_health_probe.TARGET
+            file_health_probe.TARGET = os.path.join(base, "default.target")
+            try:
+                os.symlink(victim, os.path.join(base, "link"))
+                probed = file_health_probe.probe({"args": {"target": "link"}})
+                self.assertFalse(probed["healthy"], probed)
+                self.assertIn("refused", probed["observation"])
+                victim_mtime = os.path.getmtime(victim)
+                recovered = file_health_probe.recover({"args": {"target": "link"}})
+                self.assertFalse(recovered["succeeded"], recovered)
+                self.assertIn("refused", recovered["detail"])
+                self.assertEqual(
+                    os.path.getmtime(victim),
+                    victim_mtime,
+                    "recovery touched a file outside the base through a link",
+                )
+                # A link resolving INSIDE the base stays legitimate.
+                inner = os.path.join(base, "inner.txt")
+                with open(inner, "w"):
+                    pass
+                os.symlink(inner, os.path.join(base, "alias"))
+                ok = file_health_probe.probe({"args": {"target": "alias"}})
+                self.assertTrue(ok["healthy"], ok)
+            finally:
+                file_health_probe.TARGET = old_target
+
+    def test_target_with_nul_byte_is_refused_not_raised(self):
+        # Audit 2026-11-10b: a NUL passes the lexical checks, then the
+        # stat/open layer raises an uncaught `ValueError: embedded null
+        # byte` — crashing the plugin instead of answering unhealthy.
+        for hostile in ("bad\x00name", "a/b\x00c"):
+            with self.subTest(target=hostile):
+                probed = file_health_probe.probe({"args": {"target": hostile}})
+                self.assertFalse(probed["healthy"], probed)
+                self.assertIn("refused", probed["observation"])
+                recovered = file_health_probe.recover({"args": {"target": hostile}})
+                self.assertFalse(recovered["succeeded"], recovered)
+                self.assertIn("refused", recovered["detail"])
 
 
 if __name__ == "__main__":

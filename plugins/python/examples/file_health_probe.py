@@ -23,14 +23,20 @@ def resolve_target(params):
     probe or touch any file the process can reach. Only bare relative
     names are accepted, resolved against the base directory (the
     env-configured default's parent); absolute paths, `..` escapes,
-    backslash separators and drive letters are refused. The env default
-    itself stays the operator's choice (S1).
+    backslash separators, drive letters and NUL bytes are refused, and
+    the final path is symlink-resolved (`realpath`) and must stay inside
+    the resolved base. The env default itself stays the operator's choice
+    (S1).
     """
     raw = params.get("args", {}).get("target")
     if raw is None:
         return TARGET
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError("target must be a non-empty string")
+    if "\x00" in raw:
+        # The stat/open layer raises an uncaught ValueError on NUL
+        # long after any lexical check could help; refuse it here.
+        raise ValueError("target must not contain NUL bytes")
     # Windows rules: `..\evil` normalizes to a backslash traversal the
     # `../` check never sees, and `C:evil` is drive-relative — os.path
     # join resolves it against the drive's CWD, discarding the base.
@@ -49,7 +55,20 @@ def resolve_target(params):
         part == ".." for part in normalized.split("/")
     ):
         raise ValueError(f"target must not escape the base directory: {raw!r}")
-    return os.path.join(os.path.dirname(TARGET) or ".", normalized)
+    # Lexical checks stop at names; a symlink inside the base can still
+    # point anywhere. Resolve the final path and require it to stay
+    # inside the (itself resolved) base. `commonpath` is the canonical
+    # containment test on either path flavor; a different drive (or any
+    # incomparable pair) raises ValueError, which means "outside".
+    base = os.path.realpath(os.path.dirname(TARGET) or ".")
+    resolved = os.path.realpath(os.path.join(base, normalized))
+    try:
+        inside = os.path.commonpath([base, resolved]) == base
+    except ValueError:
+        inside = False
+    if not inside:
+        raise ValueError(f"target resolves outside the base directory: {raw!r}")
+    return resolved
 
 
 def probe(params):
@@ -59,7 +78,7 @@ def probe(params):
         return {"healthy": False, "observation": f"refused target: {exc}"}
     try:
         age = time.time() - os.path.getmtime(target)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return {"healthy": False, "observation": f"cannot stat {target}: {exc}"}
     if age > MAX_AGE_SECONDS:
         return {"healthy": False, "observation": f"{target} is {age:.0f}s old (max {MAX_AGE_SECONDS:.0f}s)"}
@@ -75,5 +94,5 @@ def recover(params):
         with open(target, "a"):
             os.utime(target, None)
         return {"succeeded": True, "detail": f"touched {target}"}
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return {"succeeded": False, "detail": f"cannot touch {target}: {exc}"}
