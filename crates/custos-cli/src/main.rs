@@ -633,8 +633,9 @@ mod tests {
 
     #[test]
     fn start_options_accept_every_flag_together() {
-        let options = parse_start_options(&args(&["--db", "other.db", "--interval", "250", "--once"]))
-            .expect("flags parse");
+        let options =
+            parse_start_options(&args(&["--db", "other.db", "--interval", "250", "--once"]))
+                .expect("flags parse");
         assert_eq!(options.db_path, "other.db");
         assert_eq!(options.interval_ms, 250);
         assert!(options.once);
@@ -649,12 +650,10 @@ mod tests {
         let err = expect_exit_err(parse_start_options(&args(&["--interval"])));
         assert_eq!(err, ExitCode::from(2));
         // `--interval` with a non-numeric value.
-        let err =
-            expect_exit_err(parse_start_options(&args(&["--interval", "fast"])));
+        let err = expect_exit_err(parse_start_options(&args(&["--interval", "fast"])));
         assert_eq!(err, ExitCode::from(2));
         // Any unknown flag aborts parsing.
-        let err =
-            expect_exit_err(parse_start_options(&args(&["--once", "--verbose"])));
+        let err = expect_exit_err(parse_start_options(&args(&["--once", "--verbose"])));
         assert_eq!(err, ExitCode::from(2));
     }
 

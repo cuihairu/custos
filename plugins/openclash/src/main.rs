@@ -332,7 +332,8 @@ mod tests {
     fn put_maps_transport_failure_to_switch_failed() {
         let _guard = ENV.lock().unwrap();
         std::env::set_var("OPENCLASH_API", dead_port_base());
-        let err = put("/proxies/Proxy", json!({ "name": "node" })).expect_err("dead port must fail");
+        let err =
+            put("/proxies/Proxy", json!({ "name": "node" })).expect_err("dead port must fail");
         assert!(
             err.starts_with("switch failed: "),
             "expected a switch mapping, got: {err}"
@@ -367,10 +368,7 @@ mod tests {
         std::env::set_var("OPENCLASH_API", dead_port_base());
         std::env::set_var("OPENCLASH_GROUP", "Proxy");
         let err = switch_best_node().expect_err("core down");
-        assert!(
-            err.starts_with("core unreachable: "),
-            "got: {err}"
-        );
+        assert!(err.starts_with("core unreachable: "), "got: {err}");
         std::env::remove_var("OPENCLASH_API");
         std::env::remove_var("OPENCLASH_GROUP");
     }
@@ -408,9 +406,6 @@ mod tests {
         // On this host /etc/init.d/openclash does not exist, so the
         // controlled spawn must surface StartFailed, not panic or hang.
         let err = restart_service().expect_err("init script missing");
-        assert!(
-            err.starts_with("init script not runnable"),
-            "got: {err}"
-        );
+        assert!(err.starts_with("init script not runnable"), "got: {err}");
     }
 }
