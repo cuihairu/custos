@@ -595,3 +595,118 @@ fn graph(path: &str) -> ExitCode {
     }
     ExitCode::SUCCESS
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    /// `expect_err` for results whose `Ok` side is not `Debug`.
+    fn expect_exit_err<T>(result: Result<T, ExitCode>) -> ExitCode {
+        match result {
+            Ok(_) => panic!("expected an exit-code error"),
+            Err(code) => code,
+        }
+    }
+
+    /// Writes `text` to a uniquely named file under the temp dir and returns
+    /// its path; the caller removes it when done.
+    fn temp_config(name: &str, text: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "custos-cli-test-{}-{name}.toml",
+            std::process::id()
+        ));
+        std::fs::write(&path, text).expect("write temp config");
+        path
+    }
+
+    #[test]
+    fn start_options_default_to_documented_values() {
+        let options = parse_start_options(&[]).expect("no args parse");
+        assert_eq!(options.db_path, "custos.db");
+        assert_eq!(options.interval_ms, 5_000);
+        assert!(!options.once);
+    }
+
+    #[test]
+    fn start_options_accept_every_flag_together() {
+        let options = parse_start_options(&args(&["--db", "other.db", "--interval", "250", "--once"]))
+            .expect("flags parse");
+        assert_eq!(options.db_path, "other.db");
+        assert_eq!(options.interval_ms, 250);
+        assert!(options.once);
+    }
+
+    #[test]
+    fn start_options_error_paths_exit_two() {
+        // `--db` without a value.
+        let err = expect_exit_err(parse_start_options(&args(&["--db"])));
+        assert_eq!(err, ExitCode::from(2));
+        // `--interval` without a value.
+        let err = expect_exit_err(parse_start_options(&args(&["--interval"])));
+        assert_eq!(err, ExitCode::from(2));
+        // `--interval` with a non-numeric value.
+        let err =
+            expect_exit_err(parse_start_options(&args(&["--interval", "fast"])));
+        assert_eq!(err, ExitCode::from(2));
+        // Any unknown flag aborts parsing.
+        let err =
+            expect_exit_err(parse_start_options(&args(&["--once", "--verbose"])));
+        assert_eq!(err, ExitCode::from(2));
+    }
+
+    #[test]
+    fn db_arg_defaults_and_overrides() {
+        let path = db_arg(&args(&[]), "runs").expect("default db");
+        assert_eq!(path, "custos.db");
+        let path = db_arg(&args(&["--db", "history.db"]), "runs").expect("override db");
+        assert_eq!(path, "history.db");
+    }
+
+    #[test]
+    fn db_arg_error_paths_exit_two() {
+        let err = expect_exit_err(db_arg(&args(&["--db"]), "runs"));
+        assert_eq!(err, ExitCode::from(2));
+        let err = expect_exit_err(db_arg(&args(&["--limit", "5"]), "runs"));
+        assert_eq!(err, ExitCode::from(2));
+    }
+
+    #[test]
+    fn load_config_reports_missing_and_invalid_files_as_failure() {
+        let err = expect_exit_err(load_config("/nonexistent/custos-test.toml"));
+        assert_eq!(err, ExitCode::FAILURE);
+        let path = temp_config("invalid", "this is ] not toml [");
+        let err = expect_exit_err(load_config(path.to_str().unwrap()));
+        assert_eq!(err, ExitCode::FAILURE);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn validate_accepts_a_scaffolded_template() {
+        // The same gate `custos validate` runs at startup: an `init`
+        // template must pass it end to end from disk.
+        let text = init::generate("process", "worker").expect("process template");
+        let path = temp_config("valid", &text);
+        assert_eq!(validate(path.to_str().unwrap()), ExitCode::SUCCESS);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn notify_rejects_bad_retry_arguments_before_touching_the_store() {
+        // Non-numeric queue id.
+        let code = notify(&args(&["retry", "abc"]));
+        assert_eq!(code, ExitCode::from(2));
+        // `retry` without any id.
+        let code = notify(&args(&["retry"]));
+        assert_eq!(code, ExitCode::from(2));
+        // Unknown subcommand.
+        let code = notify(&args(&["purge"]));
+        assert_eq!(code, ExitCode::from(2));
+        // No subcommand at all.
+        let code = notify(&args(&[]));
+        assert_eq!(code, ExitCode::from(2));
+    }
+}
