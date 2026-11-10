@@ -261,3 +261,156 @@ fn main() {
         other => Reply::Error(-32601, format!("unknown method: {other}")),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Env-var accessors are process-global; every test that reads or sets
+    /// OPENCLASH_* vars holds this lock so they cannot observe each other.
+    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A loopback address that is listening on nothing: binding port 0,
+    /// noting the assigned port and dropping the listener leaves it closed,
+    /// so any connection attempt fails at the transport layer immediately.
+    fn dead_port_base() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().expect("local addr").port();
+        drop(listener);
+        format!("http://127.0.0.1:{port}")
+    }
+
+    #[test]
+    fn env_accessors_default_and_override() {
+        let _guard = ENV.lock().unwrap();
+        std::env::remove_var("OPENCLASH_API");
+        std::env::remove_var("OPENCLASH_SECRET");
+        std::env::remove_var("OPENCLASH_GROUP");
+        assert_eq!(api_base(), "http://127.0.0.1:9090");
+        assert_eq!(secret(), None);
+        assert_eq!(group(), None);
+
+        std::env::set_var("OPENCLASH_API", "http://192.168.1.20:9090");
+        std::env::set_var("OPENCLASH_SECRET", "s3cret");
+        std::env::set_var("OPENCLASH_GROUP", "Proxy");
+        assert_eq!(api_base(), "http://192.168.1.20:9090");
+        assert_eq!(secret().as_deref(), Some("s3cret"));
+        assert_eq!(group().as_deref(), Some("Proxy"));
+
+        std::env::remove_var("OPENCLASH_API");
+        std::env::remove_var("OPENCLASH_SECRET");
+        std::env::remove_var("OPENCLASH_GROUP");
+    }
+
+    #[test]
+    fn empty_env_values_are_treated_as_unset() {
+        let _guard = ENV.lock().unwrap();
+        // An empty SECRET/GROUP must behave as "not configured": a Bearer
+        // header of "" would be rejected by the core, and "" is never a
+        // valid group name.
+        std::env::set_var("OPENCLASH_SECRET", "");
+        std::env::set_var("OPENCLASH_GROUP", "");
+        assert_eq!(secret(), None);
+        assert_eq!(group(), None);
+        std::env::remove_var("OPENCLASH_SECRET");
+        std::env::remove_var("OPENCLASH_GROUP");
+    }
+
+    #[test]
+    fn get_maps_transport_failure_to_core_unreachable() {
+        let _guard = ENV.lock().unwrap();
+        std::env::set_var("OPENCLASH_API", dead_port_base());
+        let err = get("/version").expect_err("dead port must fail");
+        assert!(
+            err.starts_with("core unreachable: "),
+            "expected a transport mapping, got: {err}"
+        );
+        std::env::remove_var("OPENCLASH_API");
+    }
+
+    #[test]
+    fn put_maps_transport_failure_to_switch_failed() {
+        let _guard = ENV.lock().unwrap();
+        std::env::set_var("OPENCLASH_API", dead_port_base());
+        let err = put("/proxies/Proxy", json!({ "name": "node" })).expect_err("dead port must fail");
+        assert!(
+            err.starts_with("switch failed: "),
+            "expected a switch mapping, got: {err}"
+        );
+        std::env::remove_var("OPENCLASH_API");
+    }
+
+    #[test]
+    fn probe_reports_unhealthy_when_core_is_down() {
+        let _guard = ENV.lock().unwrap();
+        std::env::set_var("OPENCLASH_API", dead_port_base());
+        let (healthy, observation) = probe();
+        assert!(!healthy);
+        assert!(
+            observation.starts_with("core unreachable: "),
+            "got: {observation}"
+        );
+        std::env::remove_var("OPENCLASH_API");
+    }
+
+    #[test]
+    fn switch_best_node_requires_a_configured_group() {
+        let _guard = ENV.lock().unwrap();
+        std::env::remove_var("OPENCLASH_GROUP");
+        let err = switch_best_node().expect_err("no group configured");
+        assert_eq!(err, "no OPENCLASH_GROUP configured");
+    }
+
+    #[test]
+    fn switch_best_node_surfaces_core_unreachable() {
+        let _guard = ENV.lock().unwrap();
+        std::env::set_var("OPENCLASH_API", dead_port_base());
+        std::env::set_var("OPENCLASH_GROUP", "Proxy");
+        let err = switch_best_node().expect_err("core down");
+        assert!(
+            err.starts_with("core unreachable: "),
+            "got: {err}"
+        );
+        std::env::remove_var("OPENCLASH_API");
+        std::env::remove_var("OPENCLASH_GROUP");
+    }
+
+    #[test]
+    fn capabilities_declare_the_full_operation_contract() {
+        let caps = capabilities();
+        let entries = caps.as_array().expect("capabilities are a list");
+        assert_eq!(entries.len(), 3, "probe + two recovery actions: {caps}");
+
+        let ids: Vec<&str> = entries
+            .iter()
+            .filter_map(|e| e.get("operation_id").and_then(Value::as_str))
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "openclash.probe",
+                "openclash.switch_best_node",
+                "openclash.restart"
+            ]
+        );
+        // The host gates permissions and interruption risk on these fields.
+        let probe = &entries[0];
+        assert_eq!(probe["kind"], "probe_provider");
+        assert_eq!(probe["read_only"], true);
+        let restart = &entries[2];
+        assert_eq!(restart["kind"], "recovery_action_provider");
+        assert_eq!(restart["interrupts_network"], true);
+        assert_eq!(restart["interrupts_remote_admin"], true);
+    }
+
+    #[test]
+    fn restart_service_fails_cleanly_off_openwrt() {
+        // On this host /etc/init.d/openclash does not exist, so the
+        // controlled spawn must surface StartFailed, not panic or hang.
+        let err = restart_service().expect_err("init script missing");
+        assert!(
+            err.starts_with("init script not runnable"),
+            "got: {err}"
+        );
+    }
+}
