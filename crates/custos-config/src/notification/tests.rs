@@ -355,3 +355,133 @@ hmac_secret = "top-secret"
     assert!(!debug.contains("top-secret"), "leaked secret: {debug}");
     assert!(debug.contains("[redacted]"), "no redaction: {debug}");
 }
+
+#[test]
+fn channel_lookup_resolves_configured_ids_and_rejects_unknown() {
+    let config = load(
+        r#"
+version = 1
+
+[[resources]]
+id = "web"
+type = "http-endpoint"
+
+[notification.channels.audit]
+type = "local-log"
+enabled = true
+"#,
+    )
+    .unwrap();
+    // Dispatch resolves rule channel refs through this accessor; a hit must
+    // be the typed channel, a miss must be None (never a default).
+    assert_eq!(
+        config.notification.channel("audit"),
+        Some(&ChannelConfig::LocalLog { enabled: true })
+    );
+    assert!(config.notification.channel("missing").is_none());
+}
+
+#[test]
+fn secret_string_redacts_everywhere_but_expose_returns_plaintext() {
+    let secret = SecretString::new("hunter2");
+    assert_eq!(format!("{secret:?}"), "[redacted]");
+    assert_eq!(format!("{secret}"), "[redacted]");
+    // The value is reachable only at the exact use site (§8.7).
+    assert_eq!(secret.expose(), "hunter2");
+}
+
+#[test]
+fn smtp_channel_debug_redacts_the_password() {
+    let config = load(
+        r#"
+version = 1
+
+[[resources]]
+id = "web"
+type = "http-endpoint"
+
+[notification.channels.mail]
+type = "smtp"
+host = "smtp.example.com"
+from = "custos@example.com"
+to = ["ops@example.com"]
+username = "custos"
+password = "mail-hunter2"
+"#,
+    )
+    .unwrap();
+    let debug = format!("{:?}", config.notification.channels.get("mail").unwrap());
+    assert!(!debug.contains("mail-hunter2"), "leaked password: {debug}");
+    // Non-secret fields stay visible for diagnosis.
+    assert!(debug.contains("smtp.example.com"), "got: {debug}");
+}
+
+#[test]
+fn telegram_channel_debug_redacts_the_bot_token() {
+    let config = load(
+        r#"
+version = 1
+
+[[resources]]
+id = "web"
+type = "http-endpoint"
+
+[notification.channels.tg]
+type = "telegram"
+bot_token = "tg-hunter2"
+chat_id = "@ops"
+"#,
+    )
+    .unwrap();
+    let debug = format!("{:?}", config.notification.channels.get("tg").unwrap());
+    assert!(!debug.contains("tg-hunter2"), "leaked bot token: {debug}");
+    assert!(debug.contains("@ops"), "got: {debug}");
+}
+
+#[test]
+fn herald_channel_debug_redacts_the_token() {
+    let config = load(
+        r#"
+version = 1
+
+[[resources]]
+id = "web"
+type = "http-endpoint"
+
+[notification.channels.h]
+type = "herald"
+base_url = "http://127.0.0.1:8080"
+app = "custos"
+token = "herald-hunter2"
+"#,
+    )
+    .unwrap();
+    let debug = format!("{:?}", config.notification.channels.get("h").unwrap());
+    assert!(!debug.contains("herald-hunter2"), "leaked token: {debug}");
+    assert!(debug.contains("custos"), "got: {debug}");
+}
+
+#[test]
+fn local_log_channel_debug_carries_the_enabled_flag() {
+    let config = load(
+        r#"
+version = 1
+
+[[resources]]
+id = "web"
+type = "http-endpoint"
+
+[notification.channels.off]
+type = "local-log"
+enabled = false
+"#,
+    )
+    .unwrap();
+    match config.notification.channel("off") {
+        Some(ChannelConfig::LocalLog { enabled }) => {
+            let debug = format!("{:?}", ChannelConfig::LocalLog { enabled: *enabled });
+            assert!(debug.contains("enabled: false"), "got: {debug}");
+        }
+        other => panic!("expected LocalLog channel, got {other:?}"),
+    }
+}
