@@ -286,3 +286,84 @@ fn write_confirm_uses_the_callers_deadline_not_the_default() {
     // The plugin cannot have answered before its stall ended.
     assert!(started.elapsed() < Duration::from_secs(10), "{started:?}");
 }
+
+#[test]
+#[cfg(unix)]
+fn shutdown_reaps_the_child_even_when_it_leaks_the_transport_pipes() {
+    // 2026-11-11 audit P0-3: a daemonizing child (or a fixture-style fd
+    // leak) hands its stdout/stderr write ends to a descendant that never
+    // exits, so the transport readers never see EOF. Shutdown must still
+    // reap the direct child — the leaked fd cannot wedge it into a hang,
+    // and start-failure paths (which run the same reaping) must not leak
+    // the child either.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let latch = tmp.path().join("leak-latch");
+    std::fs::write(&latch, b"latch").expect("write latch");
+    let mut config = mock_config(&[]);
+    config.env.insert(
+        "MOCK_PLUGIN_LEAK_FD_LATCH".to_owned(),
+        latch.to_string_lossy().into_owned(),
+    );
+    let session = PluginSession::start(&config).expect("spawn");
+    assert!(session.is_running());
+
+    let started = Instant::now();
+    session.shutdown().expect("shutdown");
+    assert!(!session.is_running());
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "shutdown must not wait on the leaked pipe write end"
+    );
+    // The leaked fd is observable — it must not be stdin/stdout/stderr
+    // (i.e. the transport pipes really were held open by it).
+    assert_eq!(
+        std::fs::read(&latch).expect("latch content"),
+        4_i32.to_le_bytes(),
+        "fixture failed to leak the transport pipes"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn drop_reaps_the_child_even_when_it_leaks_the_transport_pipes() {
+    // Same leak, on the drop path: the session dies without any
+    // cooperation from the child, and the child must still be gone — no
+    // orphan process, no hang on the leaked fd. The start-failure cleanup
+    // runs the same reaping (see reap_failed_start unit test).
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let latch = tmp.path().join("leak-latch");
+    std::fs::write(&latch, b"latch").expect("write latch");
+    let mut config = mock_config(&[]);
+    config.env.insert(
+        "MOCK_PLUGIN_LEAK_FD_LATCH".to_owned(),
+        latch.to_string_lossy().into_owned(),
+    );
+    let session = PluginSession::start(&config).expect("spawn");
+    // The fixture writes the latch content only after it actually leaked
+    // the fd — that is the proof the transport pipes were held open by a
+    // descendant when the reaping ran.
+    let latch_content = loop {
+        let content = std::fs::read(&latch).expect("latch content");
+        if content == [108, 97, 116, 99, 104] {
+            std::thread::sleep(Duration::from_millis(10));
+            continue;
+        }
+        break content;
+    };
+    let started = Instant::now();
+    drop(session);
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "drop must not wait on the leaked pipe write end"
+    );
+    assert_eq!(
+        latch_content,
+        4_i32.to_le_bytes(),
+        "fixture failed to leak the transport pipes"
+    );
+    assert_eq!(
+        std::fs::read(&latch).expect("latch content"),
+        4_i32.to_le_bytes(),
+        "fixture failed to leak the transport pipes"
+    );
+}

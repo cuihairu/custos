@@ -190,10 +190,14 @@ impl PluginSession {
             faults: Mutex::new(Vec::new()),
         });
 
+        // A failed transport spawn must not leak the already-running child:
+        // reap it (kill after a bounded wait) before surfacing the error
+        // (2026-11-11 audit P0-3). The stdin writer gets a Close so it drains
+        // instead of parking on a channel nobody reads.
         thread::Builder::new()
             .name("plugin-stdin".into())
             .spawn(writer_loop(stdin, writer_rx))
-            .map_err(|e| HostError::Spawn(format!("writer thread: {e}")))?;
+            .map_err(|e| reap_failed_start(&shared, "writer thread", e))?;
         thread::Builder::new()
             .name("plugin-stdout".into())
             .spawn(stdout_loop(
@@ -201,11 +205,11 @@ impl PluginSession {
                 shared.clone(),
                 config.max_message_bytes,
             ))
-            .map_err(|e| HostError::Spawn(format!("stdout thread: {e}")))?;
+            .map_err(|e| reap_failed_start(&shared, "stdout thread", e))?;
         thread::Builder::new()
             .name("plugin-stderr".into())
             .spawn(stderr_loop(stderr, shared.clone()))
-            .map_err(|e| HostError::Spawn(format!("stderr thread: {e}")))?;
+            .map_err(|e| reap_failed_start(&shared, "stderr thread", e))?;
 
         Ok(Self {
             shared,
@@ -563,6 +567,18 @@ fn stderr_loop(stderr: std::process::ChildStderr, shared: Arc<Shared>) -> impl F
     }
 }
 
+/// Converts a transport-thread spawn failure into a [`HostError`] without
+/// leaking the already-running child: mark the session dead, tell the stdin
+/// writer to drain, then reap the process (kill after a bounded wait).
+fn reap_failed_start(shared: &Arc<Shared>, stage: &str, err: std::io::Error) -> HostError {
+    shared.mark_dead("transport thread spawn failed");
+    if let Some(writer) = lock(&shared.writer).take() {
+        let _ = writer.send(WriterMsg::Close);
+    }
+    wait_child_exit(shared, Duration::from_secs(3));
+    HostError::Spawn(format!("{stage}: {err}"))
+}
+
 fn wait_child_exit(shared: &Arc<Shared>, grace: Duration) {
     let Some(mut child) = lock(&shared.child).take() else {
         return;
@@ -721,5 +737,81 @@ mod tests {
             read_capped_line(&mut after, 16).unwrap(),
             Some(CappedLine::Line("{\"ok\":true}".into()))
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn reap_failed_start_kills_the_child_and_marks_the_session_dead() {
+        // 2026-11-11 audit P0-3: a transport-thread spawn failure after the
+        // child already runs must not leak it. reap_failed_start is exactly
+        // what the map_err handlers call, so drive it directly against a
+        // child that never exits on its own.
+        let child = Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("sleep spawns");
+        let pid = child.id();
+        let shared = Arc::new(Shared {
+            state: Mutex::new(RunState::Running),
+            pending: Mutex::new(HashMap::new()),
+            writer: Mutex::new(None),
+            child: Mutex::new(Some(child)),
+            stderr_tail: Mutex::new(VecDeque::new()),
+            faults: Mutex::new(Vec::new()),
+        });
+        let started = std::time::Instant::now();
+        let err = reap_failed_start(&shared, "stdout thread", std::io::Error::other("io"));
+        assert!(matches!(err, HostError::Spawn(ref m) if m.contains("stdout thread")));
+        assert!(!shared.is_running());
+        match &*lock(&shared.state) {
+            RunState::Dead { reason } => {
+                assert_eq!(reason, "transport thread spawn failed")
+            }
+            RunState::Running => {
+                panic!("session must be dead after a failed start")
+            }
+        }
+        // Reaped, not leaked: the pid is gone from the process table
+        // (SIGKILL reaps immediately for `sleep`; a leaked child would still
+        // accept signal 0). The kill only fires after the 3s grace, so the
+        // whole call is bounded, not hanging.
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "reap must be bounded"
+        );
+        let alive = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("kill runs");
+        assert!(!alive.success(), "child pid {pid} survived the reap");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn reap_failed_start_reports_and_never_hangs_on_a_fast_exiting_child() {
+        let child = Command::new("true")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("true spawns");
+        let shared = Arc::new(Shared {
+            state: Mutex::new(RunState::Running),
+            pending: Mutex::new(HashMap::new()),
+            writer: Mutex::new(None),
+            child: Mutex::new(Some(child)),
+            stderr_tail: Mutex::new(VecDeque::new()),
+            faults: Mutex::new(Vec::new()),
+        });
+        let started = std::time::Instant::now();
+        let err = reap_failed_start(&shared, "stderr thread", std::io::Error::other("io"));
+        assert!(matches!(err, HostError::Spawn(ref m) if m.contains("stderr thread")));
+        assert!(!shared.is_running());
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
     }
 }

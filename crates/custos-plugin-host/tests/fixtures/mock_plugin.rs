@@ -13,6 +13,8 @@
 //! - env `MOCK_PLUGIN_SLOW_START_MS=<n>` — stall before the protocol loop,
 //!   so spawn + initialize blocks that long (writes `MOCK_PLUGIN_READY_FILE`
 //!   first, so tests can tell the stall is in flight);
+//! - env `MOCK_PLUGIN_LEAK_FD_LATCH=<path>` — leak a file descriptor to an
+//!   arbitrary file in every descendant (daemonize-style fd inheritance);
 //! - probe params: `die` (exit the process), `hang_ms` (delay the response
 //!   in a spawned thread so the read loop stays live), `garbage_before` /
 //!   `big_before` (emit a malformed / oversized line before the real
@@ -22,6 +24,10 @@
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
+use std::os::fd::AsFd as _;
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Mutex};
 
 fn reply(out: &Arc<Mutex<std::io::Stdout>>, id: Value, result: Value) {
@@ -102,6 +108,22 @@ fn main() {
                 let _ = std::fs::write(ready, b"ready");
             }
             std::thread::sleep(std::time::Duration::from_millis(ms));
+        }
+    }
+
+    // Leak-injection for the session tests: if the latch file is present,
+    // the fixture leaks a file descriptor to it in every descendant
+    // (daemonize-style fd inheritance) — the child must be reaped on a
+    // session-start failure even when the leaked fd keeps the transport
+    // pipes open (2026-11-11 audit P0-3).
+    #[cfg(unix)]
+    if let Ok(latch) = std::env::var("MOCK_PLUGIN_LEAK_FD_LATCH") {
+        if std::path::PathBuf::from(&latch).exists() {
+            let leaked = std::fs::File::open(&latch).expect("leak latch opens");
+            let leaked = leaked
+                .try_clone()
+                .expect("leak latch clones for the whole process lifetime");
+            let _ = std::fs::write(&latch, leaked.as_fd().as_raw_fd().to_le_bytes());
         }
     }
 
