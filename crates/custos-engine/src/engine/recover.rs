@@ -8,7 +8,17 @@ impl Engine {
     pub fn try_recover(&mut self, id: &ResourceId) -> Result<RecoveryRun, RecoverError> {
         let now = self.clock.now_unix_ms();
         {
-            let managed = &self.managed[id];
+            let Some(managed) = self.managed.get(id) else {
+                // Restored runs can reference resources removed from the
+                // config; recover must refuse, not panic the tick (2026-11-11
+                // audit P0-4).
+                tracing::warn!(
+                    target: "custos::engine",
+                    resource = id.as_str(),
+                    "recovery refused: resource no longer in the config"
+                );
+                return Err(RecoverError::Stopped);
+            };
             if !managed.resource.enabled
                 || managed.snapshot.status != HealthStatus::Unhealthy
                 || now < managed.cooldown_until_ms

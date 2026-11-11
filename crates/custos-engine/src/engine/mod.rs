@@ -1071,6 +1071,95 @@ mod tests {
         assert!(store.event_types().contains(&"recovery.outcome_unknown"));
     }
 
+    /// A waiting run restored from the store whose resource left the config
+    /// (config change + crash recovery) must cancel, not panic the tick on
+    /// `managed[&id]` (2026-11-11 audit P0-4).
+    #[test]
+    fn redrive_cancels_a_waiting_run_for_a_resource_no_longer_in_config() {
+        let (mut engine, store, _) = test_engine(
+            vec![resource(
+                "svc",
+                vec![plan("restart", 1, RiskLevel::Low)],
+                vec![],
+            )],
+            vec![(ResourceId::new("svc"), vec![])],
+            vec![vec![]],
+            vec![],
+        );
+        let run_id = RecoveryRunId::new("run-ghost");
+        let mut run = RecoveryRun::new(
+            run_id.clone(),
+            ResourceId::new("ghost"),
+            "failure threshold reached",
+            1_000,
+        );
+        run.status = RecoveryRunStatus::Waiting;
+        store.save_run(&run);
+
+        engine.resume_unfinished(); // queues the waiting run
+        let finished = engine.tick(); // must not panic
+        assert!(
+            finished.iter().all(|r| r.resource_id.as_str() != "ghost"),
+            "the ghost run must cancel, not drive: {finished:?}"
+        );
+        let cancelled = store.run(&run_id).expect("run persisted");
+        assert_eq!(cancelled.status, RecoveryRunStatus::Cancelled);
+    }
+
+    /// Waiters parked on a dependency key that no longer resolves to a
+    /// managed resource must be cancelled, not panic `wake_ready_waiters`
+    /// (2026-11-11 audit P0-4). Parked directly here because the only
+    /// runtime path that parks waiters (suspend_on) runs behind a
+    /// config-validated dependency edge.
+    #[test]
+    fn wake_ready_waiters_cancels_waiters_on_a_resource_no_longer_in_config() {
+        let (mut engine, store, _) = test_engine(
+            vec![resource(
+                "svc",
+                vec![plan("restart", 1, RiskLevel::Low)],
+                vec![],
+            )],
+            vec![(ResourceId::new("svc"), vec![])],
+            vec![vec![]],
+            vec![],
+        );
+        let run_id = RecoveryRunId::new("run-parked-ghost");
+        let mut run = RecoveryRun::new(
+            run_id.clone(),
+            ResourceId::new("app"),
+            "failure threshold reached",
+            1_000,
+        );
+        run.status = RecoveryRunStatus::Waiting;
+        engine.waiters.insert(ResourceId::new("ghost"), vec![run]);
+
+        let finished = engine.tick(); // must not panic
+        assert!(
+            finished.iter().all(|r| r.resource_id.as_str() != "app"),
+            "the parked run must cancel, not drive: {finished:?}"
+        );
+        let cancelled = store.run(&run_id).expect("run persisted");
+        assert_eq!(cancelled.status, RecoveryRunStatus::Cancelled);
+    }
+
+    /// Recovery on a resource id missing from `managed` must refuse, not
+    /// panic indexing `self.managed[id]` (2026-11-11 audit P0-4).
+    #[test]
+    fn try_recover_refuses_a_resource_no_longer_in_config() {
+        let (mut engine, _store, _) = test_engine(
+            vec![resource(
+                "svc",
+                vec![plan("restart", 1, RiskLevel::Low)],
+                vec![],
+            )],
+            vec![(ResourceId::new("svc"), vec![])],
+            vec![vec![]],
+            vec![],
+        );
+        let result = engine.try_recover(&ResourceId::new("ghost"));
+        assert!(matches!(result, Err(RecoverError::Stopped)));
+    }
+
     /// A collector wired as the notification sink, for assertions.
     type EventCollector = std::sync::Arc<std::sync::Mutex<Vec<NotificationEvent>>>;
 

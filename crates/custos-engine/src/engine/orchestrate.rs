@@ -36,6 +36,20 @@ impl Engine {
         if run.status != RecoveryRunStatus::Waiting {
             return; // safety: nothing to resume
         }
+        if !self.managed.contains_key(&id) {
+            // Crash recovery replays runs from the store; one whose
+            // resource left the config (config change + restart) must be
+            // cancelled, not panic the whole tick on `managed[&id]`
+            // (2026-11-11 audit P0-4).
+            tracing::warn!(
+                target: "custos::engine",
+                run = run.id.as_str(),
+                resource = id.as_str(),
+                "waiting run references a resource no longer in the config; cancelling"
+            );
+            self.finish_cancelled(run);
+            return;
+        }
         if self.active_runs.contains(&id) {
             // The run was already popped from its queue; re-queue it so it
             // is tried again next tick instead of being orphaned forever.
@@ -84,6 +98,24 @@ impl Engine {
             .map(|(dep, _)| dep.clone())
             .collect();
         for dep in deps {
+            // A dep key that no longer resolves to a managed resource (config
+            // change + crash recovery) holds nothing but stale parked runs;
+            // cancel them instead of panicking the tick on `managed[&dep]`
+            // (2026-11-11 audit P0-4).
+            if !self.managed.contains_key(&dep) {
+                let stale = self.waiters.remove(&dep).unwrap_or_default();
+                tracing::warn!(
+                    target: "custos::engine",
+                    dependency = dep.as_str(),
+                    count = stale.len(),
+                    "waiter dependency no longer in the config; cancelling parked waiters"
+                );
+                for run in stale {
+                    self.wait_cycles.remove(&run.id);
+                    self.finish_cancelled(run);
+                }
+                continue;
+            }
             let now = self.clock.now_unix_ms();
             // The observation pass at the top of `tick` probes every due
             // resource through ProbeDueTracker; re-probing here bypassed the
