@@ -2,6 +2,7 @@
 //! never bypass the core (docs/guide/agent-brief.md rule 4).
 
 use custos_model::{ActionOutcome, ActionSpec};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,6 +29,22 @@ where
 /// executor actually honors the deadline it was handed.
 pub const EXECUTOR_WATCHDOG_GRACE_MS: u64 = 5_000;
 
+/// Number of watchdog workers still parked on an executor past their
+/// deadline (2026-11-11 audit P0-2). Threads cannot be force-killed in
+/// Rust, so a hung executor leaks one worker (and the executor `Arc`) per
+/// attempt; the counter makes the leak observable — log scrapes and tests
+/// assert it stays at zero for executors that honor their deadline. The
+/// builtin executor always returns since the P0-1 drain deadline; plugin
+/// executors that can hang are visible here until they are moved to
+/// out-of-process isolation.
+static LEAKED_WATCHDOG_WORKERS: AtomicUsize = AtomicUsize::new(0);
+
+/// Watchdog workers currently parked past their deadline. Zero means every
+/// executor returned within `timeout + EXECUTOR_WATCHDOG_GRACE_MS`.
+pub fn leaked_watchdog_workers() -> usize {
+    LEAKED_WATCHDOG_WORKERS.load(Ordering::Relaxed)
+}
+
 /// Runs one action under a hard watchdog (C20). Recovery actions execute on
 /// the tick thread, so an executor that hangs — a plugin ignoring its
 /// deadline, or the builtin executor blocked on a daemon that escaped the
@@ -35,8 +52,9 @@ pub const EXECUTOR_WATCHDOG_GRACE_MS: u64 = 5_000;
 /// The executor runs on a worker thread; past `timeout +
 /// EXECUTOR_WATCHDOG_GRACE_MS` the result is unknowable (§6.6), the attempt
 /// records [`ActionOutcome::OutcomeUnknown`] and the tick moves on. The
-/// worker stays parked on the executor until it finally returns; a result
-/// arriving that late is logged and discarded.
+/// worker stays parked on the executor until it finally returns (counted in
+/// [`leaked_watchdog_workers`]); a result arriving that late is logged and
+/// discarded.
 pub fn execute_with_watchdog(
     executor: Arc<dyn ActionExecutor>,
     action: &ActionSpec,
@@ -61,8 +79,10 @@ fn execute_with_deadline(
     std::thread::spawn(move || {
         let outcome = executor.execute(&owned, timeout);
         if tx.send(outcome).is_err() {
+            LEAKED_WATCHDOG_WORKERS.fetch_sub(1, Ordering::Relaxed);
             tracing::warn!(
                 target: "custos::engine",
+                leaked = LEAKED_WATCHDOG_WORKERS.load(Ordering::Relaxed),
                 "action finished after the watchdog gave up; result discarded"
             );
         }
@@ -70,6 +90,7 @@ fn execute_with_deadline(
     match rx.recv_timeout(deadline) {
         Ok(outcome) => outcome,
         Err(_) => {
+            LEAKED_WATCHDOG_WORKERS.fetch_add(1, Ordering::Relaxed);
             tracing::warn!(
                 target: "custos::engine",
                 "action exceeded its watchdog deadline; outcome unknown (§6.6)"
@@ -159,8 +180,15 @@ mod tests {
         assert_eq!(outcome, ActionOutcome::Succeeded);
     }
 
+    /// The leak counter is process-global; these two tests assert against it
+    /// and must not observe each other's parked workers.
+    static LEAK_COUNTER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn watchdog_declares_unknown_when_the_executor_never_returns() {
+        let _order = LEAK_COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let (gate_tx, gate_rx) = std::sync::mpsc::channel::<()>();
         let gate_rx = std::sync::Mutex::new(gate_rx);
         let executor: Arc<dyn ActionExecutor> = Arc::new(move |_: &ActionSpec, _: Duration| {
@@ -168,6 +196,7 @@ mod tests {
             ActionOutcome::Succeeded
         });
         let started = std::time::Instant::now();
+        let baseline = leaked_watchdog_workers();
         let outcome = execute_with_deadline(
             executor,
             &action(),
@@ -179,8 +208,40 @@ mod tests {
             started.elapsed() < Duration::from_secs(5),
             "watchdog waited far past its deadline"
         );
+        // The worker is parked on the gated executor: exactly one leaked
+        // worker is outstanding (2026-11-11 audit P0-2).
+        assert_eq!(
+            leaked_watchdog_workers(),
+            baseline + 1,
+            "a hung executor must hold exactly one worker"
+        );
         // Release the parked worker; the late result must be dropped, not
-        // delivered or panicked on.
+        // delivered or panicked on — and the leak counter must clear.
         drop(gate_tx);
+        let cleared = std::time::Instant::now();
+        while leaked_watchdog_workers() > baseline {
+            assert!(
+                cleared.elapsed() < Duration::from_secs(5),
+                "released worker never left the leak counter"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn watchdog_leaks_no_worker_when_the_executor_honors_its_deadline() {
+        let _order = LEAK_COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let baseline = leaked_watchdog_workers();
+        let executor: Arc<dyn ActionExecutor> =
+            Arc::new(|_: &ActionSpec, _: Duration| ActionOutcome::Succeeded);
+        let outcome = execute_with_watchdog(executor, &action(), Duration::from_millis(50));
+        assert_eq!(outcome, ActionOutcome::Succeeded);
+        assert_eq!(
+            leaked_watchdog_workers(),
+            baseline,
+            "a timely executor must not park a worker past its deadline"
+        );
     }
 }
