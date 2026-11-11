@@ -9,6 +9,11 @@ use std::io::Read;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
+
 /// Result of one controlled execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecResult {
@@ -91,14 +96,17 @@ pub fn run_controlled(argv: &[String], timeout: Duration, max_output_bytes: usiz
 
     // Reader threads drain both pipes to EOF so the child can never block on
     // a full pipe; each keeps at most `max_output_bytes` and a truncation flag.
-    let stdout_reader = child
-        .stdout
-        .take()
-        .map(|mut pipe| std::thread::spawn(move || read_capped(&mut pipe, max_output_bytes)));
-    let stderr_reader = child
-        .stderr
-        .take()
-        .map(|mut pipe| std::thread::spawn(move || read_capped(&mut pipe, max_output_bytes)));
+    // The drain is deadline-bounded: a daemonizing child can hand its pipe
+    // write ends to a grandchild that escapes the kill (setsid), in which
+    // case EOF never comes and an unbounded join would hang this probe
+    // forever on the caller's thread (2026-11-11 audit P0-1).
+    let drain_deadline = Instant::now() + timeout + DRAIN_GRACE;
+    let stdout_reader = child.stdout.take().map(|mut pipe| {
+        std::thread::spawn(move || read_capped(&mut pipe, max_output_bytes, drain_deadline))
+    });
+    let stderr_reader = child.stderr.take().map(|mut pipe| {
+        std::thread::spawn(move || read_capped(&mut pipe, max_output_bytes, drain_deadline))
+    });
 
     let deadline = Instant::now() + timeout;
     loop {
@@ -130,7 +138,9 @@ pub fn run_controlled(argv: &[String], timeout: Duration, max_output_bytes: usiz
                 if Instant::now() >= deadline {
                     kill_tree(&child);
                     let _ = child.wait();
-                    // Readers observe EOF once the tree is dead.
+                    // Readers drain until EOF or the drain deadline, whichever
+                    // comes first (an escaped grandchild can hold the write
+                    // end open past the kill).
                     let _ = join_reader(stdout_reader);
                     let _ = join_reader(stderr_reader);
                     return ExecResult::TimedOut;
@@ -154,14 +164,126 @@ pub fn run_controlled(argv: &[String], timeout: Duration, max_output_bytes: usiz
 
 type CappedOutput = (String, bool);
 
-fn read_capped<R: Read>(pipe: &mut R, max_bytes: usize) -> CappedOutput {
+/// How long the pipe readers keep draining after the kill before giving up.
+/// Tail output after a normal exit drains in milliseconds; 2s only bites in
+/// the pathological case where an escaped grandchild holds the write end.
+const DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+/// One non-blocking step of the deadline-bounded pipe reader.
+enum ReadStep {
+    /// Bytes were readable and `n` were read into the buffer.
+    Data(usize),
+    /// EOF: every write end is closed, the pipe is done.
+    Eof,
+    /// No data yet but a write end is still open; wait a bit.
+    Busy,
+}
+
+/// Deadline-bounded pipe reading over the platform's non-blocking peek
+/// primitive: `poll(2)` on Unix, `PeekNamedPipe` on Windows. The pipe stays
+/// in blocking mode; the peek only decides whether a read can proceed.
+trait BoundedPipe: Read {
+    fn read_step(&mut self, buf: &mut [u8], deadline: Instant) -> ReadStep;
+}
+
+#[cfg(unix)]
+impl<R: Read + AsRawFd> BoundedPipe for R {
+    fn read_step(&mut self, buf: &mut [u8], deadline: Instant) -> ReadStep {
+        let fd = self.as_raw_fd();
+        let mut poll_fd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let timeout_ms = remaining.as_millis().min(i32::MAX as u128) as i32;
+        // poll() on a blocking fd only promises readiness; the read itself
+        // then returns whatever is in the pipe without blocking.
+        let ready = unsafe { libc::poll(&mut poll_fd, 1, timeout_ms) };
+        if ready == 0 {
+            // The wait spanned the whole remaining budget: deadline reached.
+            return ReadStep::Eof;
+        }
+        if ready < 0 {
+            // EINTR gets another chance; anything else is unrecoverable here.
+            let interrupted = std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR);
+            return if interrupted {
+                ReadStep::Busy
+            } else {
+                ReadStep::Eof
+            };
+        }
+        if poll_fd.revents & libc::POLLIN == 0 {
+            // HUP/ERR/NVAL with no readable data: no writer will feed us.
+            return ReadStep::Eof;
+        }
+        match Read::read(self, buf) {
+            Ok(0) | Err(_) => ReadStep::Eof,
+            Ok(n) => ReadStep::Data(n),
+        }
+    }
+}
+
+#[cfg(windows)]
+impl<R: Read + AsRawHandle> BoundedPipe for R {
+    fn read_step(&mut self, buf: &mut [u8], _deadline: Instant) -> ReadStep {
+        // PeekNamedPipe reports available bytes without blocking; while a
+        // grandchild holds the write end, available stays 0 until the
+        // deadline ends the loop.
+        let handle = self.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+        let mut available: u32 = 0;
+        let ok = unsafe {
+            windows_sys::Win32::System::Pipes::PeekNamedPipe(
+                handle,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            // Broken pipe: every write end is closed, so this is real EOF.
+            return ReadStep::Eof;
+        }
+        if available == 0 {
+            return ReadStep::Busy;
+        }
+        let want = buf.len().min(available as usize);
+        match Read::read(self, &mut buf[..want]) {
+            Ok(0) | Err(_) => ReadStep::Eof,
+            Ok(n) => ReadStep::Data(n),
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+impl<R: Read> BoundedPipe for R {
+    fn read_step(&mut self, buf: &mut [u8], _deadline: Instant) -> ReadStep {
+        // No peek primitive on exotic hosts: keep the historical blocking
+        // read; the deadline check in read_capped still bounds the loop
+        // between chunks.
+        match self.read(buf) {
+            Ok(0) | Err(_) => ReadStep::Eof,
+            Ok(n) => ReadStep::Data(n),
+        }
+    }
+}
+
+fn read_capped<R: BoundedPipe>(pipe: &mut R, max_bytes: usize, deadline: Instant) -> CappedOutput {
     let mut kept = Vec::with_capacity(max_bytes.min(8 * 1024));
     let mut buf = [0u8; 4096];
     let mut truncated = false;
     loop {
-        match pipe.read(&mut buf) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => {
+        if Instant::now() >= deadline {
+            // A write end is still open somewhere the kill could not reach;
+            // give up on the tail rather than hanging the caller forever.
+            break;
+        }
+        match pipe.read_step(&mut buf, deadline) {
+            ReadStep::Eof => break,
+            ReadStep::Busy => std::thread::sleep(Duration::from_millis(10)),
+            ReadStep::Data(n) => {
                 let room = max_bytes.saturating_sub(kept.len());
                 if n > room {
                     truncated = true;
@@ -405,6 +527,52 @@ mod tests {
             "process tree survived the timeout: {}",
             String::from_utf8_lossy(&orphans.stdout)
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn escaped_pipe_writer_does_not_block_return() {
+        let start = Instant::now();
+        // Daemonize-style leak: the backgrounded sleeper inherits the stdout
+        // write end and outlives the direct child, so the reader never sees
+        // EOF. The drain deadline must bound the wait (2026-11-11 audit P0-1).
+        let marker = format!("sleep 60.{}", std::process::id());
+        let script = format!("{marker} & echo done");
+        let result = run_controlled(&argv("sh", &["-c", &script]), Duration::from_secs(5), 4096);
+        assert!(
+            matches!(&result, ExecResult::Succeeded { stdout, .. } if stdout.trim() == "done"),
+            "tail written before the leak must survive: {result:?}"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(15),
+            "must not wait for the leaked sleeper"
+        );
+        // Best-effort cleanup; the sleeper also self-terminates within 60s.
+        let _ = Command::new("pkill").args(["-f", &marker]).status();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn timeout_returns_despite_setsid_grandchild_holding_pipe() {
+        let start = Instant::now();
+        // setsid moves the grandchild out of the killed process group while
+        // it keeps the stdout write end, so EOF never comes after the kill.
+        // Without the drain deadline this join hangs until the grandchild
+        // exits (2026-11-11 audit P0-1).
+        let marker = format!("sleep 60.{}", std::process::id());
+        let script = format!("setsid {marker} 2>/dev/null & exec sleep 30");
+        let result = run_controlled(
+            &argv("sh", &["-c", &script]),
+            Duration::from_millis(300),
+            4096,
+        );
+        assert_eq!(result, ExecResult::TimedOut);
+        assert!(
+            start.elapsed() < Duration::from_secs(15),
+            "join must not wait for the escaped grandchild"
+        );
+        // Best-effort cleanup; the sleeper also self-terminates within 60s.
+        let _ = Command::new("pkill").args(["-f", &marker]).status();
     }
 
     #[test]
