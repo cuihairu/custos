@@ -14,8 +14,12 @@ use std::sync::Arc;
 
 /// Hands events to a worker thread that owns the engine dispatch. Dropping
 /// the spool closes the channel; the worker drains what is queued and exits.
+/// `tx` is `None` when the worker thread could not be spawned: the spool
+/// degrades to pure inline dispatch rather than panicking the runtime
+/// assembly (C18: notifications never take recovery down, 2026-11-11 audit
+/// P1-7).
 pub struct SpooledDispatch<Q: NotificationQueue + Send + Sync + 'static> {
-    tx: SyncSender<NotificationEvent>,
+    tx: Option<SyncSender<NotificationEvent>>,
     /// Shared with the worker; used by the inline fallback path.
     engine: Arc<NotificationEngine<Q>>,
 }
@@ -26,7 +30,7 @@ impl<Q: NotificationQueue + Send + Sync + 'static> SpooledDispatch<Q> {
     pub fn spawn(engine: Arc<NotificationEngine<Q>>, capacity: usize) -> Self {
         let (tx, rx) = std::sync::mpsc::sync_channel(capacity);
         let worker_engine = engine.clone();
-        std::thread::Builder::new()
+        let worker = std::thread::Builder::new()
             .name("notify-dispatch".into())
             .spawn(move || {
                 while let Ok(event) = rx.recv() {
@@ -41,21 +45,36 @@ impl<Q: NotificationQueue + Send + Sync + 'static> SpooledDispatch<Q> {
                         );
                     }
                 }
-            })
-            .expect("spawn notify dispatch worker");
-        Self { tx, engine }
+            });
+        match worker {
+            Ok(_) => Self {
+                tx: Some(tx),
+                engine,
+            },
+            Err(err) => {
+                tracing::warn!(
+                    target: "custos::runtime",
+                    error = %err,
+                    "notify dispatch worker failed to spawn; every dispatch runs inline"
+                );
+                Self { tx: None, engine }
+            }
+        }
     }
 
     /// Hands the event to the worker. Never blocks on SQLite: a spool with
-    /// room takes the handoff; a saturated spool falls back to one inline
-    /// dispatch instead of dropping the event. The inline event may jump
-    /// queued ones in the dedup window under extreme overload — the
+    /// room takes the handoff; a saturated (or absent) worker falls back to
+    /// one inline dispatch instead of dropping the event. The inline event
+    /// may jump queued ones in the dedup window under extreme overload — the
     /// alternative is losing the notification.
     pub fn dispatch(&self, event: &NotificationEvent) {
-        match self.tx.try_send(event.clone()) {
-            Ok(()) => {}
-            Err(TrySendError::Full(event)) => self.inline(&event),
-            Err(TrySendError::Disconnected(event)) => self.inline(&event),
+        match &self.tx {
+            Some(tx) => match tx.try_send(event.clone()) {
+                Ok(()) => {}
+                Err(TrySendError::Full(event)) => self.inline(&event),
+                Err(TrySendError::Disconnected(event)) => self.inline(&event),
+            },
+            None => self.inline(event),
         }
     }
 
@@ -192,6 +211,25 @@ mod tests {
         }
         let got = wait_for(&queue, 8);
         assert_eq!(got, 8, "every spooled event is enqueued by the worker");
+    }
+
+    #[test]
+    fn degraded_spool_without_worker_still_dispatches_inline() {
+        // 2026-11-11 audit P1-7: a worker thread that could not be spawned
+        // must degrade the spool to pure inline dispatch (tx: None) instead
+        // of panicking the runtime assembly (C18).
+        let queue = Arc::new(CountingQueue {
+            count: Mutex::new(0),
+        });
+        let engine = Arc::new(NotificationEngine::new(config(), queue.clone()));
+        let spool = SpooledDispatch { tx: None, engine };
+        spool.dispatch(&event(1));
+        spool.dispatch(&event(2));
+        assert_eq!(
+            *queue.count.lock().unwrap(),
+            2,
+            "events must still enqueue without the worker"
+        );
     }
 
     #[test]
