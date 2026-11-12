@@ -548,3 +548,9 @@
 - [x] 六项均按 复核 2026-11-12 追加当日证据（逐条实测命令与读数，见各条目行内），沿用 2026-11-04/05/06/07 的复核口径
 - [x] 无未勾项可推进时不新造任务：本批仅落账复核证据，不新增 `- [ ]` 项、不动生产代码
 - [x] 顺带修复既有 flaky：`concurrent_network_operations_never_race` 在全量并行下偶发 `mutex free at test start: WouldBlock`（todo.md:527 已记档）——根因是它与 `contending_network_operation_waits_for_the_in_flight_one` 并行运行时后者先执行完释放锁，前者 try_lock 成功后再无锁可断言竞态拒绝路径。修复：新增 `NETWORK_OPS_TEST_LOCK` 静态互斥锁串行化两测试（crates/custos-toolbox/src/platform_tools.rs:254-258，同 executor.rs:185 LEAK_COUNTER_TEST_LOCK 范式）。验证：`cargo test -p custos-toolbox --lib` 连续 5 轮 24/24 绿；`cargo test --workspace` 616 passed / 0 failed；clippy -D warnings 0 错
+## Codex 深审发现（2026-11-12，luna profile 近5 commit 审核，0C/1M/3m，待修）
+
+- [ ] [M] 看门狗泄漏计数修超时/迟到结果竞态（crates/custos-engine/src/executor.rs:79-99）——worker 仅在 send 失败时减计数，主线程 Err 分支提前减导致双重扣减
+- [ ] [m] inline 降级日志文案按实际路径区分（crates/custos-notify/src/spool.rs:83-92）——缺 tx 的降级被记成 spool saved
+- [ ] [m] 刷新 todo.md:531-536 修复锚点行号（P0-1/P0-3/P0-4/P1-7 引用已漂移）
+- [ ] [m] todo.md:224 环境复核证据补可复现命令输出
