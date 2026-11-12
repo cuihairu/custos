@@ -252,6 +252,12 @@ mod tests {
     use custos_platform::{PlatformError, PlatformResult};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    /// `NETWORK_OPS` is process-global: the two tests below hold it, so they
+    /// must be serialized or they observe each other's in-flight guard and
+    /// panic on the free-mutex precondition (previously flaky under full
+    /// parallel runs).
+    static NETWORK_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     struct RefusingReboot;
 
     impl custos_platform::RebootController for RefusingReboot {
@@ -316,6 +322,9 @@ mod tests {
 
     #[test]
     fn concurrent_network_operations_never_race() {
+        let _order = NETWORK_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         // Hold the global network mutex like an in-flight operation, then
         // exercise the timeout refusal through the lock helper with a
         // zero wait (a full execute() would block for NETWORK_OPS_WAIT_MS).
@@ -355,6 +364,9 @@ mod tests {
 
     #[test]
     fn contending_network_operation_waits_for_the_in_flight_one() {
+        let _order = NETWORK_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         // C9: with another network operation in flight, a contender used
         // to be refused instantly — the engine recorded a failed attempt
         // (burning the ladder) for what is only contention. It must wait,
