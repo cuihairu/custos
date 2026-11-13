@@ -554,3 +554,4 @@
 - [ ] [m] inline 降级日志文案按实际路径区分（crates/custos-notify/src/spool.rs:83-92）——缺 tx 的降级被记成 spool saved
 - [ ] [m] 刷新 todo.md:531-536 修复锚点行号（P0-1/P0-3/P0-4/P1-7 引用已漂移）
 - [ ] [m] todo.md:224 环境复核证据补可复现命令输出
+- [ ] LUCI-ISTORE-001 [P1] LuCI 界面完善 + iStore 上架包（2026-11-13 用户令「写界面并出包，计划上 iStore」）：①status.htm 增强（api_overview JSON：procd+资源健康计数+audit/incident 近 N 条，四卡渲染+10s 自动刷新）②CBI 补全（toml 路径选择+通知三通道最小字段，走 init.d 接线不重写配置系统）③iStore 上架规格联网核实落 docs/analysis/istore-publishing-2026-11-14.md ④ipk 规范化（CONTROL 完整字段/conffiles 标记 custos.toml/postinst prerm 幂等/图标/双语 Description）⑤多架构 x86_64+aarch64 musl 出包（nightly 补 aarch64-musl 腿）⑥真机 192.168.5.11 升级安装验收（conffile 不覆盖/界面真数据/procd 探测继续）。验收：真机升级路径全过 + 界面各卡有真数据截图 + ipk 结构检查 + cargo/lua 门禁绿。
