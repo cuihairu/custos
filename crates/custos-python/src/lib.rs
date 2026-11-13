@@ -41,11 +41,8 @@ fn to_python(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
             } else if let Some(u) = n.as_u64() {
                 u.into_pyobject(py)?.unbind().into_any()
             } else {
-                n.as_f64()
-                    .into_pyobject(py)
-                    .map_err(|e| PyValueError::new_err(e.to_string()))?
-                    .unbind()
-                    .into_any()
+                // f64 IntoPyObject is Infallible: no map_err needed
+                n.as_f64().into_pyobject(py)?.unbind().into_any()
             }
         }
         Value::String(s) => s.into_pyobject(py)?.unbind().into_any(),
