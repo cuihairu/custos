@@ -108,8 +108,10 @@ EOF
 chmod 755 "$R"/CONTROL/postinst "$R"/CONTROL/prerm
 mkdir -p "$OUT"
 tar -czf "$R/control.tar.gz" -C "$R/CONTROL" ./control ./postinst ./prerm ./conffiles
-tar -czf "$R/data.tar.gz" -C "$R/data" \
-	etc/config/custos etc/custos/custos.toml etc/init.d/custos usr/bin/custos
+# Tar the whole staged tree (directory entries included): opkg does not
+# create missing parent dirs for file-only listings (new subdirectories).
+# Root ownership regardless of the builder's uid (files ship to the router).
+tar --owner=0 --group=0 --numeric-owner -czf "$R/data.tar.gz" -C "$R/data" etc usr
 echo "2.0" > "$R/debian-binary"
 tar -czf "$OUT/custos_${REL}_${ARCH}.ipk" -C "$R" \
 	./debian-binary ./control.tar.gz ./data.tar.gz
@@ -118,10 +120,12 @@ echo "built: $OUT/custos_${REL}_${ARCH}.ipk"
 # ---- luci-app-custos (all) -------------------------------------------------
 R="$STAGE/luci"
 mkdir -p "$R/data/usr/lib/lua/luci/controller" "$R/data/usr/lib/lua/luci/model/cbi" \
-	"$R/data/usr/lib/lua/luci/view/custos" "$R/CONTROL"
+	"$R/data/usr/lib/lua/luci/view/custos" "$R/data/usr/lib/lua/luci/custos" "$R/CONTROL"
 cp "$SRC/usr/lib/lua/luci/controller/custos.lua" "$R/data/usr/lib/lua/luci/controller/"
 cp "$SRC/usr/lib/lua/luci/model/cbi/custos.lua" "$R/data/usr/lib/lua/luci/model/cbi/"
 cp "$SRC/usr/lib/lua/luci/view/custos/status.htm" "$R/data/usr/lib/lua/luci/view/custos/"
+cp "$SRC/usr/lib/lua/luci/view/custos/resources.htm" "$R/data/usr/lib/lua/luci/view/custos/"
+cp "$SRC/usr/lib/lua/luci/custos/tomledit.lua" "$R/data/usr/lib/lua/luci/custos/"
 
 cat > "$R/CONTROL/postinst" <<'EOF'
 #!/bin/sh
@@ -147,16 +151,13 @@ SourceDateEpoch: 1794931200
 Maintainer: cuihairu <chuihairu@gmail.com>
 Architecture: all
 Installed-Size: $SIZE
-Description: LuCI interface for custos: settings page and live status dashboard (health, events, incidents, recovery runs).
- custos 的 LuCI 界面：设置页与实时状态面板（健康、事件、事故、恢复运行）。
+Description: LuCI interface for custos: settings page, live status dashboard (health, events, incidents, recovery runs) and a monitoring-resource / recovery-policy editor.
+ custos 的 LuCI 界面：设置页、实时状态面板（健康、事件、事故、恢复运行）与监控资源/恢复策略编辑器。
 EOF
 
 chmod 755 "$R"/CONTROL/postinst "$R"/CONTROL/prerm
 tar -czf "$R/control.tar.gz" -C "$R/CONTROL" ./control ./postinst ./prerm
-tar -czf "$R/data.tar.gz" -C "$R/data" \
-	usr/lib/lua/luci/controller/custos.lua \
-	usr/lib/lua/luci/model/cbi/custos.lua \
-	usr/lib/lua/luci/view/custos/status.htm
+tar --owner=0 --group=0 --numeric-owner -czf "$R/data.tar.gz" -C "$R/data" usr
 echo "2.0" > "$R/debian-binary"
 tar -czf "$OUT/luci-app-custos_${REL}_all.ipk" -C "$R" \
 	./debian-binary ./control.tar.gz ./data.tar.gz
@@ -196,9 +197,7 @@ EOF
 
 chmod 755 "$R"/CONTROL/postinst "$R"/CONTROL/prerm
 tar -czf "$R/control.tar.gz" -C "$R/CONTROL" ./control ./postinst ./prerm
-tar -czf "$R/data.tar.gz" -C "$R/data" \
-	usr/lib/opkg/meta/custos.json \
-	www/luci-static/resources/app-icons/custos.png
+tar --owner=0 --group=0 --numeric-owner -czf "$R/data.tar.gz" -C "$R/data" usr www
 echo "2.0" > "$R/debian-binary"
 tar -czf "$OUT/app-meta-custos_${REL}_all.ipk" -C "$R" \
 	./debian-binary ./control.tar.gz ./data.tar.gz

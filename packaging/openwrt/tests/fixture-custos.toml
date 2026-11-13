@@ -1,0 +1,37 @@
+version = 1
+
+# OpenWrt 自身
+[[resources]]
+id = "wan"
+type = "network-interface"
+
+[resources.probe]
+interface = "eth0"
+interval_ms = 10000
+
+# 默认网关
+[[resources]]
+id = "gateway"
+type = "default-gateway"
+
+[resources.probe]
+interval_ms = 10000
+
+# dnsmasq 进程
+[[resources]]
+id = "dnsmasq"
+type = "custom-command"
+
+[resources.probe]
+command = ["sh", "-c", "pidof dnsmasq | grep -q . && echo OK || exit 1"]
+interval_ms = 10000
+
+# 网关连通性
+[[resources]]
+id = "lan-host"
+type = "icmp"
+
+[resources.probe]
+host = "192.168.5.1"
+timeout_ms = 3000
+interval_ms = 10000

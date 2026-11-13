@@ -1,0 +1,465 @@
+<%+header%>
+<h2><a id="content" name="content"><%:监控资源%></a></h2>
+
+<p><%:编辑监控资源与恢复策略（/etc/custos/custos.toml）。每次写回前自动备份为 custos.toml.bak，写回内容先通过 custos validate 校验，通过后才重启服务；校验失败则回滚并显示错误行号。%></p>
+
+<div id="custos-error" class="alert-message warning" style="display:none"></div>
+<pre id="custos-error-output" style="display:none; white-space:pre-wrap"></pre>
+<div id="custos-ok" class="alert-message success" style="display:none"></div>
+
+<div class="cbi-map">
+	<fieldset class="cbi-section">
+		<legend><%:资源列表%></legend>
+		<table class="table" id="custos-list">
+			<tr><th>id</th><th><%:类型%></th><th><%:依赖%></th><th><%:健康%></th><th><%:恢复计划%></th><th><%:操作%></th></tr>
+		</table>
+		<input type="button" class="cbi-button cbi-button-add" id="custos-add" value="<%:新建资源%>" />
+	</fieldset>
+
+	<fieldset class="cbi-section" id="custos-form" style="display:none">
+		<legend id="custos-form-title"><%:编辑资源%></legend>
+		<table class="table">
+			<tr><td><%:资源 id%></td><td><input type="text" id="f-id" /></td></tr>
+			<tr><td><%:类型%></td>
+				<td><select id="f-type">
+					<option value="network-interface">network-interface</option>
+					<option value="default-gateway">default-gateway</option>
+					<option value="custom-command">custom-command</option>
+					<option value="icmp">icmp</option>
+					<option value="service">service</option>
+				</select></td></tr>
+			<tr><td><%:显示名称%></td><td><input type="text" id="f-display" /></td></tr>
+			<tr><td><%:启用%></td><td><input type="checkbox" id="f-enabled" /></td></tr>
+			<tr><td><%:依赖资源%></td><td><input type="text" id="f-depends" /></td></tr>
+			<tr class="probe-row"><td><%:探测间隔 (ms)%></td><td><input type="text" id="f-interval" /></td></tr>
+			<tr class="probe-row"><td><%:探测超时 (ms)%></td><td><input type="text" id="f-timeout" /></td></tr>
+			<tr class="probe-row" id="row-interface"><td><%:接口名%></td><td><input type="text" id="f-interface" /></td></tr>
+			<tr class="probe-row" id="row-command"><td><%:检查命令%></td>
+				<td><textarea id="f-command" rows="3" style="width:100%"></textarea>
+				<div style="color:#888"><%:每行一个参数，例如第一行 sh、第二行 -c、第三行检查命令%></div></td></tr>
+			<tr class="probe-row" id="row-host"><td><%:目标主机%></td><td><input type="text" id="f-host" /></td></tr>
+			<tr class="probe-row" id="row-unit"><td><%:服务单元%></td><td><input type="text" id="f-unit" /></td></tr>
+			<tr><td><%:失败阈值%></td><td><input type="text" id="f-failure" /></td></tr>
+			<tr><td><%:成功阈值%></td><td><input type="text" id="f-success" /></td></tr>
+		</table>
+
+		<fieldset class="cbi-section" id="custos-plans">
+			<legend><%:恢复计划%></legend>
+			<div id="f-plans"></div>
+			<input type="button" class="cbi-button cbi-button-add" id="custos-plan-add" value="<%:添加恢复计划%>" />
+		</fieldset>
+
+		<label id="custos-highrisk" style="display:none">
+			<input type="checkbox" id="f-confirm" />
+			<%:我已确认上述高危动作的作用范围、前置条件与后果%>
+		</label>
+
+		<div>
+			<input type="button" class="cbi-button cbi-button-save" id="custos-save" value="<%:保存并应用%>" />
+			<input type="button" class="cbi-button" id="custos-raw-edit" value="<%:高级 TOML 模式%>" />
+			<input type="button" class="cbi-button cbi-button-remove" id="custos-cancel" value="<%:取消%>" />
+		</div>
+	</fieldset>
+
+	<fieldset class="cbi-section" id="custos-raw" style="display:none">
+		<legend><%:高级 TOML 直编%></legend>
+		<div style="color:#888"><%:直接编辑此资源的 TOML 块。此模式支持任意类型与字段；保存前由 custos validate 校验，格式错误会回显行号。%></div>
+		<textarea id="custos-raw-text" rows="24" style="width:100%"></textarea>
+		<div>
+			<input type="button" class="cbi-button cbi-button-save" id="custos-raw-save" value="<%:校验并保存%>" />
+			<input type="button" class="cbi-button cbi-button-remove" id="custos-raw-cancel" value="<%:返回%>" />
+		</div>
+	</fieldset>
+</div>
+
+<script type="text/javascript">
+(function() {
+	'use strict';
+	var TOKEN = '<%=token%>';
+	var API = '/cgi-bin/luci/admin/services/custos/api';
+	// Types with the structured form (mirrors SUPPORTED_TYPES in the
+	// controller); anything else opens in the raw textarea mode.
+	var SUPPORTED = {
+		'network-interface': ['row-interface'],
+		'default-gateway': [],
+		'custom-command': ['row-command'],
+		'icmp': ['row-host'],
+		'service': ['row-unit']
+	};
+	var resources = [];
+	var editing = null;
+
+	function el(id) { return document.getElementById(id); }
+	function val(id) { return el(id).value; }
+	function set_text(id, t) { var e = el(id); if (e) e.textContent = t; }
+	function show(id, on) { el(id).style.display = on ? '' : 'none'; }
+
+	function error_banner(msg, output) {
+		set_text('custos-error', msg || '');
+		show('custos-error', !!msg);
+		var out = el('custos-error-output');
+		out.textContent = output || '';
+		show('custos-error-output', !!output);
+	}
+	function ok_banner(msg) {
+		set_text('custos-ok', msg || '');
+		show('custos-ok', !!msg);
+	}
+
+	function num_or_null(id) {
+		var t = val(id).replace(/^\s+|\s+$/g, '');
+		if (!t) return null;
+		var n = parseInt(t, 10);
+		return isNaN(n) ? null : n;
+	}
+
+	function split_list(text) {
+		var parts = text.split(/[\s,]+/);
+		var out = [];
+		for (var i = 0; i < parts.length; i++) {
+			if (parts[i]) out.push(parts[i]);
+		}
+		return out;
+	}
+
+	function api_get_resources() {
+		return fetch(API + '/resources').then(function(r) { return r.json(); });
+	}
+
+	function api_write(payload) {
+		return fetch(API + '/write', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+			body: 'payload=' + encodeURIComponent(JSON.stringify(payload)) +
+				'&token=' + encodeURIComponent(TOKEN)
+		}).then(function(r) { return r.json(); });
+	}
+
+	function make_button(text, onclick) {
+		var b = document.createElement('input');
+		b.type = 'button';
+		b.className = 'cbi-button';
+		b.value = text;
+		b.addEventListener('click', onclick);
+		return b;
+	}
+
+	function health_span(health) {
+		var map = { healthy: ['健康', '#080'], failing: ['异常', '#c00'], unknown: ['未知', '#888'] };
+		var m = map[health] || map.unknown;
+		var span = document.createElement('span');
+		span.textContent = m[0];
+		span.style.color = m[1];
+		span.style.fontWeight = '600';
+		return span;
+	}
+
+	function load() {
+		api_get_resources().then(function(j) {
+			if (j.error) { error_banner(j.error); return; }
+			error_banner(null);
+			resources = j.resources || [];
+			var table = el('custos-list');
+			while (table.rows.length > 1) table.deleteRow(-1);
+			resources.forEach(function(r, i) {
+				var row = table.insertRow(-1);
+				row.insertCell(-1).textContent = r.id || '?';
+				var type = row.insertCell(-1);
+				type.textContent = r.type || '?';
+				if (r.display_name) {
+					var small = document.createElement('span');
+					small.textContent = ' (' + r.display_name + ')';
+					small.style.color = '#888';
+					type.appendChild(small);
+				}
+				row.insertCell(-1).textContent =
+					(r.depends_on && r.depends_on.length) ? r.depends_on.join(' ') : '-';
+				row.insertCell(-1).appendChild(health_span(r.health));
+				row.insertCell(-1).textContent = String(r.plan_count || 0);
+				var ops = row.insertCell(-1);
+				ops.appendChild(make_button(r.supported ? '编辑' : 'TOML', function() {
+					if (r.supported) openForm(i);
+					else openRaw(i);
+				}));
+				ops.appendChild(document.createTextNode(' '));
+				ops.appendChild(make_button('TOML', function() { openRaw(i); }));
+				ops.appendChild(document.createTextNode(' '));
+				ops.appendChild(make_button('删除', function() {
+					if (!window.confirm('删除资源 ' + (r.id || i) + ' ？写回前会自动备份并通过 custos validate 校验。')) return;
+					api_write({ op: 'delete', index: i }).then(handle_write_response);
+				}));
+				if (!r.supported) {
+					var note = document.createElement('span');
+					note.textContent = ' 类型无结构化表单，走 TOML 直编';
+					note.style.color = '#888';
+					ops.appendChild(note);
+				}
+			});
+		}).catch(function(e) { error_banner('无法加载资源列表: ' + e); });
+	}
+
+	function handle_write_response(j) {
+		if (j.ok) {
+			error_banner(null);
+			ok_banner(j.message || '已保存');
+			close_editors();
+			load();
+		} else {
+			ok_banner(null);
+			error_banner(j.error || '写入失败', j.output);
+			// Validation output carries absolute line numbers of the temp
+			// file; the failing lines map 1:1 onto the rendered document.
+		}
+	}
+
+	function set_probe_rows(type) {
+		var keep = SUPPORTED[type] || [];
+		var rows = document.querySelectorAll('.probe-row');
+		for (var i = 0; i < rows.length; i++) {
+			var fixed = rows[i].id !== 'row-interface' && rows[i].id !== 'row-command' &&
+				rows[i].id !== 'row-host' && rows[i].id !== 'row-unit';
+			rows[i].style.display = (fixed || keep.indexOf(rows[i].id) >= 0) ? '' : 'none';
+		}
+	}
+
+	// ---- recovery plan editor ------------------------------------------
+	function plan_box(plan) {
+		var box = document.createElement('div');
+		box.className = 'cbi-plan';
+		box.style.border = '1px solid #ccc';
+		box.style.padding = '6px';
+		box.style.margin = '6px 0';
+
+		function field(label, id, value, password) {
+			var wrap = document.createElement('div');
+			var lab = document.createElement('label');
+			lab.textContent = label + ' ';
+			var input = document.createElement('input');
+			input.type = password ? 'password' : 'text';
+			input.className = id;
+			if (value !== undefined && value !== null) input.value = value;
+			wrap.appendChild(lab);
+			wrap.appendChild(input);
+			box.appendChild(wrap);
+			return input;
+		}
+		function area(label, id, lines) {
+			var wrap = document.createElement('div');
+			var lab = document.createElement('label');
+			lab.textContent = label + ' ';
+			var ta = document.createElement('textarea');
+			ta.className = id;
+			ta.rows = lines || 2;
+			ta.style.width = '90%';
+			wrap.appendChild(lab);
+			wrap.appendChild(ta);
+			box.appendChild(wrap);
+			return ta;
+		}
+
+		field('plan_id', 'p-plan-id', plan && plan.plan_id);
+		var faults = (plan && plan.applicable_faults || []).join(', ');
+		field('适用故障 (逗号分隔)', 'p-faults', faults);
+		var risk = field('风险等级', 'p-risk', (plan && plan.risk) || 'low');
+		var select = document.createElement('select');
+		['low', 'medium', 'high'].forEach(function(rv) {
+			var o = document.createElement('option');
+			o.value = rv; o.textContent = rv;
+			select.appendChild(o);
+		});
+		select.className = 'p-risk-sel';
+		select.value = (plan && plan.risk) || 'low';
+		risk.parentNode.replaceChild(select, risk);
+		var idem = document.createElement('input');
+		idem.type = 'checkbox'; idem.className = 'p-idempotent';
+		if (plan && plan.idempotent === true) idem.checked = true;
+		var idemlab = document.createElement('label');
+		idemlab.appendChild(idem);
+		idemlab.appendChild(document.createTextNode(' 幂等'));
+		box.appendChild(idemlab);
+		field('timeout_ms', 'p-timeout', plan && plan.timeout_ms);
+		field('max_attempts', 'p-attempts', plan && plan.max_attempts);
+		field('cooldown_ms', 'p-cooldown', plan && plan.cooldown_ms);
+		var action = (plan && plan.action) || {};
+		field('动作程序', 'p-program', action.program);
+		var args = area('动作参数 (每行一个)', 'p-args', 3);
+		args.value = (action.args || []).join('\n');
+		var status = (plan && plan.verification && plan.verification.status_is) || 'healthy';
+		field('验证条件 status_is', 'p-status', status);
+
+		var remove = make_button('移除此计划', function() { box.parentNode.removeChild(box); refresh_highrisk(); });
+		box.appendChild(remove);
+		select.addEventListener('change', refresh_highrisk);
+		return box;
+	}
+
+	function collect_plans() {
+		var out = [];
+		var boxes = el('f-plans').children;
+		for (var i = 0; i < boxes.length; i++) {
+			var b = boxes[i];
+			function pick(cls) { return b.querySelector('.' + cls); }
+			var plan = {
+				plan_id: pick('p-plan-id').value.replace(/^\s+|\s+$/g, ''),
+				applicable_faults: split_list(pick('p-faults').value),
+				risk: pick('p-risk-sel').value,
+				idempotent: pick('p-idempotent').checked,
+				action: {
+					program: pick('p-program').value.replace(/^\s+|\s+$/g, ''),
+					args: split_list(pick('p-args').value.replace(/\n/g, ' '))
+				}
+			};
+			function cnum(cls) {
+				var t = pick(cls).value.replace(/^\s+|\s+$/g, '');
+				if (!t) return null;
+				var v = parseInt(t, 10);
+				return isNaN(v) ? null : v;
+			}
+			plan.timeout_ms = cnum('p-timeout');
+			plan.max_attempts = cnum('p-attempts');
+			plan.cooldown_ms = cnum('p-cooldown');
+			var status = pick('p-status').value.replace(/^\s+|\s+$/g, '');
+			if (status) plan.verification = { status_is: status };
+			out.push(plan);
+		}
+		return out;
+	}
+
+	function refresh_highrisk() {
+		var boxes = el('f-plans').children;
+		var has_high = false;
+		for (var i = 0; i < boxes.length; i++) {
+			var sel = boxes[i].querySelector('.p-risk-sel');
+			if (sel && sel.value === 'high') has_high = true;
+		}
+		show('custos-highrisk', has_high);
+	}
+
+	// ---- form state ------------------------------------------------------
+	function openForm(i) {
+		var r = resources[i];
+		editing = i;
+		ok_banner(null); error_banner(null);
+		set_text('custos-form-title', i === null ? '新建资源' : '编辑资源: ' + (r.id || i));
+		el('f-id').value = (i === null) ? '' : (r.id || '');
+		el('f-type').value = (i === null) ? 'custom-command' : (r.type || 'custom-command');
+		el('f-display').value = (i === null || !r.display_name) ? '' : r.display_name;
+		el('f-enabled').checked = (i === null || r.enabled === undefined) ? true : r.enabled === true;
+		var probe = (i === null) ? {} : (r.probe || {});
+		el('f-depends').value = (i === null || !r.depends_on) ? '' : r.depends_on.join(' ');
+		el('f-interval').value = probe.interval_ms !== undefined ? String(probe.interval_ms) : '10000';
+		el('f-timeout').value = probe.timeout_ms !== undefined ? String(probe.timeout_ms) : '';
+		el('f-interface').value = probe.interface || '';
+		el('f-command').value = (probe.command || []).join('\n');
+		el('f-host').value = probe.host || '';
+		el('f-unit').value = probe.unit || '';
+		var hp = (i === null) ? {} : (r.health_policy || {});
+		el('f-failure').value = hp.failure_threshold !== undefined ? String(hp.failure_threshold) : '3';
+		el('f-success').value = hp.success_threshold !== undefined ? String(hp.success_threshold) : '2';
+		var container = el('f-plans');
+		while (container.firstChild) container.removeChild(container.firstChild);
+		var plans = (i === null || !r.recovery_policy) ? [] : ((r.recovery_policy.plans) || []);
+		plans.forEach(function(p) { container.appendChild(plan_box(p)); });
+		refresh_highrisk();
+		set_probe_rows(el('f-type').value);
+		show('custos-raw', false);
+		show('custos-form', true);
+	}
+
+	function openRaw(i) {
+		var r = resources[i];
+		editing = i;
+		ok_banner(null); error_banner(null);
+		el('custos-raw-text').value = r ? (r.raw || '') : '';
+		show('custos-form', false);
+		show('custos-raw', true);
+	}
+
+	function close_editors() {
+		editing = null;
+		show('custos-form', false);
+		show('custos-raw', false);
+	}
+
+	function build_data() {
+		var type = val('f-type');
+		var probe = {};
+		var interval = num_or_null('f-interval');
+		var timeout = num_or_null('f-timeout');
+		if (interval !== null) probe.interval_ms = interval;
+		if (timeout !== null) probe.timeout_ms = timeout;
+		if (type === 'network-interface' && val('f-interface')) probe.interface = val('f-interface');
+		if (type === 'custom-command') {
+			var cmd = split_list(val('f-command').replace(/\n/g, ' '));
+			if (cmd.length) probe.command = cmd;
+		}
+		if (type === 'icmp' && val('f-host')) probe.host = val('f-host');
+		if (type === 'service' && val('f-unit')) probe.unit = val('f-unit');
+
+		var hp = {};
+		var fail = num_or_null('f-failure');
+		var succ = num_or_null('f-success');
+		if (fail !== null) hp.failure_threshold = fail;
+		if (succ !== null) hp.success_threshold = succ;
+
+		var display = val('f-display').replace(/^\s+|\s+$/g, '');
+		var data = {
+			id: val('f-id').replace(/^\s+|\s+$/g, ''),
+			type: type,
+			enabled: el('f-enabled').checked,
+			probe: probe,
+			health_policy: hp,
+			depends_on: split_list(val('f-depends')),
+			recovery_policy: { plans: collect_plans() }
+		};
+		if (display) data.display_name = display;
+		return data;
+	}
+
+	function save_form() {
+		var data = build_data();
+		var confirm_needed = false;
+		var plans = (data.recovery_policy && data.recovery_policy.plans) || [];
+		for (var i = 0; i < plans.length; i++) {
+			if (plans[i].risk === 'high') confirm_needed = true;
+		}
+		if (confirm_needed && !el('f-confirm').checked) {
+			error_banner('包含 risk = high 的恢复计划，请先勾选高危动作确认');
+			return;
+		}
+		var payload = {
+			op: (editing === null) ? 'create' : 'save',
+			index: editing,
+			data: data,
+			confirm_high_risk: confirm_needed && el('f-confirm').checked
+		};
+		api_write(payload).then(handle_write_response);
+	}
+
+	function save_raw() {
+		if (editing === null) { error_banner('未选择资源'); return; }
+		api_write({ op: 'raw', index: editing, raw: val('custos-raw-text') })
+			.then(handle_write_response);
+	}
+
+	el('custos-add').addEventListener('click', function() { openForm(null); });
+	el('custos-plan-add').addEventListener('click', function() {
+		el('f-plans').appendChild(plan_box(null));
+		refresh_highrisk();
+	});
+	el('f-type').addEventListener('change', function() { set_probe_rows(val('f-type')); });
+	el('custos-save').addEventListener('click', save_form);
+	el('custos-raw-save').addEventListener('click', save_raw);
+	el('custos-raw-edit').addEventListener('click', function() {
+		// Re-edit the current resource in raw mode (create not supported here:
+		// a new resource must pass the structured form first).
+		if (editing === null) { error_banner('请先保存新资源，再使用 TOML 直编调整'); return; }
+		openRaw(editing);
+	});
+	el('custos-cancel').addEventListener('click', close_editors);
+	el('custos-raw-cancel').addEventListener('click', close_editors);
+
+	load();
+})();
+</script>
+<%+footer%>
