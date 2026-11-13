@@ -3,24 +3,64 @@ START=99
 USE_PROCD=1
 
 PROG=/usr/bin/custos
-CONF_TOML=/etc/custos/custos.toml
+CONF_TOML_DEFAULT=/etc/custos/custos.toml
 CONF_DB_DEFAULT=/etc/custos/custos.db
 CONF_INTERVAL_DEFAULT=5000
 
+# Emits CUSTOS_NOTIFY_* "KEY=VALUE" words on stdout for the procd env param.
+# The config crate's env overlay (custos-config notification::env_overlay)
+# replaces the TOML [notification] section when any selector variable is
+# present, so the LuCI notification form works without rewriting the TOML.
+# Only complete pairs are emitted: a half-set channel would fail the config
+# load and stop the engine, so an incomplete LuCI form is ignored rather than
+# fatal. Values must not contain whitespace (the LuCI form validates this).
+notify_pairs() {
+	local enabled local_log tg_token tg_chat h_url h_app h_token min_severity
+	config_get enabled notify enabled '0'
+	[ "$enabled" = "1" ] || return 0
+	config_get local_log notify local_log '0'
+	[ "$local_log" = "1" ] && echo "CUSTOS_NOTIFY_LOCAL_LOG=1"
+	config_get tg_token notify telegram_token ''
+	config_get tg_chat notify telegram_chat ''
+	if [ -n "$tg_token" ] && [ -n "$tg_chat" ]; then
+		echo "CUSTOS_NOTIFY_TELEGRAM_TOKEN=$tg_token"
+		echo "CUSTOS_NOTIFY_TELEGRAM_CHAT=$tg_chat"
+	fi
+	config_get h_url notify herald_url ''
+	if [ -n "$h_url" ]; then
+		echo "CUSTOS_NOTIFY_HERALD_URL=$h_url"
+		config_get h_app notify herald_app 'custos'
+		echo "CUSTOS_NOTIFY_HERALD_APP=$h_app"
+		config_get h_token notify herald_token ''
+		[ -n "$h_token" ] && echo "CUSTOS_NOTIFY_HERALD_TOKEN=$h_token"
+	fi
+	config_get min_severity notify min_severity 'warning'
+	echo "CUSTOS_NOTIFY_MIN_SEVERITY=$min_severity"
+}
+
 start_service() {
 	local enabled
-	local db interval
+	local db interval conf
 	config_load custos
 	config_get enabled main enabled '0'
 	config_get db main db "$CONF_DB_DEFAULT"
 	config_get interval main interval "$CONF_INTERVAL_DEFAULT"
+	config_get conf main conf "$CONF_TOML_DEFAULT"
 	[ "$enabled" = "1" ] || return 0
-	[ -f "$CONF_TOML" ] || {
-		logger -t custos "no config at $CONF_TOML; not starting"
+	[ -f "$conf" ] || {
+		logger -t custos "no config at $conf; not starting"
 		return 1
 	}
 	procd_open_instance
-	procd_set_param command "$PROG" start "$CONF_TOML" --db "$db" --interval "$interval"
+	procd_set_param command "$PROG" start "$conf" --db "$db" --interval "$interval"
+	# Notification overlay env, one word per pair (values carry no spaces).
+	local pairs
+	pairs=$(notify_pairs)
+	if [ -n "$pairs" ]; then
+		# Word splitting is the point: each line becomes one env argument.
+		# shellcheck disable=SC2086
+		procd_set_param env $pairs
+	fi
 	procd_set_param respawn 3600 5 0
 	procd_set_param stdout 1
 	procd_set_param stderr 1

@@ -2,7 +2,18 @@ config custos 'main'
 	option enabled '0'
 	option db '/etc/custos/custos.db'
 	option interval '5000'
+	option conf '/etc/custos/custos.toml'
+
+# Notification settings: passed to the engine as CUSTOS_NOTIFY_* env vars by
+# the init script (the config overlay replaces the TOML [notification]
+# section when enabled). telegram_token/telegram_chat/herald_* are empty by
+# default and set through the LuCI settings page.
+config notify 'notify'
+	option enabled '0'
+	option local_log '0'
+	option min_severity 'warning'
+	option herald_app 'custos'
 
 # Resource probes are defined in the TOML config file:
-#   /etc/custos/custos.toml
+#   /etc/custos/custos.toml (path adjustable via main.conf)
 # See docs/guide/resources.md for the full schema.

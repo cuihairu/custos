@@ -485,3 +485,193 @@ enabled = false
         other => panic!("expected LocalLog channel, got {other:?}"),
     }
 }
+
+// The env overlay's pure core: tests drive a map-based variable source and
+// never mutate process env (parallel load() tests would observe leftovers).
+use std::collections::HashMap;
+
+fn overlay_from_map(map: &[(&str, &str)]) -> Result<NotificationConfig, crate::ConfigError> {
+    let owned: HashMap<String, String> = map
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
+    let get = move |key: &str| owned.get(key).cloned();
+    let fallback = NotificationConfig::default();
+    super::env_overlay_from(get, fallback)
+}
+
+fn expect_validation(err: crate::ConfigError) -> String {
+    match err {
+        crate::ConfigError::Validation { message, .. } => message,
+        other => panic!("expected a validation error, got {other}"),
+    }
+}
+
+#[test]
+fn env_overlay_without_selectors_keeps_the_toml_section() {
+    let fallback = NotificationConfig::default();
+    let out = super::env_overlay_from(|_| None, fallback.clone()).unwrap();
+    assert_eq!(out, fallback, "no vars at all: TOML section stands");
+    // A lone MIN_SEVERITY is a no-op: only channel selectors trigger the
+    // overlay, otherwise setting the knob alone would silently wipe the
+    // TOML section.
+    let out = overlay_from_map(&[("CUSTOS_NOTIFY_MIN_SEVERITY", "critical")]).unwrap();
+    assert_eq!(out, fallback);
+}
+
+#[test]
+fn env_overlay_builds_a_local_log_rule() {
+    let out = overlay_from_map(&[("CUSTOS_NOTIFY_LOCAL_LOG", "1")]).unwrap();
+    assert_eq!(out.rules.len(), 1);
+    let rule = &out.rules[0];
+    assert_eq!(rule.id, "env-notify");
+    assert_eq!(rule.severity_min, Severity::Warning, "default floor");
+    assert!(rule.log, "local-log channel implies rule.log");
+    assert_eq!(rule.channels, ["local-log"]);
+    assert_eq!(rule.dedup_window_ms, 30 * 60 * 1000);
+    match out.channel("local-log") {
+        Some(ChannelConfig::LocalLog { enabled: true }) => {}
+        other => panic!("expected enabled LocalLog, got {other:?}"),
+    }
+}
+
+#[test]
+fn env_overlay_local_log_disabled_flag_yields_no_channels() {
+    let out = overlay_from_map(&[("CUSTOS_NOTIFY_LOCAL_LOG", "0")]).unwrap();
+    assert!(
+        out.rules.is_empty() && out.channels.is_empty(),
+        "0 disables"
+    );
+    let out = overlay_from_map(&[("CUSTOS_NOTIFY_LOCAL_LOG", "false")]).unwrap();
+    assert!(out.channels.is_empty());
+    let out = overlay_from_map(&[("CUSTOS_NOTIFY_LOCAL_LOG", "")]).unwrap();
+    assert!(out.channels.is_empty());
+}
+
+#[test]
+fn env_overlay_wires_telegram_with_defaults() {
+    let out = overlay_from_map(&[
+        ("CUSTOS_NOTIFY_TELEGRAM_TOKEN", "tok"),
+        ("CUSTOS_NOTIFY_TELEGRAM_CHAT", "@custos"),
+    ])
+    .unwrap();
+    let rule = &out.rules[0];
+    assert_eq!(rule.channels, ["telegram"]);
+    assert!(!rule.log);
+    match out.channel("telegram") {
+        Some(ChannelConfig::Telegram(cfg)) => {
+            assert_eq!(cfg.chat_id, "@custos");
+            assert_eq!(cfg.timeout_ms, 10_000);
+            assert_eq!(cfg.retries, 3);
+            assert_eq!(cfg.backoff_ms, 30_000);
+        }
+        other => panic!("expected Telegram channel, got {other:?}"),
+    }
+}
+
+#[test]
+fn env_overlay_rejects_a_half_set_telegram_pair() {
+    let err = expect_validation(
+        overlay_from_map(&[("CUSTOS_NOTIFY_TELEGRAM_TOKEN", "tok")]).unwrap_err(),
+    );
+    assert!(
+        err.contains("TELEGRAM_CHAT"),
+        "half-set pair must name the missing var, got: {err}"
+    );
+    let err =
+        expect_validation(overlay_from_map(&[("CUSTOS_NOTIFY_TELEGRAM_CHAT", "@c")]).unwrap_err());
+    assert!(err.contains("TELEGRAM_TOKEN"), "got: {err}");
+}
+
+#[test]
+fn env_overlay_wires_herald_with_defaults() {
+    let out = overlay_from_map(&[("CUSTOS_NOTIFY_HERALD_URL", "http://127.0.0.1:8080")]).unwrap();
+    match out.channel("herald") {
+        Some(ChannelConfig::Herald(cfg)) => {
+            assert_eq!(cfg.base_url, "http://127.0.0.1:8080");
+            assert_eq!(cfg.app, "custos", "default app id");
+            assert_eq!(cfg.category, "alerts");
+            assert_eq!(cfg.audiences, ["log"]);
+            assert!(cfg.token.is_none());
+            assert_eq!(cfg.auth, HeraldAuth::ApiKey);
+        }
+        other => panic!("expected Herald channel, got {other:?}"),
+    }
+    // App id and bearer token come through when set.
+    let out = overlay_from_map(&[
+        ("CUSTOS_NOTIFY_HERALD_URL", "https://herald.example.com"),
+        ("CUSTOS_NOTIFY_HERALD_APP", "homegw"),
+        ("CUSTOS_NOTIFY_HERALD_TOKEN", "tok"),
+    ])
+    .unwrap();
+    match out.channel("herald") {
+        Some(ChannelConfig::Herald(cfg)) => {
+            assert_eq!(cfg.app, "homegw");
+            assert!(cfg.token.is_some(), "token set");
+        }
+        other => panic!("expected Herald channel, got {other:?}"),
+    }
+}
+
+#[test]
+fn env_overlay_rejects_a_non_http_herald_url() {
+    let err = expect_validation(
+        overlay_from_map(&[("CUSTOS_NOTIFY_HERALD_URL", "ftp://127.0.0.1:8080")]).unwrap_err(),
+    );
+    assert!(err.contains("http or https"), "got: {err}");
+}
+
+#[test]
+fn env_overlay_rejects_an_unknown_min_severity() {
+    let err = expect_validation(
+        overlay_from_map(&[
+            ("CUSTOS_NOTIFY_LOCAL_LOG", "1"),
+            ("CUSTOS_NOTIFY_MIN_SEVERITY", "loudest"),
+        ])
+        .unwrap_err(),
+    );
+    assert!(err.contains("unknown severity"), "got: {err}");
+    // info and critical parse too.
+    let out = overlay_from_map(&[
+        ("CUSTOS_NOTIFY_LOCAL_LOG", "1"),
+        ("CUSTOS_NOTIFY_MIN_SEVERITY", "critical"),
+    ])
+    .unwrap();
+    assert_eq!(out.rules[0].severity_min, Severity::Critical);
+}
+
+#[test]
+fn env_overlay_rejects_a_garbage_local_log_flag() {
+    let err = expect_validation(
+        overlay_from_map(&[("CUSTOS_NOTIFY_LOCAL_LOG", "yes-please")]).unwrap_err(),
+    );
+    assert!(err.contains("0|1|true|false"), "got: {err}");
+}
+
+#[test]
+fn env_overlay_replaces_the_whole_toml_section() {
+    let fallback = NotificationConfig {
+        rules: vec![NotificationRule {
+            id: "toml-rule".to_owned(),
+            event: None,
+            severity_min: Severity::Info,
+            resource: None,
+            channels: vec![],
+            log: false,
+            dedup_window_ms: 0,
+        }],
+        channels: [("off".to_owned(), ChannelConfig::LocalLog { enabled: false })].into(),
+    };
+    let out = super::env_overlay_from(
+        |key| (key == "CUSTOS_NOTIFY_LOCAL_LOG").then(|| "1".to_owned()),
+        fallback,
+    )
+    .map_err(expect_validation)
+    .unwrap();
+    // The TOML section had one rule and one channel; the overlay must
+    // replace both, never merge half-way with the file's leftovers.
+    assert_eq!(out.rules.len(), 1);
+    assert_eq!(out.rules[0].id, "env-notify");
+    assert_eq!(out.channels.len(), 1);
+    assert!(out.channel("off").is_none());
+}

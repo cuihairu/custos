@@ -59,6 +59,24 @@ pnpm run docs:build  # 构建
 
 English: [README.md](README.md)
 
+## OpenWrt / iStoreOS
+
+OpenWrt 打包在 `packaging/openwrt/` 下，产出三个 .ipk 包：
+
+```bash
+sh packaging/openwrt/build-ipk.sh <musl 编译的 custos 二进制> dist/ --arch x86_64|aarch64
+```
+
+- `custos` — musl 静态二进制、procd init 脚本、UCI 配置（`/etc/config/custos`）与默认 TOML。
+- `luci-app-custos` — LuCI 应用：设置页（服务开关、数据库与 TOML 配置路径、探测间隔；Telegram/Herald/本地日志通知通道经 init.d 以 `CUSTOS_NOTIFY_*` 环境变量透传给引擎）与实时状态面板（服务状态、资源健康、最近审计事件、事故、恢复运行；每 10 秒自动刷新）。界面文案为中文硬编码，未做 .po。
+- `app-meta-custos` — iStore 应用元数据（图标 + 清单），上架面板后与其他商店应用一样展示。
+
+安装顺序：`custos` → `luci-app-custos` → `app-meta-custos`（Depends 链即按此顺序拉取），或直接 `opkg install app-meta-custos_*.ipk`。启用：`uci set custos.main.enabled=1 && uci commit custos && /etc/init.d/custos start`，然后进 LuCI → 服务 → Custos。
+
+iStore 上架：清单格式已对照真机 iStoreOS 上已装的 app-meta 包核实（见 [docs/analysis/istore-publishing-2026-11-14.md](docs/analysis/istore-publishing-2026-11-14.md)）；正式进商店仍需联系 iStore（Linkease）方。包本体遵循通用 opkg 规范，纯 `opkg` 即可安装。
+
+升级须知：`/etc/custos/custos.toml`、`/etc/config/custos`、`/etc/init.d/custos` 均为 conffile——正常 `opkg` 升级保留已修改的配置，新默认以 `custos.toml-opkg` 落在旁边。从旧单包布局（全部在 `custos` 里）迁移需先 `opkg install --force-reinstall custos_*.ipk`（注意这会替换 conffile），之后才能装 `luci-app-custos`。
+
 ## 状态
 
 P0–P3 已实现（核心恢复引擎、插件运行时与通知、平台基础能力、网络/代理/真实自愈场景；验收场景 1、2 与 Windows Wi-Fi 完整路径仍需真实环境验证）。可选管理界面（P4）已有只读仪表盘与桌面托盘；macOS/BSD 适配与插件签名待做。详见 [分阶段实施计划](docs/guide/roadmap.md)。

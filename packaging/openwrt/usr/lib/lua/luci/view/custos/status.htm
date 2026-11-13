@@ -1,22 +1,190 @@
 <%+header%>
 <h2><a id="content" name="content"><%:Custos 运行状态%></a></h2>
+
+<div id="custos-error" class="alert-message warning" style="display:none"></div>
+
 <div class="cbi-map">
 	<fieldset class="cbi-section">
 		<legend><%:服务状态%></legend>
 		<table class="table">
 			<tr><td><%:procd 状态%></td><td><code id="custos-status">…</code></td></tr>
-			<tr><td><%:数据库%></td><td><code>/etc/custos/custos.db</code></td></tr>
+			<tr><td><%:数据库%></td><td><code id="custos-db">/etc/custos/custos.db</code></td></tr>
 			<tr><td><%:TOML 配置%></td><td><code>/etc/custos/custos.toml</code></td></tr>
+			<tr><td><%:累计%></td><td><span id="custos-counts">…</span></td></tr>
+		</table>
+	</fieldset>
+
+	<fieldset class="cbi-section">
+		<legend><%:资源健康%></legend>
+		<table class="table" id="custos-health">
+			<tr><th><%:资源%></th><th><%:状态%></th><th><%:最近探测%></th><th><%:时间%></th></tr>
+		</table>
+	</fieldset>
+
+	<fieldset class="cbi-section">
+		<legend><%:最近事件%></legend>
+		<table class="table" id="custos-audit">
+			<tr><th><%:时间%></th><th><%:级别%></th><th><%:类型%></th><th><%:资源%></th><th>run</th></tr>
+		</table>
+	</fieldset>
+
+	<fieldset class="cbi-section">
+		<legend><%:事故 (incidents)%></legend>
+		<table class="table" id="custos-incidents">
+			<tr><th><%:时间%></th><th><%:资源%></th><th><%:故障%></th><th><%:摘要%></th><th><%:状态%></th></tr>
+		</table>
+	</fieldset>
+
+	<fieldset class="cbi-section">
+		<legend><%:恢复运行%></legend>
+		<table class="table" id="custos-runs">
+			<tr><th><%:时间%></th><th><%:资源%></th><th><%:状态%></th><th><%:触发原因%></th></tr>
 		</table>
 	</fieldset>
 </div>
+
+<p><%:每 10 秒自动刷新%></p>
+
 <script type="text/javascript">
-	fetch('/cgi-bin/luci/admin/services/custos/api/status')
-		.then(r => r.json()).then(j => {
-			document.getElementById('custos-status').textContent =
-				(j.status === 'running') ? 'running' : 'stopped';
-		}).catch(() => {
-			document.getElementById('custos-status').textContent = '(unavailable)';
-		});
+(function() {
+	var inflight = false;
+
+	function set_text(id, text) {
+		var el = document.getElementById(id);
+		if (el) el.textContent = text;
+	}
+
+	function clear_rows(id) {
+		var table = document.getElementById(id);
+		// Drop every row except the header (index 0).
+		while (table.rows.length > 1) table.deleteRow(-1);
+		return table;
+	}
+
+	function add_row(id, cells) {
+		var table = document.getElementById(id);
+		var row = table.insertRow(-1);
+		for (var i = 0; i < cells.length; i++) {
+			var td = row.insertCell(-1);
+			var value = cells[i];
+			if (value && value.el) td.appendChild(value.el);
+			else td.textContent = value;
+		}
+		return row;
+	}
+
+	function empty_row(id, message) {
+		var row = add_row(id, [message]);
+		var td = row.cells[0];
+		td.colSpan = document.getElementById(id).rows[0].cells.length;
+		td.style.color = '#888';
+	}
+
+	var SEVERITY_COLOR = { critical: '#c00', warning: '#c60', info: '#06c' };
+	var STATUS_COLOR = { recovered: '#080', escalated: '#c00', cancelled: '#888' };
+
+	function colored(text, map, fallback) {
+		var span = document.createElement('span');
+		span.textContent = text;
+		span.style.color = map[text] || fallback || 'inherit';
+		span.style.fontWeight = '600';
+		return span;
+	}
+
+	function load() {
+		if (inflight) return;
+		inflight = true;
+		fetch('/cgi-bin/luci/admin/services/custos/api/overview')
+			.then(function(r) { return r.json(); })
+			.then(function(j) {
+				var err = document.getElementById('custos-error');
+				if (j.error) {
+					err.textContent = j.error;
+					err.style.display = '';
+				} else {
+					err.style.display = 'none';
+				}
+
+				var state = document.getElementById('custos-status');
+				state.textContent = (j.status === 'running') ? 'running' : 'stopped';
+				state.style.color = (j.status === 'running') ? '#080' : '#c00';
+				set_text('custos-db', j.db || '-');
+				var c = j.counts || {};
+				set_text('custos-counts',
+					'runs ' + (c.runs || 0) + ' · attempts ' + (c.attempts || 0) +
+					' · verifications ' + (c.verifications || 0) +
+					' · audit ' + (c.audit_events || 0));
+
+				clear_rows('custos-health');
+				if (!j.health || !j.health.length) {
+					empty_row('custos-health', '暂无探测数据（服务未启用或尚未探测）');
+				} else {
+					j.health.forEach(function(row) {
+						add_row('custos-health', [
+							row.resource_id,
+							colored(row.succeeded ? '健康' : '异常',
+								{}, row.succeeded ? '#080' : '#c00'),
+							row.probe + (row.observation ? ' — ' + row.observation : ''),
+							row.at || '-'
+						]);
+					});
+				}
+
+				clear_rows('custos-audit');
+				if (!j.audit || !j.audit.length) {
+					empty_row('custos-audit', '暂无审计事件');
+				} else {
+					j.audit.forEach(function(row) {
+						add_row('custos-audit', [
+							row.at || '-',
+							colored(row.severity, SEVERITY_COLOR),
+							row.event_type,
+							row.resource_id,
+							row.run_id || '-'
+						]);
+					});
+				}
+
+				clear_rows('custos-incidents');
+				if (!j.incidents || !j.incidents.length) {
+					empty_row('custos-incidents', '暂无事故记录');
+				} else {
+					j.incidents.forEach(function(row) {
+						add_row('custos-incidents', [
+							row.opened_at || '-',
+							row.resource_id,
+							row.fault_code,
+							row.summary,
+							colored(row.closed ? '已关闭' : '未关闭',
+								{}, row.closed ? '#888' : '#c00')
+						]);
+					});
+				}
+
+				clear_rows('custos-runs');
+				if (!j.runs || !j.runs.length) {
+					empty_row('custos-runs', '暂无恢复运行');
+				} else {
+					j.runs.forEach(function(row) {
+						add_row('custos-runs', [
+							row.updated_at || '-',
+							row.resource_id,
+							colored(row.status, STATUS_COLOR),
+							row.trigger
+						]);
+					});
+				}
+			})
+			.catch(function() {
+				var err = document.getElementById('custos-error');
+				err.textContent = '无法获取状态（接口请求失败）';
+				err.style.display = '';
+			})
+			.finally(function() { inflight = false; });
+	}
+
+	load();
+	setInterval(load, 10000);
+})();
 </script>
 <%+footer%>

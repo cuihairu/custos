@@ -71,6 +71,13 @@ jobs:
             artifact: custos-linux-musl-x86_64
             static: true
             install_musl_tools: true
+          # aarch64 musl builds natively on the arm64 runner (musl-gcc
+          # targets the host arch); the .ipk leg needs it for ARM routers.
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            artifact: custos-linux-musl-aarch64
+            static: true
+            install_musl_tools: true
 
           - os: windows-2022
             target: x86_64-pc-windows-msvc
@@ -81,6 +88,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       CC_x86_64_unknown_linux_musl: musl-gcc
+      CC_aarch64_unknown_linux_musl: musl-gcc
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -145,16 +153,16 @@ jobs:
           cp -r packaging-stage/examples packaging-stage/docs "$STAGE/"
           tar -C "$STAGE" -czf "dist/${{ matrix.artifact }}.tar.gz" .
 
-      # OpenWrt .ipk: musl static binary + procd init + LuCI interface
-      # (packaging/openwrt/build-ipk.sh; the tar.gz wrapper format
-      # installs via `opkg install custos*.ipk`).
+      # OpenWrt .ipk: musl static binary + procd init + LuCI interface +
+      # iStore app metadata (packaging/openwrt/build-ipk.sh builds the
+      # custos / luci-app-custos / app-meta-custos trio; install order
+      # custos -> luci-app-custos -> app-meta-custos satisfies the Depends
+      # chain, or `opkg install app-meta-custos*.ipk` pulls all three).
       - name: package openwrt ipk
         if: runner.os == 'Linux' && matrix.static
         run: |
-          sh packaging/openwrt/build-ipk.sh "target/${{ matrix.target }}/release/custos" dist/
-          ARCH=$(echo ${{ matrix.target }} | sed 's/unknown-linux-musl//;s/-//g')
-          mv "dist/custos_0.1.0-1_x86_64.ipk" "dist/custos_0.1.0-1_${ARCH}.ipk" 2>/dev/null \
-            || echo "ipk rename skipped"
+          sh packaging/openwrt/build-ipk.sh "target/${{ matrix.target }}/release/custos" dist/ \
+            --arch "$(echo '${{ matrix.target }}' | sed 's/-unknown-linux-musl//')"
 
       # Windows: zip binary + msi.
       - name: package binary zip

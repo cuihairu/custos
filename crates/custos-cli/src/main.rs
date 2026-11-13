@@ -31,9 +31,12 @@ COMMANDS:
         --db PATH              Database file (default: custos.db)
         --interval MS          Tick interval override (default: 5s)
         --once                 Run one observation tick and exit
-    status [--db PATH]         Store counters and recent audit events
-    runs [--db PATH]           Recent recovery runs, newest first
-    incidents [--db PATH]      Incident history, newest first
+    status [--db PATH] [--json]
+                               Store counters, per-resource health and recent
+                               audit events
+    runs [--db PATH] [--json]  Recent recovery runs, newest first
+    incidents [--db PATH] [--json]
+                               Incident history, newest first
     notify status [--db PATH]  Notification queue counts and recent entries
     notify retry <ID> [--db PATH]
                                Requeue a dead-lettered notification
@@ -277,7 +280,16 @@ fn start(path: &str, args: &[String]) -> ExitCode {
 
 /// Parses a lone `--db PATH` option shared by the history commands.
 fn db_arg(args: &[String], command: &str) -> Result<String, ExitCode> {
+    history_query_args(args, command).map(|(path, _json)| path)
+}
+
+/// Parses `--db PATH` and `--json` for the read-only history commands
+/// (`status`/`runs`/`incidents`); `--json` emits the same rows as a machine
+/// document instead of the aligned text table (consumed by the LuCI
+/// dashboard, docs/analysis/istore-publishing-2026-11-14.md).
+fn history_query_args(args: &[String], command: &str) -> Result<(String, bool), ExitCode> {
     let mut path = "custos.db".to_owned();
+    let mut json = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -288,13 +300,106 @@ fn db_arg(args: &[String], command: &str) -> Result<String, ExitCode> {
                 })?;
                 i += 2;
             }
+            "--json" => {
+                json = true;
+                i += 1;
+            }
             other => {
                 eprintln!("error: unknown option `{other}` for `{command}`");
                 return Err(ExitCode::from(2));
             }
         }
     }
-    Ok(path)
+    Ok((path, json))
+}
+
+/// `status --json`: counters, per-resource latest health and recent audit
+/// events in one document (the LuCI overview makes a single call).
+fn status_json(store: &custos_store::Store) -> Result<serde_json::Value, custos_store::StoreError> {
+    let counts = store.counts()?;
+    let health = store.latest_health()?;
+    let audit = store.recent_audit(10)?;
+    Ok(serde_json::json!({
+        "counts": {
+            "runs": counts.runs,
+            "attempts": counts.attempts,
+            "verifications": counts.verifications,
+            "audit_events": counts.audit_events,
+        },
+        "health": health
+            .iter()
+            .map(|row| {
+                serde_json::json!({
+                    "resource_id": row.resource_id,
+                    "probe": row.probe_name,
+                    "succeeded": row.succeeded,
+                    "observation": row.observation,
+                    "at": row.collected_at_unix_ms,
+                })
+            })
+            .collect::<Vec<_>>(),
+        "audit": audit
+            .iter()
+            .map(|row| {
+                serde_json::json!({
+                    "id": row.id,
+                    "at": row.at_unix_ms,
+                    "severity": row.severity,
+                    "event_type": row.event_type,
+                    "resource_id": row.resource_id,
+                    "run_id": row.run_id,
+                })
+            })
+            .collect::<Vec<_>>(),
+    }))
+}
+
+/// `runs --json`.
+fn runs_json(store: &custos_store::Store) -> Result<serde_json::Value, custos_store::StoreError> {
+    let rows = store.list_runs(20)?;
+    Ok(serde_json::json!({ "runs": rows
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.id,
+                "resource_id": row.resource_id,
+                "status": row.status,
+                "trigger": row.trigger,
+                "started_at": row.started_at_unix_ms,
+                "updated_at": row.updated_at_unix_ms,
+            })
+        })
+        .collect::<Vec<_>>() }))
+}
+
+/// `incidents --json`.
+fn incidents_json(
+    store: &custos_store::Store,
+) -> Result<serde_json::Value, custos_store::StoreError> {
+    let rows = store.list_incidents(20)?;
+    Ok(serde_json::json!({ "incidents": rows
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.id,
+                "resource_id": row.resource_id,
+                "fault_code": row.fault_code,
+                "summary": row.summary,
+                "opened_at": row.opened_at_unix_ms,
+                "closed_at": row.closed_at_unix_ms,
+            })
+        })
+        .collect::<Vec<_>>() }))
+}
+
+/// Prints a JSON document built by one of the `*_json` builders; the Value
+/// path is total, so the unwrap documents an invariant rather than a risk.
+fn print_json(value: serde_json::Value) -> ExitCode {
+    println!(
+        "{}",
+        serde_json::to_string(&value).expect("json value is always serializable")
+    );
+    ExitCode::SUCCESS
 }
 
 /// Opens the store for read-only history queries.
@@ -307,14 +412,23 @@ fn open_history(path: &str) -> Result<custos_store::Store, ExitCode> {
 
 /// Recent recovery runs, newest first.
 fn runs(args: &[String]) -> ExitCode {
-    let path = match db_arg(args, "runs") {
-        Ok(path) => path,
+    let (path, json) = match history_query_args(args, "runs") {
+        Ok(pair) => pair,
         Err(code) => return code,
     };
     let store = match open_history(&path) {
         Ok(store) => store,
         Err(code) => return code,
     };
+    if json {
+        return match runs_json(&store) {
+            Ok(value) => print_json(value),
+            Err(err) => {
+                eprintln!("error: query failed: {err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match store.list_runs(20) {
         Ok(rows) if rows.is_empty() => {
             println!("no recovery runs recorded");
@@ -346,14 +460,23 @@ fn runs(args: &[String]) -> ExitCode {
 
 /// Incident history, newest first; open incidents are marked.
 fn incidents(args: &[String]) -> ExitCode {
-    let path = match db_arg(args, "incidents") {
-        Ok(path) => path,
+    let (path, json) = match history_query_args(args, "incidents") {
+        Ok(pair) => pair,
         Err(code) => return code,
     };
     let store = match open_history(&path) {
         Ok(store) => store,
         Err(code) => return code,
     };
+    if json {
+        return match incidents_json(&store) {
+            Ok(value) => print_json(value),
+            Err(err) => {
+                eprintln!("error: query failed: {err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match store.list_incidents(20) {
         Ok(rows) if rows.is_empty() => {
             println!("no incidents recorded");
@@ -498,25 +621,12 @@ fn notify_retry(id: u64, args: &[String]) -> ExitCode {
     }
 }
 
-/// Store counters and the newest audit events.
+/// Store counters, per-resource health and the newest audit events.
 fn status(args: &[String]) -> ExitCode {
-    let mut path = "custos.db".to_owned();
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--db" => {
-                path = args.get(i + 1).cloned().unwrap_or_else(|| {
-                    eprintln!("error: --db requires a path");
-                    std::process::exit(2);
-                });
-                i += 2;
-            }
-            other => {
-                eprintln!("error: unknown option `{other}` for `status`");
-                return ExitCode::from(2);
-            }
-        }
-    }
+    let (path, json) = match history_query_args(args, "status") {
+        Ok(pair) => pair,
+        Err(code) => return code,
+    };
     let store = match custos_store::Store::open(&path) {
         Ok(store) => store,
         Err(err) => {
@@ -524,6 +634,15 @@ fn status(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if json {
+        return match status_json(&store) {
+            Ok(value) => print_json(value),
+            Err(err) => {
+                eprintln!("error: query failed: {err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match (store.counts(), store.recent_audit(10)) {
         (Ok(counts), Ok(events)) => {
             println!(
@@ -671,6 +790,112 @@ mod tests {
         assert_eq!(err, ExitCode::from(2));
         let err = expect_exit_err(db_arg(&args(&["--limit", "5"]), "runs"));
         assert_eq!(err, ExitCode::from(2));
+    }
+
+    #[test]
+    fn history_query_args_carry_the_json_flag() {
+        let (path, json) = history_query_args(&args(&[]), "status").expect("defaults");
+        assert_eq!(path, "custos.db");
+        assert!(!json);
+        let (path, json) =
+            history_query_args(&args(&["--db", "h.db", "--json"]), "status").expect("flags");
+        assert_eq!(path, "h.db");
+        assert!(json);
+        let err = expect_exit_err(history_query_args(&args(&["--jsonx"]), "status"));
+        assert_eq!(err, ExitCode::from(2));
+    }
+
+    /// Seeds a temp database with one healthy probe, one failing probe, one
+    /// run and one open incident, then returns its path (caller removes it).
+    fn seeded_history_db(name: &str) -> std::path::PathBuf {
+        use custos_engine::events::RunStore as _;
+        let path = std::env::temp_dir().join(format!("custos-cli-json-{name}.db"));
+        std::fs::remove_file(&path).ok();
+        let store = custos_store::Store::open(&path).expect("open temp store");
+        let now = 1_790_000_000_000u64;
+        store.save_probe_result(&custos_model::Evidence {
+            resource_id: custos_model::ResourceId::new("web"),
+            probe_name: "http".into(),
+            succeeded: true,
+            observation: "200 OK in 12ms".into(),
+            collected_at_unix_ms: now,
+        });
+        store.save_probe_result(&custos_model::Evidence {
+            resource_id: custos_model::ResourceId::new("db"),
+            probe_name: "tcp".into(),
+            succeeded: false,
+            observation: "connection refused".into(),
+            collected_at_unix_ms: now + 1,
+        });
+        let run = custos_model::RecoveryRun::new(
+            custos_model::ids::RecoveryRunId::new("run-1"),
+            custos_model::ResourceId::new("db"),
+            "failure threshold reached",
+            now + 2,
+        );
+        store.save_run(&run);
+        store.save_incident(&custos_model::Incident::open(
+            custos_model::ids::IncidentId::new("inc-1"),
+            custos_model::ResourceId::new("db"),
+            custos_model::FaultCode::ProcessExited,
+            "process exited".to_owned(),
+            now + 3,
+        ));
+        path
+    }
+
+    #[test]
+    fn status_json_reports_counts_health_and_audit() {
+        let path = seeded_history_db("status");
+        let store = custos_store::Store::open(&path).expect("reopen");
+        let value = status_json(&store).expect("status json");
+        let counts = &value["counts"];
+        assert_eq!(counts["runs"].as_u64(), Some(1));
+        assert_eq!(counts["attempts"].as_u64(), Some(0));
+        assert_eq!(counts["verifications"].as_u64(), Some(0));
+        let health = value["health"].as_array().expect("health array");
+        assert_eq!(health.len(), 2, "one row per probed resource");
+        let web = health
+            .iter()
+            .find(|row| row["resource_id"] == "web")
+            .expect("web row");
+        assert_eq!(web["succeeded"], serde_json::Value::Bool(true));
+        assert_eq!(web["observation"], "200 OK in 12ms");
+        let db = health
+            .iter()
+            .find(|row| row["resource_id"] == "db")
+            .expect("db row");
+        assert_eq!(db["succeeded"], serde_json::Value::Bool(false));
+        // Audit is empty here (no engine events emitted) but the key exists.
+        assert!(value["audit"].is_array());
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn runs_and_incidents_json_roundtrip_seeded_rows() {
+        let path = seeded_history_db("runs");
+        let store = custos_store::Store::open(&path).expect("reopen");
+        let value = runs_json(&store).expect("runs json");
+        let rows = value["runs"].as_array().expect("runs array");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], "run-1");
+        assert_eq!(rows[0]["resource_id"], "db");
+        assert!(rows[0]["status"].is_string());
+        assert_eq!(rows[0]["trigger"], "failure threshold reached");
+        assert!(rows[0]["started_at"].as_u64().is_some());
+        assert!(rows[0]["updated_at"].as_u64().is_some());
+
+        let value = incidents_json(&store).expect("incidents json");
+        let rows = value["incidents"].as_array().expect("incidents array");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], "inc-1");
+        assert_eq!(rows[0]["fault_code"], "process_exited");
+        assert_eq!(rows[0]["summary"], "process exited");
+        assert!(
+            rows[0]["closed_at"].is_null(),
+            "an open incident has no closed_at"
+        );
+        std::fs::remove_file(path).ok();
     }
 
     #[test]

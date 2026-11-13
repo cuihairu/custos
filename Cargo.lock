@@ -400,6 +400,7 @@ dependencies = [
  "custos-notify",
  "custos-probe",
  "custos-store",
+ "serde_json",
  "tracing",
  "winresource",
 ]

@@ -59,6 +59,24 @@ Ready-to-run monitoring configurations in `examples/` (each validates with `cust
 
 中文文档：[README.zh.md](README.zh.md)
 
+## OpenWrt / iStoreOS
+
+OpenWrt packaging lives under `packaging/openwrt/` and builds three .ipk packages:
+
+```bash
+sh packaging/openwrt/build-ipk.sh <path-to-musl-custos-binary> dist/ --arch x86_64|aarch64
+```
+
+- `custos` — musl static binary, procd init script, UCI config (`/etc/config/custos`) and default TOML.
+- `luci-app-custos` — LuCI app: settings page (service enable, database and TOML config paths, probe interval; Telegram/Herald/local-log notification channels passed to the engine as `CUSTOS_NOTIFY_*` environment variables by the init script) plus a live status dashboard (service state, resource health, recent audit events, incidents, recovery runs; auto-refresh every 10 s). UI text is Chinese, hardcoded in the templates — no .po files.
+- `app-meta-custos` — iStore app metadata (icon + manifest), so the app shows up in the iStore panel like the other store apps.
+
+Install order: `custos` → `luci-app-custos` → `app-meta-custos` (the Depends chain pulls them in this order), or simply `opkg install app-meta-custos_*.ipk`. Enable with `uci set custos.main.enabled=1 && uci commit custos && /etc/init.d/custos start`, then open LuCI → Services → Custos.
+
+iStore publishing: the manifest format was verified against installed app-meta packages on a real iStoreOS device (see [docs/analysis/istore-publishing-2026-11-14.md](docs/analysis/istore-publishing-2026-11-14.md)); the official store listing itself still requires contacting the iStore (Linkease) team. The packages follow the generic opkg spec and install with plain `opkg` regardless.
+
+Upgrade notes: `/etc/custos/custos.toml`, `/etc/config/custos` and `/etc/init.d/custos` are conffiles — a normal `opkg` upgrade keeps a modified config and drops the new default beside it as `custos.toml-opkg`. Migrating from an old single-package layout (everything in `custos`) needs `opkg install --force-reinstall custos_*.ipk` first — which does replace conffiles — before `luci-app-custos` can install.
+
 ## Status
 
 P0–P3 are implemented (core recovery engine, plugin runtime and notifications, platform base capabilities, and the network/proxy/self-healing scenarios; acceptance scenarios 1 and 2 and the full Windows Wi-Fi path still await verification on real hardware). The optional management interface (P4) has the read-only dashboard and desktop tray; macOS/BSD adaptation and plugin signing are pending. See the [phased implementation plan](docs/guide/roadmap.md).

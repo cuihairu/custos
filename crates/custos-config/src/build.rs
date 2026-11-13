@@ -377,11 +377,14 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
         other => ConfigError::validation("dependency graph", other.to_string()),
     })?;
 
-    // Notification section, validated against the known resource set.
+    // Notification section, validated against the known resource set, then
+    // overridden wholesale by CUSTOS_NOTIFY_* env vars when any channel
+    // selector is present (OpenWrt/LuCI + container wiring, §8.2).
     let notification = notification::build(raw.notification, &known).map_err(|err| match err {
         ConfigError::Validation { .. } => err,
         other => ConfigError::validation("notification", other.to_string()),
     })?;
+    let notification = notification::env_overlay(notification)?;
 
     // Optional dashboard; a missing section means disabled.
     let dashboard = dashboard::parse(raw.dashboard)?;
