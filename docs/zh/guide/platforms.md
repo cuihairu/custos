@@ -26,7 +26,7 @@ RebootController
 - 进程检测。
 - Windows Service 控制。
 - Wi-Fi 状态检测。
-- Wi-Fi 重连。
+- Wi-Fi 重连（`netsh wlan connect` 经适配器探测；仅当 `netsh wlan show interfaces` 报告存在无线网卡时声明为原生，否则为 `unsupported`——`crates/custos-platform/src/windows.rs:539-544`、`:776-783`）。
 - 网络接口重置。
 - DNS 刷新。
 - IP 配置检查。
@@ -45,7 +45,7 @@ Wi-Fi 重连涉及凭据、网卡和系统权限，应使用系统支持的 API 
 
 - 进程检测。
 - systemd 服务控制。
-- OpenRC 后续适配。
+- OpenRC 服务控制（`rc-service`；`crates/custos-platform/src/linux.rs:170`，探测在 `:55`，接线在 `:85`）。
 - 网络接口状态。
 - IP 和路由检查。
 - DNS 检查。

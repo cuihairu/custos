@@ -38,7 +38,7 @@ custos status [--db PATH] [--json]     存储计数与最近审计事件
 custos runs [--db PATH] [--json]       最近恢复任务（新→旧）
 custos incidents [--db PATH] [--json]  事件（incident）历史
 custos notify status [--db PATH]   通知队列五状态计数与最近条目
-custos notify retry <ID> [--db]    手动重排一条死信通知
+custos notify retry <ID> [--db PATH]  手动重排一条死信通知
 custos resources <CONFIG>          列出配置的资源
 custos graph <CONFIG>              依赖图（拓扑序）
 ```

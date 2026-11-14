@@ -38,7 +38,7 @@ custos status [--db PATH] [--json]     Store counters and recent audit events
 custos runs [--db PATH] [--json]       Recent recovery runs (newest first)
 custos incidents [--db PATH] [--json]  Incident history
 custos notify status [--db PATH]   Notification queue counters (five states) and recent entries
-custos notify retry <ID> [--db]    Manually requeue a dead-lettered notification
+custos notify retry <ID> [--db PATH]  Manually requeue a dead-lettered notification
 custos resources <CONFIG>          List configured resources
 custos graph <CONFIG>              Dependency graph in topological order
 ```

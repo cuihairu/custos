@@ -26,8 +26,7 @@ Capabilities to support progressively include:
 - Process detection.
 - Windows Service control.
 - Wi-Fi state detection.
-- Wi-Fi reconnection (built, not yet wired — see Capabilities for the
-  current `unsupported` declaration).
+- Wi-Fi reconnection (`netsh wlan connect` behind an adapter probe; declared native only when `netsh wlan show interfaces` reports a radio, `unsupported` otherwise — `crates/custos-platform/src/windows.rs:539-544`, `:776-783`).
 - Network interface reset.
 - DNS flush.
 - IP configuration checks.
@@ -46,7 +45,7 @@ Needs to support:
 
 - Process detection.
 - systemd service control.
-- OpenRC adaptation later.
+- OpenRC service control (`rc-service`; `crates/custos-platform/src/linux.rs:170`, detected at `:55`, wired at `:85`).
 - Network interface state.
 - IP and route checks.
 - DNS checks.
