@@ -22,7 +22,7 @@ Enabling prerequisites and acceptance constraints:
 2. Dashboard unavailability must not affect the core engine.
 3. The Dashboard must not bypass the Core Engine to execute recovery directly.
 4. High-risk operations must still go through the unified authorization and audit.
-5. Transport security (auth, bind address, CSRF) is hardened centrally with the toolbox (ADR-0015).
+5. Transport security is the open end: the endpoints are read-only and carry no authentication and no CSRF token, so the only current protection is the loopback bind refusal — a non-loopback `listen` address is rejected outright (`crates/custos-dashboard/src/lib.rs:34-52`). Remote access is expected to go through a local reverse proxy that supplies its own authentication. Auth and CSRF hardening with the toolbox (ADR-0015) is still pending.
 
 ## 9.2 CLI commands
 
