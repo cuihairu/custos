@@ -26,17 +26,17 @@ Notification delivery failure must not block a RecoveryRun.
 
 ## 8.2 Built-in channels
 
-The first version ships with:
+Five channels are configured and dispatched (`crates/custos-config/src/notification/raw.rs:277-300`):
 
 ### Local Log
 
-Structured local logs, serving as the baseline audit output.
+Structured local logs, serving as the baseline audit output. Written first on every event, before any other channel, so a local audit line always exists even when every remote channel is down.
 
 ### Webhook
 
 Sends JSON events to a user-configured HTTP or HTTPS endpoint.
 
-Requirements:
+Implemented behavior:
 
 - Request timeout.
 - Retry and backoff.
@@ -49,13 +49,11 @@ Requirements:
 - Never log secrets.
 - Clearly distinguish an HTTP request failure from the peer's business-level confirmation failure.
 
-The Webhook should be the first general-purpose external channel implemented.
-
 ### SMTP Email
 
-Supports conventional SMTP email alerting.
+Conventional SMTP email alerting.
 
-Requirements:
+Implemented behavior:
 
 - Connection and send timeouts.
 - TLS support.
@@ -64,17 +62,20 @@ Requirements:
 - Retry on send failure.
 - Explicit send results.
 
-### Console
+### Telegram
 
-The CLI displays events in real time, for local debugging and runtime observation.
+Bot-token delivery to a configured chat, used by the OpenWrt init script overlay (`CUSTOS_NOTIFY_TELEGRAM_TOKEN` / `CUSTOS_NOTIFY_TELEGRAM_CHAT`, §8.5).
 
-Console is not a remote notification channel.
+### Herald
+
+Delivery to a Herald instance, with API-key or bearer authentication and the same SSRF posture as the webhook channel.
+
+Console is not one of them: there is no console channel in the configuration or in `crates/custos-notify`. Local observation runs through the local-log channel and the CLI's own `status`, `runs` and `incidents` output.
 
 ## 8.3 Third-party notification plugins
 
-Support for:
+Not yet built in, so far:
 
-- Telegram.
 - Discord.
 - Slack.
 - WeCom (Enterprise WeChat).
@@ -85,8 +86,6 @@ Support for:
 - User-defined notification channels.
 
 These channels plug in through a unified NotificationChannel interface; platform-specific logic must not be added to the Core Engine.
-
-The first version does not need all of them built in. Prioritize making Webhook and SMTP usable.
 
 ## 8.4 Event model
 

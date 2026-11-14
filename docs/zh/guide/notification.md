@@ -26,17 +26,17 @@ Core Engine 只产生结构化事件，不直接调用 Telegram、SMTP 或其他
 
 ## 8.2 内置渠道
 
-第一版内置：
+已配置并分发的通道有五个（`crates/custos-config/src/notification/raw.rs:277-300`）：
 
 ### Local Log
 
-本地结构化日志，作为基础审计输出。
+本地结构化日志，作为基础审计输出。每个事件都会先写入本地日志，再发其他通道，因此即使所有远程通道都不可用，本地也一定留有一条审计记录。
 
 ### Webhook
 
 向用户配置的 HTTP 或 HTTPS 接口发送 JSON 事件。
 
-要求：
+已实现的行为：
 
 - 请求超时。
 - 重试与退避。
@@ -49,13 +49,11 @@ Core Engine 只产生结构化事件，不直接调用 Telegram、SMTP 或其他
 - 不记录密钥。
 - 明确区分 HTTP 请求失败和对方业务确认失败。
 
-Webhook 应当是优先实现的通用外部渠道。
-
 ### SMTP Email
 
-支持常规 SMTP 邮件告警。
+常规 SMTP 邮件告警。
 
-要求：
+已实现的行为：
 
 - 连接与发送超时。
 - TLS 支持。
@@ -64,17 +62,20 @@ Webhook 应当是优先实现的通用外部渠道。
 - 发送失败重试。
 - 明确的发送结果。
 
-### Console
+### Telegram
 
-CLI 实时展示事件，用于本地调试和运行观察。
+按 bot token 投递到配置的会话，OpenWrt init 脚本的覆盖通道用它（`CUSTOS_NOTIFY_TELEGRAM_TOKEN` / `CUSTOS_NOTIFY_TELEGRAM_CHAT`，见 §8.5）。
 
-Console 不是远程通知渠道。
+### Herald
+
+投递到 Herald 实例，支持 API-key 或 bearer 认证，SSRF 姿态与 webhook 通道一致。
+
+Console 不在其中：配置里没有 console 通道，`crates/custos-notify` 里也没有 console 通道实现。本地观察靠本地日志通道，加上 CLI 自身的 `status`、`runs`、`incidents` 输出。
 
 ## 8.3 第三方通知插件
 
-支持：
+尚未内置：
 
-- Telegram。
 - Discord。
 - Slack。
 - 企业微信。
@@ -84,9 +85,7 @@ Console 不是远程通知渠道。
 - Gotify。
 - 用户自定义通知渠道。
 
-这些渠道通过统一 NotificationChannel 接口接入，不需要在 Core Engine 中加入各平台专属逻辑。
-
-第一版不需要全部内置。优先保证 Webhook 和 SMTP 可用。
+这些通道通过统一 NotificationChannel 接口接入，不需要在 Core Engine 中加入各平台专属逻辑。
 
 ## 8.4 事件模型
 
