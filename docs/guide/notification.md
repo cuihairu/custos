@@ -136,6 +136,14 @@ Examples:
 - The same fault keeps recurring: aggregate and suppress duplicates.
 - Fault recovered: send a recovery notification.
 
+### Environment overlay (`CUSTOS_NOTIFY_*`)
+
+Besides the TOML `[notification]` section, the engine accepts an environment overlay on startup (the OpenWrt init script uses it to forward the LuCI settings page into the engine):
+
+- Channel selectors: `CUSTOS_NOTIFY_LOCAL_LOG`; `CUSTOS_NOTIFY_TELEGRAM_TOKEN` + `CUSTOS_NOTIFY_TELEGRAM_CHAT`; `CUSTOS_NOTIFY_HERALD_URL` (plus optional `CUSTOS_NOTIFY_HERALD_APP` / `_TOKEN`).
+- `CUSTOS_NOTIFY_MIN_SEVERITY` lowers the severity floor but selects no channel by itself.
+- Semantics: when **any** channel selector is present, the overlay **replaces the entire** `[notification]` section (the TOML is never rewritten); a bare `CUSTOS_NOTIFY_MIN_SEVERITY` with no channel selector is a no-op.
+
 ## 8.6 Behavior while the network is down
 
 When the network is interrupted:

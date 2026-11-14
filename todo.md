@@ -276,6 +276,7 @@
 - [x] rust-toolchain.toml 补充（stable 通道声明） `694adad`
 - [x] CI：cargo fmt/clippy/test 工作流 `694adad`（ci.yml：push/PR 触发 fmt --check + clippy -D warnings + workspace test + mingw 交叉检查（apt 装 mingw-w64 编 bundled sqlite）；与 nightly 分离、永不发布版本）
 - [x] CI：docs:build 工作流（PR 校验） `694adad`（docs.yml：pnpm frozen-lockfile + vitepress build，路径过滤；本地验证含新 ADR 页构建通过）
+- [ ] 站点浏览器语言自动切换（首页 navigator.language 探测跳 /zh/ 或 rootLocale 重定向）——P2 增强项，需用户拍板范围；当前基线=手动切换+显式链接（en 页导航语言下拉、双语首页互链），G2 审计 2026-11-14 落项：无自动切换、契约通过（/ 为 EN、/zh/ 为 ZH）
 
 ## 审核发现
 

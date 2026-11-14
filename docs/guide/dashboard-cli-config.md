@@ -34,9 +34,9 @@ custos init <TYPE> --id <ID> [--out PATH] [--force]
                                    Scaffold a complete configuration template for a resource type
                                    (placeholder values; edit before use, then validate)
 custos start <CONFIG> [OPTIONS]    Run the engine loop (--db PATH, --interval MS, --once)
-custos status [--db PATH]          Store counters and recent audit events
-custos runs [--db PATH]            Recent recovery runs (newest first)
-custos incidents [--db PATH]       Incident history
+custos status [--db PATH] [--json]     Store counters and recent audit events
+custos runs [--db PATH] [--json]       Recent recovery runs (newest first)
+custos incidents [--db PATH] [--json]  Incident history
 custos notify status [--db PATH]   Notification queue counters (five states) and recent entries
 custos notify retry <ID> [--db]    Manually requeue a dead-lettered notification
 custos resources <CONFIG>          List configured resources
@@ -44,6 +44,8 @@ custos graph <CONFIG>              Dependency graph in topological order
 ```
 
 `start` performs crash recovery first (unfinished runs are marked outcome-unknown and never blindly retried), then enters the probe/recover tick loop; the notification engine is wired into the same process (event enqueue + background delivery, offline drain).
+
+`--json` on the three read-only history commands (`status` / `runs` / `incidents`) emits the same rows as a single machine-readable JSON document — it is the data source of the LuCI status dashboard.
 
 ---
 

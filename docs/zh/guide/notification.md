@@ -136,6 +136,14 @@ configuration.invalid
 - 同一故障持续发生：聚合并抑制重复通知。
 - 故障恢复：发送恢复通知。
 
+### 环境变量覆盖（`CUSTOS_NOTIFY_*`）
+
+除了 TOML 的 `[notification]` 段，引擎启动时还接受环境变量覆盖（OpenWrt 的 init 脚本用它把 LuCI 设置页的通道配置透传给引擎）：
+
+- 通道选择变量：`CUSTOS_NOTIFY_LOCAL_LOG`；`CUSTOS_NOTIFY_TELEGRAM_TOKEN` + `CUSTOS_NOTIFY_TELEGRAM_CHAT`；`CUSTOS_NOTIFY_HERALD_URL`（另加可选的 `CUSTOS_NOTIFY_HERALD_APP` / `_TOKEN`）。
+- `CUSTOS_NOTIFY_MIN_SEVERITY` 只降低严重度下限，本身不选通道。
+- 语义：只要**任一**通道选择变量存在，覆盖就**整体替换** `[notification]` 段（绝不回写 TOML）；只设 `CUSTOS_NOTIFY_MIN_SEVERITY` 而无通道选择变量时为无操作。
+
 ## 8.6 断网时的行为
 
 网络中断时：

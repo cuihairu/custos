@@ -31,9 +31,9 @@ CLI 是 P0/P1 的操作面（已实现）：
 ```text
 custos validate <CONFIG>           解析并校验配置（拒绝重复 ID、悬空引用、依赖环）
 custos start <CONFIG> [OPTIONS]    运行引擎循环（--db PATH、--interval MS、--once）
-custos status [--db PATH]          存储计数与最近审计事件
-custos runs [--db PATH]            最近恢复任务（新→旧）
-custos incidents [--db PATH]       事件（incident）历史
+custos status [--db PATH] [--json]     存储计数与最近审计事件
+custos runs [--db PATH] [--json]       最近恢复任务（新→旧）
+custos incidents [--db PATH] [--json]  事件（incident）历史
 custos notify status [--db PATH]   通知队列五状态计数与最近条目
 custos notify retry <ID> [--db]    手动重排一条死信通知
 custos resources <CONFIG>          列出配置的资源
@@ -42,6 +42,8 @@ custos graph <CONFIG>              依赖图（拓扑序）
 
 `start` 启动时先做崩溃恢复（未终态运行标记 outcome-unknown，绝不盲目重试），
 再进入探测/恢复 tick 循环；通知引擎随进程接线（事件入队 + 后台投递，断网补发）。
+
+三个只读历史命令（`status` / `runs` / `incidents`）的 `--json` 把同样的行输出为单个机器可读 JSON 文档——它就是 LuCI 状态面板的数据源。
 
 ---
 
