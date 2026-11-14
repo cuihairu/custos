@@ -10,9 +10,9 @@ This is the implementation map behind Custos. Layers are responsibilities: a lay
 
 **Responsibility:** turn operator input into validated domain objects and shared vocabulary before any runtime side effect.
 
-- **Implementation:** `crates/custos-config/src/lib.rs` parses strict TOML, validates references, alternatives, recovery plans and permissions, then builds `ValidatedConfig`, `Resource`, `Dependency` and `DependencyGraph` (`crates/custos-config/src/lib.rs:347`).
+- **Implementation:** `crates/custos-config/src/lib.rs` parses strict TOML, validates references, alternatives, recovery plans and permissions, then builds `ValidatedConfig`, `Resource`, `Dependency` and `DependencyGraph` (`crates/custos-config/src/build.rs:42`).
 - **Domain model:** resource/dependency/recovery/event types live in `crates/custos-model`; the graph owns cycle detection and topological order (`crates/custos-model/src/graph.rs:35`).
-- **Configuration schema:** the top-level unknown-field boundary is `RawConfig` (`crates/custos-config/src/lib.rs:293`); all probe fields are declared in `RawProbe` (`crates/custos-config/src/lib.rs:56`).
+- **Configuration schema:** the top-level unknown-field boundary is `RawConfig` (`crates/custos-config/src/schema.rs:254`); all probe fields are declared in `RawProbe` (`crates/custos-config/src/schema.rs:17`).
 - **Protocol files:** none; this layer uses TOML plus serializable domain structs.
 - **Copy attachment:** `docs/guide/resources.md`, `docs/guide/dashboard-cli-config.md`, and `docs/guide/overview.md` §2.
 
@@ -20,7 +20,7 @@ This is the implementation map behind Custos. Layers are responsibilities: a lay
 
 **Responsibility:** own observation scheduling, dependency ordering, failure diagnosis, recovery state transitions, budgets and final health verdicts.
 
-- **Implementation:** `Engine` owns managed resources, topological probe order, active runs, waiters and the event sink (`crates/custos-engine/src/engine.rs:49`); `tick` probes due resources in dependency order (`crates/custos-engine/src/engine.rs:196`); recovery starts at `try_recover` (`crates/custos-engine/src/engine.rs:453`).
+- **Implementation:** `Engine` owns managed resources, topological probe order, active runs, waiters and the event sink (`crates/custos-engine/src/engine/mod.rs:49`); `tick` probes due resources in dependency order (`crates/custos-engine/src/engine/orchestrate.rs:9`); recovery starts at `try_recover` (`crates/custos-engine/src/engine/recover.rs:8`).
 - **State:** in-process `ManagedResource`, snapshots, active-run set and waiters; durable run state is delegated through `RunStore` (`crates/custos-engine/src/events.rs:130`).
 - **Budgets:** start, duration, restart-rate and high-risk limits are enforced before work is recorded (`crates/custos-engine/src/budget.rs:59`).
 - **Configuration schema:** this layer consumes the validated graph and per-resource recovery policy; there is no separate protocol file.
@@ -32,7 +32,7 @@ This is the implementation map behind Custos. Layers are responsibilities: a lay
 
 - **Native probes:** `Probe::probe` returns a normalized report; it never chooses an action (`crates/custos-probe/src/lib.rs:70`). `custos-core::build_probes` turns every configured resource into a builtin probe at startup (`crates/custos-core/src/assemble.rs:42`).
 - **Protocol:** native probes have no wire protocol; each probe reads its typed slice of `Resource.config`.
-- **Plugin protocol:** newline-framed JSON-RPC methods and capability declarations are defined in `crates/custos-plugin-api/src/rpc.rs:23` and `crates/custos-plugin-api/src/capability.rs:38`. The host session frames both pipe directions with output caps and deadlines (`crates/custos-plugin-host/src/session.rs:245`); example plugins call `serve` from `crates/custos-plugin-api/src/server.rs:32`.
+- **Plugin protocol:** newline-framed JSON-RPC methods and capability declarations are defined in `crates/custos-plugin-api/src/rpc.rs:23` and `crates/custos-plugin-api/src/capability.rs:38`. The host session frames both pipe directions with output caps and deadlines (`crates/custos-plugin-host/src/session.rs:101`); example plugins call `serve` from `crates/custos-plugin-api/src/server.rs:32`.
 - **Permission/dispatch:** builtin and plugin operations meet at `ToolRegistry`; permission is checked before a builtin tool or plugin is reached (`crates/custos-toolbox/src/registry.rs:181`).
 - **Configuration schema:** plugin executables and resource-specific probe parameters arrive through the main TOML contract; external controller settings are read by the example plugins themselves (`plugins/mihomo/src/main.rs:28`).
 - **Copy attachment:** `docs/guide/plugins.md`, `docs/guide/probe-survey.md`, `docs/guide/security.md`, and `docs/adr/ADR-0003-why-jsonrpc-over-stdio.md`.
@@ -52,8 +52,8 @@ This is the implementation map behind Custos. Layers are responsibilities: a lay
 **Responsibility:** preserve evidence and run state before, during and after recovery; expose the same durable queue to observers.
 
 - **Engine port:** `RunStore` persists runs, attempts, verifications, evidence, diagnoses, incidents, steps, events and unfinished runs (`crates/custos-engine/src/events.rs:130`).
-- **SQLite implementation:** `Store::open` establishes the shared database (`crates/custos-store/src/store.rs:44`) and implements both `RunStore` and `NotificationQueue` (`crates/custos-store/src/store.rs:810`, `crates/custos-store/src/store.rs:609`).
-- **Schema:** numbered migrations create the durable tables (`crates/custos-store/src/migrations.rs:46`); migration application itself is recorded at `crates/custos-store/src/migrations.rs:213`.
+- **SQLite implementation:** `Store::open` establishes the shared database (`crates/custos-store/src/store/lifecycle.rs:8`) and implements both `RunStore` and `NotificationQueue` (`crates/custos-store/src/store/runs.rs:5`, `crates/custos-store/src/migrations.rs:180`).
+- **Schema:** numbered migrations create the durable tables (`crates/custos-store/src/migrations.rs:61`); migration application itself is recorded at `crates/custos-store/src/migrations.rs:249`.
 - **State:** file-backed SQLite only. There is no Redis, MySQL or daemon-wide cache state in this repository.
 - **Copy attachment:** `docs/guide/persistence.md` and `docs/adr/ADR-0007-why-sqlite.md`.
 
@@ -71,30 +71,30 @@ This is the implementation map behind Custos. Layers are responsibilities: a lay
 
 **Responsibility:** compose all layers once, then run/supervise processes with crash-safe semantics.
 
-- **Assembly:** `assemble` is the single construction point for probes, SQLite, notifications, engine, builtin executor and clock (`crates/custos-core/src/assemble.rs:58`); CLI startup resumes unfinished runs and starts the delivery worker (`crates/custos-cli/src/main.rs:216`, `crates/custos-cli/src/main.rs:230`).
+- **Assembly:** `assemble` is the single construction point for probes, SQLite, notifications, engine, builtin executor and clock (`crates/custos-core/src/assemble.rs:59`); CLI startup resumes unfinished runs and starts the delivery worker (`crates/custos-cli/src/main.rs:221`, `crates/custos-cli/src/main.rs:243`).
 - **Supervision:** plugin restart budget, handshake and degraded status are isolated in `PluginSupervisor` (`crates/custos-plugin-host/src/supervisor.rs:66`).
 - **State:** engine and supervisor in-memory state is bounded and process-local; durable crash state is SQLite. The process owns both workers; there is no Redis lease or MySQL coordinator.
-- **Configuration schema:** CLI options are parsed at `crates/custos-cli/src/main.rs:125`; store policy is typed in `crates/custos-store/src/config.rs:21`.
+- **Configuration schema:** CLI options are parsed at `crates/custos-cli/src/main.rs:128`; store policy is typed in `crates/custos-store/src/config.rs:21`.
 - **Copy attachment:** `docs/guide/workspace.md` and `docs/adr/ADR-0013-why-unknown-outcomes-are-never-blindly-retried.md`.
 
 ## 8. Interface and observer layer
 
 **Responsibility:** expose read/introspection/control surfaces without allowing a client to bypass coordination, permissions or durable state.
 
-- **CLI:** the command surface validates, introspects, starts, inspects runs/incidents/resources and graphs (`crates/custos-cli/src/main.rs:44`); the main loop owns tick cadence and notification worker lifecycle (`crates/custos-cli/src/main.rs:253`).
-- **Dashboard:** optional, disabled by default, loopback-only and read-only (`crates/custos-dashboard/src/lib.rs:26`, route table at `crates/custos-dashboard/src/lib.rs:125`).
-- **Tray:** a separate process reads the same SQLite file and renders system menu state (`crates/custos-tray/src/main.rs:137`).
-- **Python binding:** embedders call `run_once`, which goes through the same `assemble` path (`crates/custos-python/src/lib.rs:262`).
+- **CLI:** the command surface validates, introspects, starts, inspects runs/incidents/resources and graphs (`crates/custos-cli/src/main.rs:50`); the main loop owns tick cadence and notification worker lifecycle (`crates/custos-cli/src/main.rs:273`).
+- **Dashboard:** optional, disabled by default, loopback-only and read-only (`crates/custos-dashboard/src/lib.rs:26`, route table at `crates/custos-dashboard/src/lib.rs:180`).
+- **Tray:** a separate process reads the same SQLite file and renders system menu state (`crates/custos-tray/src/main.rs:25`).
+- **Python binding:** embedders call `run_once`, which goes through the same `assemble` path (`crates/custos-python/src/lib.rs:259`).
 - **Configuration schema:** dashboard fields live in `crates/custos-config/src/dashboard.rs`; the dashboard itself has no write API.
 - **Copy attachment:** `docs/guide/dashboard-cli-config.md`, `docs/adr/ADR-0010-why-dashboard-off-by-default.md`, and the homepage architecture diagram.
 
 ## Why this split
 
-1. **Reject invalid topology before execution.** Configuration parsing constructs and validates the dependency graph at startup, preventing unknown resources and cycles from becoming recovery-time recursion (`crates/custos-model/src/graph.rs:59`; `crates/custos-config/src/lib.rs:347`).
-2. **Keep capability providers out of control flow.** Probes return observations only (`crates/custos-probe/src/lib.rs:70`), while the engine owns dependency resolution, planning, execution and final health verdicts (`crates/custos-engine/src/engine.rs:196`; `crates/custos-engine/src/engine.rs:453`).
+1. **Reject invalid topology before execution.** Configuration parsing constructs and validates the dependency graph at startup, preventing unknown resources and cycles from becoming recovery-time recursion (`crates/custos-model/src/graph.rs:59`; `crates/custos-config/src/build.rs:42`).
+2. **Keep capability providers out of control flow.** Probes return observations only (`crates/custos-probe/src/lib.rs:70`), while the engine owns dependency resolution, planning, execution and final health verdicts (`crates/custos-engine/src/engine/orchestrate.rs:9`; `crates/custos-engine/src/engine/recover.rs:8`).
 3. **Normalize native and external capabilities at one permission boundary.** Builtin tools and plugin operations are registered in one table, and denial happens before either implementation runs (`crates/custos-toolbox/src/registry.rs:181`), so plugin subprocesses cannot acquire an unreviewed control path.
 4. **Make OS execution replaceable without making it policy-bearing.** Recovery delegates execution through `ActionExecutor` (`crates/custos-engine/src/executor.rs:10`), while concrete OS capabilities are declared and implemented behind platform contracts (`crates/custos-platform/src/controller.rs:41`; `crates/custos-platform/src/capability.rs:19`).
-5. **Persist state before and after risky transitions.** The engine does not depend on SQL directly; it writes through `RunStore` (`crates/custos-engine/src/events.rs:130`), and SQLite implements durable runs plus the notification queue in one file (`crates/custos-store/src/store.rs:810`; `crates/custos-store/src/store.rs:609`).
+5. **Persist state before and after risky transitions.** The engine does not depend on SQL directly; it writes through `RunStore` (`crates/custos-engine/src/events.rs:130`), and SQLite implements durable runs plus the notification queue in one file (`crates/custos-store/src/store/runs.rs:5`; `crates/custos-store/src/migrations.rs:180`).
 6. **Keep reporting failure out of the recovery path.** Recovery emits events to a non-blocking notification sink (`crates/custos-core/src/assemble.rs:30`); notification rules enqueue (`crates/custos-notify/src/engine.rs:203`), and a separate worker delivers later (`crates/custos-notify/src/engine.rs:293`).
-7. **Isolate crash blast radius.** A plugin process death is absorbed by a bounded restart/degraded supervisor (`crates/custos-plugin-host/src/supervisor.rs:128`), while an interrupted engine run is marked unknown and re-driven only by explicit resume logic (`crates/custos-engine/src/engine.rs:1178`).
-8. **Preserve observability when management surfaces fail.** The engine loop remains independent of optional CLI/dashboard/tray/Python callers; dashboard is bound only when enabled (`crates/custos-cli/src/main.rs:196`) and the tray reads a file rather than owning engine state (`crates/custos-tray/src/main.rs:137`).
+7. **Isolate crash blast radius.** A plugin process death is absorbed by a bounded restart/degraded supervisor (`crates/custos-plugin-host/src/supervisor.rs:66`), while an interrupted engine run is marked unknown and re-driven only by explicit resume logic (`crates/custos-engine/src/engine/orchestrate.rs:224`).
+8. **Preserve observability when management surfaces fail.** The engine loop remains independent of optional CLI/dashboard/tray/Python callers; dashboard is bound only when enabled (`crates/custos-cli/src/main.rs:199`) and the tray reads a file rather than owning engine state (`crates/custos-tray/src/main.rs:25`).
