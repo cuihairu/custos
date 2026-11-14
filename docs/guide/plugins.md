@@ -136,7 +136,7 @@ A plugin declaring an action does not automatically make it allowed.
 ## Plugin model ruling (user decision, 2026-10-29)
 
 - **One plugin = the complete monitoring and handling logic for one resource type**: probing, diagnosis, recovery actions and the verification loop live inside the same plugin, with no half-finished splits.
-- **Plugins can be depended on by other plugins**: dependency direction matches the resource dependency graph, resolved uniformly by the Core Engine.
+- **Plugins are composed through the resource dependency graph**: dependencies link resources, not plugins directly (`Dependency` carries a `ResourceId`, `crates/custos-model/src/dependency.rs:56-69`); a plugin rides along with its resource into the graph, and the Core Engine resolves it uniformly.
 - **Consumers enable a plugin with simple configuration only**: declare the resource type and parameters, no glue code; configuration loading follows the configuration specification in §10.
 
 ## Builtin capabilities and Python script extension (user decision, 2026-10-29)
