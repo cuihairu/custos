@@ -38,7 +38,10 @@ custos/
 └── examples/
     ├── basic-process.toml
     ├── dependency-chain.toml
-    └── notifications.toml
+    ├── network-outage.toml
+    ├── notifications.toml
+    ├── remote-desktop.toml
+    └── sunlogin.toml
 ```
 
 Integration tests live inside each crate under `crates/*/tests/` (for example `crates/custos-engine/tests/vertical.rs`, `crates/custos-notify/tests/offline.rs`, `crates/custos-platform/tests/`).

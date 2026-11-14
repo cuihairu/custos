@@ -38,7 +38,10 @@ custos/
 └── examples/
     ├── basic-process.toml
     ├── dependency-chain.toml
-    └── notifications.toml
+    ├── network-outage.toml
+    ├── notifications.toml
+    ├── remote-desktop.toml
+    └── sunlogin.toml
 ```
 
 集成测试在各 crate 内的 `crates/*/tests/` 下（如 `crates/custos-engine/tests/vertical.rs`、`crates/custos-notify/tests/offline.rs`、`crates/custos-platform/tests/`）。
