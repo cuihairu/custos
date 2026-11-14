@@ -8,30 +8,28 @@ title: Resource and Dependency Model
 
 A Resource is the basic object that Custos monitors and recovers.
 
-Example resource types (the factory-wired set, `crates/custos-probe/src/factory.rs:38-148`):
+The accepted resource types are exactly the arms of the factory dispatch (`crates/custos-probe/src/factory.rs:38-148`); anything else is rejected at startup:
 
 - `process`
-- `exec`
 - `custom-command`
 - `http-endpoint`
 - `network-connectivity`
-- `tcp`
 - `dns`
 - `tls-certificate`
 - `disk`
 - `memory`
 - `cpu`
 - `log`
-- `systemd`
-- `windows-service`
 - `docker-container`
 - `icmp`
 - `network-interface`
 - `default-gateway`
 - `proxy`
 - `database`
-- `service` (systemd / windows-service native, exec fallback)
+- `service`
 - `tunnel`
+
+`service` is the one entry that dispatches on a sub-field: with `probe.unit` it uses the native service-manager probe (systemd on Linux, Windows SCM on Windows, `crates/custos-probe/src/factory.rs:114-141`); with a `command` instead it falls back to the exec probe. `systemd`, `windows-service` and `tcp` are probe-module names, not resource types, and `exec` is the probe behind `custom-command`/`tunnel`, not a type of its own.
 
 Every resource has:
 
@@ -48,16 +46,15 @@ Resource
 └── enabled
 ```
 
-Field semantics:
+Field semantics (`crates/custos-model/src/resource.rs:45-58`):
 
 - `id`: a stable, unique identifier within configuration scope.
-- `type`: the resource type.
+- `resource_type`: the resource type (written as `type` in the TOML, `crates/custos-config/src/schema.rs:191-193`).
 - `plugin_ref`: the plugin implementing the resource capabilities.
 - `config`: configuration specific to the resource type.
 - `health_policy`: health criteria, consecutive failure thresholds and recovery confirmation requirements.
 - `recovery_policy`: recovery candidate plans and recovery limits.
 - `dependencies`: the resource's upstream dependencies.
-- `permissions`: the scope of operations allowed for this resource.
 - `enabled`: whether monitoring and automatic recovery are enabled.
 
 Resource IDs must not change across process restarts, plugin restarts or machine reboots.

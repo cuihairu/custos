@@ -8,30 +8,28 @@ title: Resource 与 Dependency 模型
 
 Resource 是 Custos 监控和恢复的基本对象。
 
-资源类型示例（工厂已接线的类型，`crates/custos-probe/src/factory.rs:38-148`）：
+接受的资源类型就是工厂分发的分支集（`crates/custos-probe/src/factory.rs:38-148`），其余一律在启动时被拒绝：
 
 - `process`
-- `exec`
 - `custom-command`
 - `http-endpoint`
 - `network-connectivity`
-- `tcp`
 - `dns`
 - `tls-certificate`
 - `disk`
 - `memory`
 - `cpu`
 - `log`
-- `systemd`
-- `windows-service`
 - `docker-container`
 - `icmp`
 - `network-interface`
 - `default-gateway`
 - `proxy`
 - `database`
-- `service`（systemd / windows-service 原生，exec 兜底）
+- `service`
 - `tunnel`
+
+`service` 是唯一按子字段分发的类型：带 `probe.unit` 时走原生服务管理器探测（Linux 用 systemd、Windows 用 SCM，`crates/custos-probe/src/factory.rs:114-141`），改用 `command` 时回退到 exec 探测。`systemd`、`windows-service`、`tcp` 是探测模块名，不是资源类型；`exec` 是 `custom-command`/`tunnel` 背后的探测，不是独立类型。
 
 每个资源具有：
 
@@ -48,10 +46,10 @@ Resource
 └── enabled
 ```
 
-字段语义：
+字段语义（`crates/custos-model/src/resource.rs:45-58`）：
 
 - `id`：配置范围内稳定且唯一的标识。
-- `resource_type`：资源类型。
+- `resource_type`：资源类型（TOML 中写作 `type`，`crates/custos-config/src/schema.rs:191-193`）。
 - `plugin_ref`：实现资源能力的插件。
 - `config`：资源类型专属配置。
 - `health_policy`：健康判定、连续失败阈值和恢复确认要求。
