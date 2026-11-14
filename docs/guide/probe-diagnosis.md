@@ -103,6 +103,4 @@ The Exec Probe executes a controlled check command and parses:
 
 The Exec Probe must limit runtime and output size, and clean up the process tree on timeout. On Windows it must not kill only the parent process and leave orphaned children behind.
 
-Network, HTTP, service management and proxy-specific probes come in later versions.
-
 ---
