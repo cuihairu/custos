@@ -49,8 +49,8 @@ title: 常见探测类型业界调研与 custos 差距分析
 | 探测类型 | 业界谁在用 | custos 现状 | 优先级 | 实现要点建议（未实现） |
 |---|---|---|---|---|
 | HTTP(S) 状态码/响应时间 | [check_http](https://www.monitoring-plugins.org/doc/man/index.html)、[blackbox_exporter http prober](https://github.com/prometheus/blackbox_exporter/blob/master/CONFIGURATION.md)、[Uptime Kuma HTTP(s)](https://github.com/louislam/uptime-kuma)、[Zabbix net.tcp.service[https]](https://zabbix.com/documentation/current/en/manual/config/items/itemtypes/zabbix_agent) | ✅ `crates/custos-probe/src/factory.rs:53-55`（原生 `HttpProbe`） | 高（已有） | — |
-| HTTP 关键字/正则匹配 | [Uptime Kuma HTTP(s) Keyword](https://github.com/louislam/uptime-kuma)、[check_http -r/-s](https://github.com/nagios-plugins/nagios-plugins/tree/master/plugins)、[blackbox fail_if_matches_regexp](https://github.com/prometheus/blackbox_exporter/blob/master/CONFIGURATION.md) | ✅ `crates/custos-probe/src/http.rs:25-26`（`contains` + `fail_if_matches`） | 高（已有） | — |
-| HTTP JSON 断言（json path/值比较） | [Uptime Kuma HTTP(s) Json Query](https://github.com/louislam/uptime-kuma) | ✅ `crates/custos-probe/src/http.rs:41,100`（`json_path` + `check_json_assertion`） | 中（已有） | — |
+| HTTP 关键字/正则匹配 | [Uptime Kuma HTTP(s) Keyword](https://github.com/louislam/uptime-kuma)、[check_http -r/-s](https://github.com/nagios-plugins/nagios-plugins/tree/master/plugins)、[blackbox fail_if_matches_regexp](https://github.com/prometheus/blackbox_exporter/blob/master/CONFIGURATION.md) | ✅ `crates/custos-probe/src/http/mod.rs:36-37`（`contains` + `fail_if_matches`） | 高（已有） | — |
+| HTTP JSON 断言（json path/值比较） | [Uptime Kuma HTTP(s) Json Query](https://github.com/louislam/uptime-kuma) | ✅ `crates/custos-probe/src/http/json.rs:44,61`（`json_path` + `check_json_assertion`） | 中（已有） | — |
 | TCP 端口连通 | [check_tcp](https://www.monitoring-plugins.org/doc/man/index.html)、[blackbox tcp prober](https://github.com/prometheus/blackbox_exporter/blob/master/CONFIGURATION.md)、[Uptime Kuma Port](https://github.com/louislam/uptime-kuma)、[Zabbix net.tcp.port](https://zabbix.com/documentation/current/en/manual/config/items/itemtypes/zabbix_agent) | ✅ `crates/custos-probe/src/factory.rs:56-74`（原生 `TcpProbe`，TLS 可选） | 高（已有） | — |
 | ICMP Ping（丢包/时延） | [check_ping / check_fping](https://www.monitoring-plugins.org/doc/man/index.html)、[blackbox icmp prober](https://github.com/prometheus/blackbox_exporter/blob/master/CONFIGURATION.md)、[Uptime Kuma Ping](https://github.com/louislam/uptime-kuma) | ✅ `crates/custos-probe/src/factory.rs:96-98`（原生 `PingProbe`） | 高（已有） | — |
 | 协议握手（ssh/smtp/imap/pop/ldap/ftp banner） | [check_ssh / check_smtp / check_imap / check_pop / check_ldap / check_ftp](https://www.monitoring-plugins.org/doc/man/index.html)、[Zabbix net.tcp.service 服务清单](https://zabbix.com/documentation/current/en/manual/config/items/itemtypes/zabbix_agent) | ❌ 无 | 中 | 先 TCP 连接再读 greeting/发探测串匹配期望应答；先做 ssh+smtp 两个最常用的 |
@@ -144,4 +144,4 @@ title: 常见探测类型业界调研与 custos 差距分析
 
 ---
 
-*本文档由 custos 探测能力调研生成；custos 代码证据基于 `crates/custos-probe`（process.rs 117 行 / exec.rs 338 行 / factory.rs 90 行）。外部工具能力以所附链接为准。*
+*本文档由 custos 探测能力调研生成；custos 代码证据基于 `crates/custos-probe`（process.rs 287 行 / exec.rs 658 行 / factory.rs 421 行）。外部工具能力以所附链接为准。*
