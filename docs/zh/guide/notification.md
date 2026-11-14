@@ -26,7 +26,7 @@ Core Engine 只产生结构化事件，不直接调用 Telegram、SMTP 或其他
 
 ## 8.2 内置渠道
 
-已配置并分发的通道有五个（`crates/custos-config/src/notification/raw.rs:277-300`）：
+已配置并分发的通道有五个（`crates/custos-config/src/notification/raw.rs:271-413`）：
 
 ### Local Log
 
@@ -133,6 +133,8 @@ configuration.invalid
 - 恢复耗尽：发送高优先级告警。
 - 插件不可用：根据受影响资源的重要性决定是否通知。
 - 同一故障持续发生：聚合并抑制重复通知。
+
+重复抑制是规则级键：`dedup_window_ms`（默认 30 分钟，`0` 关闭）在窗口内抑制同一故障的重复通知（`crates/custos-config/src/notification/raw.rs:45-53`）。
 - 故障恢复：发送恢复通知。
 
 ### 环境变量覆盖（`CUSTOS_NOTIFY_*`）

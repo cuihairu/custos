@@ -2,7 +2,8 @@
 #
 # The `[notification]` section is independent from recovery rules: recovery
 # policy decides *how to fix*, notification rules decide *who hears about it*.
-# Local log is the always-on base audit; webhook and SMTP are remote channels.
+# Local log is the always-on base audit; webhook and Herald are the remote
+# channels used here (SMTP is supported too, see docs/guide/notification.md §8.2).
 version = 1
 
 [[resources]]

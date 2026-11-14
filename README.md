@@ -6,7 +6,7 @@
 </div>
 
 <div align="center">
-  <img alt="Rust" src="https://img.shields.io/badge/Rust-stable-dea584?logo=rust&logoColor=white" /> <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24-339933?logo=nodedotjs&logoColor=white" /> <img alt="pnpm" src="https://img.shields.io/badge/pnpm-workspaces-F69220?logo=pnpm&logoColor=white" /> <img alt="Python" src="https://img.shields.io/badge/Python-PyO3%20bindings-3776AB?logo=python&logoColor=white" /> <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-blue" /> <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%28partial%29%20%7C%20OpenWrt-lightgrey" /> <a href="https://cuihairu.github.io/custos/"><img src="https://img.shields.io/badge/docs-blue" alt="docs"></a>
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-stable-dea584?logo=rust&logoColor=white" /> <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24-339933?logo=nodedotjs&logoColor=white" /> <img alt="pnpm" src="https://img.shields.io/badge/pnpm-docs%20toolchain-F69220?logo=pnpm&logoColor=white" /> <img alt="Python" src="https://img.shields.io/badge/Python-PyO3%20bindings-3776AB?logo=python&logoColor=white" /> <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-blue" /> <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%28partial%29%20%7C%20OpenWrt-lightgrey" /> <a href="https://cuihairu.github.io/custos/"><img src="https://img.shields.io/badge/docs-blue" alt="docs"></a>
 </div>
 
 Custos is a cross-platform, local-first, dependency-aware fault detection and automatic recovery engine (self-healing) written in Rust.
@@ -27,7 +27,7 @@ Custos is a cross-platform, local-first, dependency-aware fault detection and au
 
 ## Plugin model (authoritative)
 
-One plugin = the complete monitoring + handling logic for ONE resource kind (probe, diagnosis, recovery actions, verification). Resources and their plugins are composed through the resource dependency graph; consumers enable them with simple configuration only — no glue code.
+One plugin = the complete monitoring + handling logic for ONE resource kind (probe, diagnosis, recovery actions, verification). Resources and their plugins are composed through the resource dependency graph; consumers enable them with simple configuration only — no glue code. Implementation status: the builtin adapters are enabled by plain TOML today; the shipped plugin binaries (mihomo, cloudflared, openclash) speak the protocol but are not yet reachable from configuration — the schema has no `plugin` key and the runtime assembles builtin probes only (`crates/custos-core/src/assemble.rs:43-56`).
 
 ## Builtin capabilities and Python script extension (authoritative)
 
@@ -52,7 +52,7 @@ Ready-to-run monitoring configurations in `examples/` (each validates with `cust
 
 - [basic-process.toml](examples/basic-process.toml) — watch a PID file, restart via plan.
 - [dependency-chain.toml](examples/dependency-chain.toml) — tunnel → proxy → network recovery order.
-- [notifications.toml](examples/notifications.toml) — webhook/SMTP notification wiring.
+- [notifications.toml](examples/notifications.toml) — webhook / local-log / Herald notification wiring.
 - [sunlogin.toml](examples/sunlogin.toml) — 向日葵 (Sunlogin) remote-desktop supervision: PC offline detection and only-Sunlogin recovery, the canonical self-healing scenario (Windows `SunloginService`, Linux `oray-sunlogin.service`).
 - [remote-desktop.toml](examples/remote-desktop.toml) — RustDesk + TeamViewer + 向日葵 behind one network dependency: if the network is down only network recovery runs; otherwise only the dead remote-desktop service is restarted.
 - [network-outage.toml](examples/network-outage.toml) — 断网 detection with layered recovery: LAN gateway probe and public-DNS anchor as a dependency chain, so the LAN link is fixed before the WAN side.
@@ -76,6 +76,10 @@ Install order: `custos` → `luci-app-custos` → `app-meta-custos` (the Depends
 iStore publishing: the manifest format was verified against installed app-meta packages on a real iStoreOS device (see [docs/analysis/istore-publishing-2026-11-14.md](docs/analysis/istore-publishing-2026-11-14.md)); the official store listing itself still requires contacting the iStore (Linkease) team. The packages follow the generic opkg spec and install with plain `opkg` regardless.
 
 Upgrade notes: `/etc/custos/custos.toml`, `/etc/config/custos` and `/etc/init.d/custos` are conffiles — a normal `opkg` upgrade keeps a modified config and drops the new default beside it as `custos.toml-opkg`. Migrating from an old single-package layout (everything in `custos`) needs `opkg install --force-reinstall custos_*.ipk` first — which does replace conffiles — before `luci-app-custos` can install.
+
+## Nightly builds
+
+The rolling `nightly` prerelease publishes ready-made binaries built by `.github/workflows/nightly.yml` after fmt + clippy + the full workspace test suite: Linux deb / rpm (glibc, x86_64 + aarch64) and tar.gz (glibc + musl, x86_64 + aarch64), Windows msi / zip, macOS dmg / tar.gz (aarch64), and the OpenWrt `.ipk` trio (`custos` / `luci-app-custos` / `app-meta-custos`, x86_64 + aarch64 musl). This is a rolling binary feed, not a verified formal release.
 
 ## Status
 

@@ -6,7 +6,7 @@
 </div>
 
 <div align="center">
-  <img alt="Rust" src="https://img.shields.io/badge/Rust-stable-dea584?logo=rust&logoColor=white" /> <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24-339933?logo=nodedotjs&logoColor=white" /> <img alt="pnpm" src="https://img.shields.io/badge/pnpm-workspaces-F69220?logo=pnpm&logoColor=white" /> <img alt="Python" src="https://img.shields.io/badge/Python-PyO3%20bindings-3776AB?logo=python&logoColor=white" /> <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-blue" /> <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%28partial%29%20%7C%20OpenWrt-lightgrey" /> <a href="https://cuihairu.github.io/custos/zh/"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue" alt="docs"></a>
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-stable-dea584?logo=rust&logoColor=white" /> <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24-339933?logo=nodedotjs&logoColor=white" /> <img alt="pnpm" src="https://img.shields.io/badge/pnpm-docs%20toolchain-F69220?logo=pnpm&logoColor=white" /> <img alt="Python" src="https://img.shields.io/badge/Python-PyO3%20bindings-3776AB?logo=python&logoColor=white" /> <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-blue" /> <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%28partial%29%20%7C%20OpenWrt-lightgrey" /> <a href="https://cuihairu.github.io/custos/zh/"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue" alt="docs"></a>
 </div>
 
 Custos 是一个用 Rust 编写的跨平台、本地自治、依赖感知的故障检测与自动恢复（自愈）引擎。
@@ -27,7 +27,7 @@ Custos 是一个用 Rust 编写的跨平台、本地自治、依赖感知的故�
 
 ## 插件口径（权威）
 
-一个插件 = 一种资源的完整监控与处理逻辑（探测、诊断、恢复动作、验证）。资源与其插件经资源依赖图组合；使用方只需简单配置即可启用，无需编写胶水代码。
+一个插件 = 一种资源的完整监控与处理逻辑（探测、诊断、恢复动作、验证）。资源与其插件经资源依赖图组合；使用方只需简单配置即可启用，无需编写胶水代码。实现现状：内置适配器今天已可直接用 TOML 启用；已交付的插件二进制（mihomo、cloudflared、openclash）会说协议，但还无法从配置里接上——schema 里没有 `plugin` 键，运行时只装配内置探测（`crates/custos-core/src/assemble.rs:43-56`）。
 
 ## 集成基础能力与 Python 脚本扩展（权威）
 
@@ -52,7 +52,7 @@ pnpm run docs:build  # 构建
 
 - [basic-process.toml](examples/basic-process.toml) — 监控 PID 文件，按方案重启。
 - [dependency-chain.toml](examples/dependency-chain.toml) — tunnel → proxy → network 的恢复顺序。
-- [notifications.toml](examples/notifications.toml) — webhook/SMTP 通知接线。
+- [notifications.toml](examples/notifications.toml) — webhook / local-log / Herald 通知接线。
 - [sunlogin.toml](examples/sunlogin.toml) — 向日葵远程桌面监控：PC 离线检测、只恢复向日葵，自愈的经典场景（Windows `SunloginService`，Linux `oray-sunlogin.service`）。
 - [remote-desktop.toml](examples/remote-desktop.toml) — RustDesk + TeamViewer + 向日葵统一挂在同一网络依赖下：断网时只修网络，网络正常时只重启挂掉的远程桌面服务。
 - [network-outage.toml](examples/network-outage.toml) — 断网检测与分层恢复：局域网网关探测与公网 DNS 锚点组成依赖链，先修内网链路再修外网。
@@ -76,6 +76,10 @@ sh packaging/openwrt/build-ipk.sh <musl 编译的 custos 二进制> dist/ --arch
 iStore 上架：清单格式已对照真机 iStoreOS 上已装的 app-meta 包核实（见 [docs/analysis/istore-publishing-2026-11-14.md](docs/analysis/istore-publishing-2026-11-14.md)）；正式进商店仍需联系 iStore（Linkease）方。包本体遵循通用 opkg 规范，纯 `opkg` 即可安装。
 
 升级须知：`/etc/custos/custos.toml`、`/etc/config/custos`、`/etc/init.d/custos` 均为 conffile——正常 `opkg` 升级保留已修改的配置，新默认以 `custos.toml-opkg` 落在旁边。从旧单包布局（全部在 `custos` 里）迁移需先 `opkg install --force-reinstall custos_*.ipk`（注意这会替换 conffile），之后才能装 `luci-app-custos`。
+
+## 夜间构建
+
+滚动 `nightly` 预发布版由 `.github/workflows/nightly.yml` 在 fmt + clippy + 全 workspace 测试通过后产出，提供现成二进制：Linux deb / rpm（glibc，x86_64 + aarch64）与 tar.gz（glibc + musl，x86_64 + aarch64）、Windows msi / zip、macOS dmg / tar.gz（aarch64），以及 OpenWrt `.ipk` 三件套（`custos` / `luci-app-custos` / `app-meta-custos`，x86_64 + aarch64 musl）。这是滚动二进制供给，不是经过验收的正式版本。
 
 ## 状态
 

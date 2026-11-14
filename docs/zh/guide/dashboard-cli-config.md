@@ -8,7 +8,7 @@ title: Dashboard、CLI 与配置
 
 Dashboard 是可选组件，默认关闭；未启用时零监听端口、零 HTTP 代码路径。
 
-目标配置形态（P4 之前不会实现）：
+已实现、默认关闭（`enabled` 默认 false，`crates/custos-config/src/dashboard.rs:12-19`）；监听器仅在 enabled 时于启动阶段绑定（`crates/custos-cli/src/main.rs:199-200`）：
 
 ```toml
 [dashboard]
@@ -22,7 +22,7 @@ listen = "127.0.0.1:8080"
 2. Dashboard 不可用不得影响核心引擎运行。
 3. Dashboard 不得绕过 Core Engine 直接执行恢复。
 4. 高风险操作仍必须走统一的授权与审计。
-5. 传输安全是尚未完成的一端：端点只读且没有认证、没有 CSRF token，目前唯一的保护是回环绑定拒绝——非回环的 `listen` 地址会被直接拒掉（`crates/custos-dashboard/src/lib.rs:34-52`）。远程访问需经本地反向代理提供认证。认证与 CSRF 随工具箱集中硬化（ADR-0015）仍待做。
+5. 传输安全是尚未完成的一端：端点只读且没有认证、没有 CSRF token，目前唯一的保护是回环绑定拒绝——非回环的 `listen` 地址会被直接拒掉（`crates/custos-dashboard/src/lib.rs:39-53`）。远程访问需经本地反向代理提供认证。认证与 CSRF 随工具箱集中硬化（ADR-0015）仍待做。
 
 ## 9.2 CLI 命令
 
@@ -30,6 +30,9 @@ CLI 是 P0/P1 的操作面（已实现）：
 
 ```text
 custos validate <CONFIG>           解析并校验配置（拒绝重复 ID、悬空引用、依赖环）
+custos init <TYPE> --id <ID> [--out PATH] [--force]
+                                   为某资源类型生成完整配置模板
+                                   （占位值；使用前先编辑，再 validate）
 custos start <CONFIG> [OPTIONS]    运行引擎循环（--db PATH、--interval MS、--once）
 custos status [--db PATH] [--json]     存储计数与最近审计事件
 custos runs [--db PATH] [--json]       最近恢复任务（新→旧）
@@ -60,13 +63,13 @@ custos graph <CONFIG>              依赖图（拓扑序）
 - 支持安全的凭据引用。
 - 支持资源之间的显式依赖。
 - 支持资源级恢复策略。
-- 支持全局预算和通知规则。
+- 支持通知规则。全局恢复预算在 v1 里是引擎内置默认值，不是配置键（`crates/custos-engine/src/budget.rs:9-25`）。
 
 首版采用 TOML（单一主格式，`version = 1`）。
 
 ## 10.2 示例：Cloudflare Tunnel 依赖代理
 
-以下为目标配置形态，展示架构语义；不代表第一版已有对应插件实现。
+以下为目标配置形态，展示架构语义。`plugin:` / `config:` 资源键与 YAML 形态仅是目标形状——TOML schema（`deny_unknown_fields`）当前会拒绝它们，因为插件接入配置的接线尚未落地（`crates/custos-core/src/assemble.rs:43-56` 只装配内置探测）。
 
 ```yaml
 version: 1
@@ -99,7 +102,7 @@ notification:
 
 1. 代理健康检查应尽量区分代理认证失败、连接失败和目标服务异常。
 2. 如果代理并非 Tunnel 的必要依赖，则不应声明 Required。
-3. HTTP 探测和上述特定插件属于后续阶段能力。
+3. HTTP 探测今天已是原生探针（`crates/custos-probe/src/factory.rs:53`）；mihomo 与 cloudflared 插件二进制已存在且会说协议，但尚无法从配置接上（见上文说明）。
 4. 第一版的配置验证器可以先定义完整配置模型，但未实现的资源类型必须报出清楚的能力缺失错误，不能假装已经运行。
 5. 恢复动作必须与插件能力声明匹配。
 
@@ -112,10 +115,10 @@ notification:
 5. 验证依赖引用。
 6. 验证依赖图。
 7. 验证恢复动作引用。
-8. 验证插件能力。
+8. 验证插件能力。（计划中：插件尚未接入配置——加载器当前不做能力校验，`plugin_ref` 恒为未设，`crates/custos-config/src/build.rs:356`。）
 9. 验证权限与风险策略。
 10. 验证通知渠道配置。
-11. 验证数据库迁移兼容性。
+11. 验证数据库迁移兼容性。（计划中：迁移在 store 打开时执行，`crates/custos-store/src/store/lifecycle.rs:39`；配置加载器不做迁移检查。）
 12. 创建或更新运行时资源注册表。
 
 配置验证失败时必须指出具体字段和原因。

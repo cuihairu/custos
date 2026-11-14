@@ -159,6 +159,8 @@ Requirement: at least one available
 
 Backup resources must not be naively modeled as "every dependency must be healthy".
 
+Implemented configuration keys (`crates/custos-config/src/schema.rs`): `dependencies[]` (full form: `resource`, `requirement`, `group`, `condition`, `conditional_on`), the `depends_on` shorthand for plain required dependencies (`schema.rs:203-205`), top-level `alternative_groups[]` with `id` / `members` / `required` (N-of-M, `required` defaults to 1, `schema.rs:239-246`), and `permissions.default_allow_high_risk` as the top-level gate for high-risk plans (`schema.rs:274-276`).
+
 ## 3.4 Health conditions
 
 A dependency must declare which health condition it depends on, not merely which resource it depends on.

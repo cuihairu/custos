@@ -26,7 +26,7 @@ Notification delivery failure must not block a RecoveryRun.
 
 ## 8.2 Built-in channels
 
-Five channels are configured and dispatched (`crates/custos-config/src/notification/raw.rs:277-300`):
+Five channels are configured and dispatched (`crates/custos-config/src/notification/raw.rs:271-413`):
 
 ### Local Log
 
@@ -133,6 +133,8 @@ Examples:
 - Recovery exhausted: send a high-priority alert.
 - Plugin unavailable: notify or not depending on the importance of affected resources.
 - The same fault keeps recurring: aggregate and suppress duplicates.
+
+Repeat suppression is a rule-level key: `dedup_window_ms` (default 30 minutes, `0` disables) suppresses repeats of the same fault within the window (`crates/custos-config/src/notification/raw.rs:45-53`).
 - Fault recovered: send a recovery notification.
 
 ### Environment overlay (`CUSTOS_NOTIFY_*`)

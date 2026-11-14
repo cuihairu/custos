@@ -137,7 +137,7 @@ A plugin declaring an action does not automatically make it allowed.
 
 - **One plugin = the complete monitoring and handling logic for one resource type**: probing, diagnosis, recovery actions and the verification loop live inside the same plugin, with no half-finished splits.
 - **Plugins are composed through the resource dependency graph**: dependencies link resources, not plugins directly (`Dependency` carries a `ResourceId`, `crates/custos-model/src/dependency.rs:56-69`); a plugin rides along with its resource into the graph, and the Core Engine resolves it uniformly.
-- **Consumers enable a plugin with simple configuration only**: declare the resource type and parameters, no glue code; configuration loading follows the configuration specification in §10.
+- **Consumers enable a plugin with simple configuration only**: declare the resource type and parameters, no glue code; configuration loading follows the configuration specification in §10. Implementation status: the schema has no `plugin` key yet and runtime assembly builds builtin probes only (`crates/custos-core/src/assemble.rs:43-56`); the shipped plugin binaries (mihomo, cloudflared, openclash) speak the protocol but are reachable only through their protocol tests for now.
 
 ## Builtin capabilities and Python script extension (user decision, 2026-10-29)
 

@@ -27,8 +27,8 @@ title: 常见探测类型业界调研与 custos 差距分析
 
 **custos 现状摘要**（证据来自仓库）：
 
-- 已内置探针仅两种：`ProcessProbe`（pid 文件存活，本地路径 `crates/custos-probe/src/process.rs:10`，工厂分支 `crates/custos-probe/src/factory.rs:29`）与 `ExecProbe`（受控命令执行：超时、输出上限、超时杀进程树，`crates/custos-probe/src/exec.rs:69`、`crates/custos-probe/src/exec.rs:211`，工厂分支 `crates/custos-probe/src/factory.rs:37`）。
-- 资源类型 `custom-command`、`network-connectivity`、`http-endpoint`、`proxy`、`tunnel`、`service` 在工厂里**全部委托给 ExecProbe**，由用户在 config 里自备命令（`crates/custos-probe/src/factory.rs:37-42`）——即这些类型**没有原生实现**，开箱即用能力为零插件目标下的主要缺口。
+- 工厂已接线 18 种原生探针：`process`（pid 文件存活，`crates/custos-probe/src/process.rs:7`，工厂分支 `crates/custos-probe/src/factory.rs:39`）、`exec`（受控命令执行：超时、输出上限、超时杀进程树，`crates/custos-probe/src/exec.rs:69`，工厂分支 `crates/custos-probe/src/factory.rs:142`）、`http-endpoint`（HttpProbe，`http.rs:22`）、`network-connectivity`（TcpProbe，`tcp.rs:18`）、`dns`（DnsProbe，`dns.rs:51`）、`tls-certificate`（TlsCertProbe，`tls_cert.rs:26`）、`disk`（DiskProbe，`disk.rs:15`）、`memory`（MemProbe，`mem.rs:16`）、`cpu`（CpuProbe，`cpu.rs:46`）、`log`（LogProbe，`log.rs:33`）、`systemd`（SystemdProbe，`systemd.rs:23`）、`windows-service`（WindowsServiceProbe，`windows_service.rs:20`）、`docker-container`（DockerProbe，`docker.rs:21`）、`icmp`（PingProbe，`icmp.rs:26`）、`network-interface`（NetifProbe，`netif.rs:21`）、`default-gateway`（GatewayProbe，`netif.rs:154`）、`proxy`（ProxyProbe，`proxy.rs:122`）、`database`（DatabaseProbe，`database.rs:51`）——见工厂分发 `crates/custos-probe/src/factory.rs:38-148`。
+- `custom-command` 与 `tunnel` 仍委托给 ExecProbe（`crates/custos-probe/src/factory.rs:142-144`）；`service` 在配置 `unit` 时走原生 systemd / windows-service 探测，未配置时回退 exec（`crates/custos-probe/src/factory.rs:114-141`）。
 
 优先级按自愈引擎场景评定：高 = 覆盖最常见故障且是自愈触发的主要信号源；中 = 常见但可暂由 exec 兜底或场景较窄；低 = 长尾/特定行业。
 
@@ -36,8 +36,8 @@ title: 常见探测类型业界调研与 custos 差距分析
 
 | 探测类型 | 业界谁在用 | custos 现状 | 优先级 | 实现要点建议（未实现） |
 |---|---|---|---|---|
-| 进程存活（pid 文件） | Nagios [check_procs](https://www.monitoring-plugins.org/doc/man/index.html)、[NSClient++ check_process](https://nsclient.org/docs/scenarios/service-monitoring)、[Sensu process-checks](https://sensu.io/resources/plugins)、[Zabbix proc.num](https://zabbix.com/documentation/current/en/manual/config/items/itemtypes/zabbix_agent) | ✅ `crates/custos-probe/src/process.rs:10`（工厂 `factory.rs:29`） | 高（已有） | — |
-| 受控命令执行（exec） | [Sensu check 执行模型](https://docs.sensu.io/sensu-go/6.1/operations/monitor-sensu/monitor-sensu-with-sensu)、NRPE/check_by_ssh 模式 | ✅ `crates/custos-probe/src/exec.rs:69`（工厂 `factory.rs:37`） | 高（已有） | — |
+| 进程存活（pid 文件） | Nagios [check_procs](https://www.monitoring-plugins.org/doc/man/index.html)、[NSClient++ check_process](https://nsclient.org/docs/scenarios/service-monitoring)、[Sensu process-checks](https://sensu.io/resources/plugins)、[Zabbix proc.num](https://zabbix.com/documentation/current/en/manual/config/items/itemtypes/zabbix_agent) | ✅ `crates/custos-probe/src/process.rs:10`（工厂 `factory.rs:39`） | 高（已有） | — |
+| 受控命令执行（exec） | [Sensu check 执行模型](https://docs.sensu.io/sensu-go/6.1/operations/monitor-sensu/monitor-sensu-with-sensu)、NRPE/check_by_ssh 模式 | ✅ `crates/custos-probe/src/exec.rs:69`（工厂 `factory.rs:142`） | 高（已有） | — |
 | systemd unit 状态（active/substate） | [Zabbix systemd.unit.info](https://zabbix.com/documentation/current/en/manual/config/items/itemtypes/zabbix_agent)、[NSClient++ check_service（Linux systemd）](https://nsclient.org/docs/scenarios/service-monitoring) | ✅ `crates/custos-probe/src/factory.rs:114-123`（设 `unit` 时走原生 `systemd`；`command` 走 exec 兜底） | 高（已有） | — |
 | Windows 服务状态（Started/Stopped、自动启动未运行告警） | [NSClient++ check_service](https://nsclient.org/docs/scenarios/service-monitoring)、[check_nt SERVICESTATE](https://support.nagios.com/kb/print-775.html)、[Nagios XI Windows 方案](https://www.nagios.com/solutions/Windows-monitoring) | ✅ `crates/custos-probe/src/factory.rs:124-131`（设 `unit` 时走原生 `windows_service`；`command` 走 exec 兜底） | 高（已有） | — |
 | Docker 容器状态（running/重启次数） | [Uptime Kuma Docker Containers](https://github.com/louislam/uptime-kuma)、[Sensu Docker 插件](https://sensu.io/resources/plugins)、[Centreon Docker](https://github.com/centreon/centreon-plugins) | ✅ `crates/custos-probe/src/factory.rs:93-95`（`docker` crate，非 exec） | 高（已有） | — |

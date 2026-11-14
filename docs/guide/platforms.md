@@ -89,7 +89,7 @@ Support (platform side implemented in `crates/custos-platform/src/openwrt.rs`):
 - ubus calls (`ubus_call`).
 - Network interface and route checks (parsed from `ubus call network.interface.<name> status`, `openwrt.rs:165`).
 
-OpenClash state detection and proxy node switching are plugin-side, not platform-side: `openclash.switch_best_node` and `openclash.restart` live in `plugins/openclash/src/main.rs:247-248`, and mihomo node switching in `crates/custos-toolbox/src/registry.rs:307`. The platform crate supplies the service/ubus primitives those plugins call.
+OpenClash state detection and proxy node switching are plugin-side, not platform-side: `openclash.switch_best_node` and `openclash.restart` live in `plugins/openclash/src/main.rs:247-248`, and mihomo node switching in `plugins/mihomo/src/main.rs:189` (dispatch at `:238`). The toolbox registration path (`crates/custos-toolbox/src/registry.rs:143`) exists but is currently exercised only in tests (e.g. `registry.rs:307`). The platform crate supplies the service/ubus primitives those plugins call.
 
 Every network and firewall change must have a clear scope of effect, preconditions, risk level and verification steps.
 

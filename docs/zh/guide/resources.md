@@ -159,6 +159,8 @@ ProxyAccess
 
 不能把备用资源简单地建模成所有依赖都必须正常。
 
+已实现的配置键（`crates/custos-config/src/schema.rs`）：`dependencies[]`（完整形式：`resource`、`requirement`、`group`、`condition`、`conditional_on`）、表达普通必需依赖的 `depends_on` 简写（`schema.rs:203-205`）、顶层 `alternative_groups[]`（`id` / `members` / `required`，N 选 M，`required` 默认 1，`schema.rs:239-246`），以及作为高风险方案顶层门控的 `permissions.default_allow_high_risk`（`schema.rs:274-276`）。
+
 ## 3.4 健康条件
 
 依赖必须声明依赖的是哪种健康条件，而不是只声明依赖某个资源。

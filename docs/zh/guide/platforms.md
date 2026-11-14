@@ -88,7 +88,7 @@ Wi-Fi 重连涉及凭据、网卡和系统权限，应使用系统支持的 API 
 - ubus 调用（`ubus_call`）。
 - 网络接口和路由检查（解析 `ubus call network.interface.<name> status`，`openwrt.rs:165`）。
 
-OpenClash 状态检测与代理节点切换在插件侧，不在平台侧：`openclash.switch_best_node` 与 `openclash.restart` 在 `plugins/openclash/src/main.rs:247-248`，mihomo 节点切换在 `crates/custos-toolbox/src/registry.rs:307`。平台 crate 只提供这些插件调用的 service/ubus 原语。
+OpenClash 状态检测与代理节点切换在插件侧，不在平台侧：`openclash.switch_best_node` 与 `openclash.restart` 在 `plugins/openclash/src/main.rs:247-248`，mihomo 节点切换在 `plugins/mihomo/src/main.rs:189`（分发在 `:238`）。工具箱的注册路径（`crates/custos-toolbox/src/registry.rs:143`）已存在，但当前只在测试里被用到（如 `registry.rs:307`）。平台 crate 只提供这些插件调用的 service/ubus 原语。
 
 所有网络和防火墙变更必须有明确作用范围、前置条件、风险等级和验证步骤。
 

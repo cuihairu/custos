@@ -8,7 +8,7 @@ title: Dashboard, CLI and Configuration
 
 The Dashboard is an optional component and is disabled by default; when not enabled there are zero listening ports and zero HTTP code paths.
 
-Target configuration shape (not implemented before P4):
+Implemented and disabled by default (`enabled` defaults to false, `crates/custos-config/src/dashboard.rs:12-19`); the listener is bound only when enabled, at startup (`crates/custos-cli/src/main.rs:199-200`):
 
 ```toml
 [dashboard]
@@ -22,7 +22,7 @@ Enabling prerequisites and acceptance constraints:
 2. Dashboard unavailability must not affect the core engine.
 3. The Dashboard must not bypass the Core Engine to execute recovery directly.
 4. High-risk operations must still go through the unified authorization and audit.
-5. Transport security is the open end: the endpoints are read-only and carry no authentication and no CSRF token, so the only current protection is the loopback bind refusal — a non-loopback `listen` address is rejected outright (`crates/custos-dashboard/src/lib.rs:34-52`). Remote access is expected to go through a local reverse proxy that supplies its own authentication. Auth and CSRF hardening with the toolbox (ADR-0015) is still pending.
+5. Transport security is the open end: the endpoints are read-only and carry no authentication and no CSRF token, so the only current protection is the loopback bind refusal — a non-loopback `listen` address is rejected outright (`crates/custos-dashboard/src/lib.rs:39-53`). Remote access is expected to go through a local reverse proxy that supplies its own authentication. Auth and CSRF hardening with the toolbox (ADR-0015) is still pending.
 
 ## 9.2 CLI commands
 
@@ -62,13 +62,13 @@ Configuration must be:
 - Supportive of secure credential references.
 - Supportive of explicit dependencies between resources.
 - Supportive of per-resource recovery policies.
-- Supportive of global budgets and notification rules.
+- Supportive of notification rules. Global recovery budgets are engine-internal defaults in v1, not configuration keys (`crates/custos-engine/src/budget.rs:9-25`).
 
 The first version uses TOML (one primary format, `version = 1`).
 
 ## 10.2 Example: a Cloudflare Tunnel depending on a proxy
 
-The following is the target configuration shape, shown to illustrate architecture semantics; it does not mean the first version already has the corresponding plugins.
+The following is the target configuration shape, shown to illustrate architecture semantics. The `plugin:` / `config:` resource keys and the YAML form are target shape only — the TOML schema (`deny_unknown_fields`) rejects them today, because plugin wiring into configuration has not landed yet (`crates/custos-core/src/assemble.rs:43-56` assembles builtin probes only).
 
 ```yaml
 version: 1
@@ -101,7 +101,7 @@ Note that:
 
 1. Proxy health checks should distinguish proxy authentication failures, connection failures and target service failures wherever possible.
 2. If the proxy is not a required dependency of the Tunnel, it must not be declared Required.
-3. HTTP probing and the specific plugins above are capabilities for later phases.
+3. HTTP probing is a native probe today (`crates/custos-probe/src/factory.rs:53`); the mihomo and cloudflared plugin binaries exist and speak the protocol, but they are not yet reachable from configuration (see the note above).
 4. The first version's configuration validator may define the complete configuration model up front, but unimplemented resource types must produce a clear capability-missing error instead of pretending to run.
 5. Recovery actions must match the plugin's declared capabilities.
 
@@ -114,10 +114,10 @@ Note that:
 5. Validate dependency references.
 6. Validate the dependency graph.
 7. Validate recovery action references.
-8. Validate plugin capabilities.
+8. Validate plugin capabilities. (Planned: plugins are not wired into configuration yet — the loader performs no capability check; `plugin_ref` is always unset, `crates/custos-config/src/build.rs:356`.)
 9. Validate permission and risk policies.
 10. Validate notification channel configuration.
-11. Validate database migration compatibility.
+11. Validate database migration compatibility. (Planned: migrations run at store open, `crates/custos-store/src/store/lifecycle.rs:39`; the config loader performs no migration check.)
 12. Create or update the runtime resource registry.
 
 When configuration validation fails, the specific field and reason must be reported.

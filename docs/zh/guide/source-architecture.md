@@ -34,7 +34,7 @@ title: 源码架构
 - **协议：** 原生探测没有 wire 协议；每个探测读取 `Resource.config` 的类型化切片。
 - **插件协议：** 换行分帧 JSON-RPC 方法和能力声明定义在 `crates/custos-plugin-api/src/rpc.rs:23` 与 `crates/custos-plugin-api/src/capability.rs:38`。宿主会话对双向管道做输出上限和超时（`crates/custos-plugin-host/src/session.rs:101`）；示例插件调用 `crates/custos-plugin-api/src/server.rs:32` 的 `serve`。
 - **权限/派发：** 内置工具与插件操作在 `ToolRegistry` 汇合；权限先于内置工具或插件执行（`crates/custos-toolbox/src/registry.rs:181`）。
-- **配置 schema：** 插件可执行文件和资源探测参数通过主 TOML 契约输入；外部控制器配置由示例插件自行读取（`plugins/mihomo/src/main.rs:28`）。
+- **配置 schema：** 资源探测参数通过主 TOML 契约输入；插件可执行文件还没有——schema 里没有 plugin 键、装配只走内置（`crates/custos-core/src/assemble.rs:43-56`）。外部控制器配置由示例插件自行读取（`plugins/mihomo/src/main.rs:31`）。
 - **文案挂载：** `docs/zh/guide/plugins.md`、`docs/zh/guide/probe-survey.md`、`docs/zh/guide/security.md` 与 `docs/zh/adr/ADR-0003-why-jsonrpc-over-stdio.md`。
 
 ## 4. 执行与平台层
