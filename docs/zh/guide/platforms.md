@@ -56,14 +56,19 @@ Wi-Fi 重连涉及凭据、网卡和系统权限，应使用系统支持的 API 
 
 ## 11.4 macOS
 
-后续支持：
+部分实现：macOS 分支在 CI 中通过编译并随 nightly 构建产出二进制，但没有一项在真机 Mac 上做过验收。
 
-- 进程检测。
-- launchd 服务管理。
-- 网络接口状态。
-- Wi-Fi 重连。
-- 网络连通性检查。
-- 系统重启。
+已实现（`crates/custos-platform/src/init_systems.rs:211-222`、`crates/custos-platform/src/lib.rs`、`crates/custos-tray/src/driver.rs:295`）：
+
+- 经 `launchctl` 的 launchd 服务管理（print / kickstart，system 与 gui 域）。
+- 经 macOS 网络控制器的网络接口与连通性状态。
+- 经 macOS 重启控制器的系统重启。
+- 菜单栏托盘（`NSApplication` accessory 模式）。
+
+仍待做：
+
+- Wi-Fi 重连（没有 macOS 的 Wi-Fi 适配路径）。
+- 以上各项的真机验收。
 
 ## 11.5 BSD
 
@@ -76,15 +81,14 @@ Wi-Fi 重连涉及凭据、网卡和系统权限，应使用系统支持的 API 
 
 ## 11.6 OpenWrt
 
-支持（实现在 `crates/custos-platform/src/openwrt.rs`）：
+支持（平台侧实现在 `crates/custos-platform/src/openwrt.rs`）：
 
-- procd 服务管理。
+- procd 服务管理（`ProcdServiceController`）。
 - UCI 配置读取（`uci_get`）；受控修改暂未开放。
-- ubus 调用。
-- 网络接口和路由检查。
-- OpenClash 状态检测。
-- 代理节点切换。
-- 服务重启。
+- ubus 调用（`ubus_call`）。
+- 网络接口和路由检查（解析 `ubus call network.interface.<name> status`，`openwrt.rs:165`）。
+
+OpenClash 状态检测与代理节点切换在插件侧，不在平台侧：`openclash.switch_best_node` 与 `openclash.restart` 在 `plugins/openclash/src/main.rs:247-248`，mihomo 节点切换在 `crates/custos-toolbox/src/registry.rs:307`。平台 crate 只提供这些插件调用的 service/ubus 原语。
 
 所有网络和防火墙变更必须有明确作用范围、前置条件、风险等级和验证步骤。
 

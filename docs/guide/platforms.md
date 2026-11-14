@@ -57,14 +57,19 @@ Do not assume every Linux system uses systemd.
 
 ## 11.4 macOS
 
-Later support:
+Partially implemented; the macOS branches are compile-checked in CI and ship in the nightly build, but none of them has been acceptance-tested on a real Mac.
 
-- Process detection.
-- launchd service management.
-- Network interface state.
-- Wi-Fi reconnection.
-- Network connectivity checks.
-- System reboot.
+Implemented (`crates/custos-platform/src/init_systems.rs:211-222`, `crates/custos-platform/src/lib.rs`, `crates/custos-tray/src/driver.rs:295`):
+
+- launchd service management via `launchctl` (print / kickstart, system and gui domains).
+- Network interface and connectivity state through the macOS network controller.
+- System reboot through the macOS reboot controller.
+- Menu-bar tray (`NSApplication` accessory mode).
+
+Still pending:
+
+- Wi-Fi reconnection (no macOS Wi-Fi adapter path).
+- Acceptance on real hardware for any item above.
 
 ## 11.5 BSD
 
@@ -77,15 +82,14 @@ Later support:
 
 ## 11.6 OpenWrt
 
-Support (implemented in `crates/custos-platform/src/openwrt.rs`):
+Support (platform side implemented in `crates/custos-platform/src/openwrt.rs`):
 
-- procd service management.
+- procd service management (`ProcdServiceController`).
 - UCI configuration reading (`uci_get`); controlled modification is not yet exposed.
-- ubus calls.
-- Network interface and route checks.
-- OpenClash state detection.
-- Proxy node switching.
-- Service restart.
+- ubus calls (`ubus_call`).
+- Network interface and route checks (parsed from `ubus call network.interface.<name> status`, `openwrt.rs:165`).
+
+OpenClash state detection and proxy node switching are plugin-side, not platform-side: `openclash.switch_best_node` and `openclash.restart` live in `plugins/openclash/src/main.rs:247-248`, and mihomo node switching in `crates/custos-toolbox/src/registry.rs:307`. The platform crate supplies the service/ubus primitives those plugins call.
 
 Every network and firewall change must have a clear scope of effect, preconditions, risk level and verification steps.
 

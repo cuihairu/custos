@@ -164,4 +164,4 @@ Check off each phase with its commit hash once it lands; for sources and accepta
 - [x] P1 plugin runtime and notification infrastructure (commit: `d30f8cb`)
 - [x] P2 platform base capabilities (commit: `c2f7325`)
 - [x] P3 network, proxy and real self-healing scenarios (commit: `52ea755`) — acceptance scenarios 1 (Sunlogin) and 2 (Wi-Fi) plus the full Windows Wi-Fi recovery path still await verification on real hardware.
-- [ ] P4 optional management interface and extensions — the web dashboard and desktop tray have landed; macOS/BSD adaptation and plugin signing policy are pending.
+- [ ] P4 optional management interface and extensions — the web dashboard and desktop tray have landed; macOS base branches have landed but await acceptance on real hardware, BSD has no implementation, and plugin signing policy is pending.
