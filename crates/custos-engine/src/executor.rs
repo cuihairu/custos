@@ -3,7 +3,8 @@
 
 use custos_model::{ActionOutcome, ActionSpec};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Executes one recovery action with a hard timeout. Implementations must
@@ -54,7 +55,9 @@ pub fn leaked_watchdog_workers() -> usize {
 /// records [`ActionOutcome::OutcomeUnknown`] and the tick moves on. The
 /// worker stays parked on the executor until it finally returns (counted in
 /// [`leaked_watchdog_workers`]); a result arriving that late is logged and
-/// discarded.
+/// discarded. Accounting goes through a per-execution [`WatchdogTicket`]:
+/// a late result can never leave the leak count inflated, and a worker
+/// that died mid-execute (panic) is dead, not parked, so it is not counted.
 pub fn execute_with_watchdog(
     executor: Arc<dyn ActionExecutor>,
     action: &ActionSpec,
@@ -68,6 +71,22 @@ pub fn execute_with_watchdog(
     )
 }
 
+/// Per-execution watchdog accounting. The global leak counter must only
+/// hold workers that are actually parked, so the +1/−1 decisions cannot be
+/// made from the send outcome alone: a late send that wins the race against
+/// the receiver being dropped succeeds and would otherwise leave a booked
+/// count standing forever. The ticket reconciles both sides — the main
+/// thread books a leak only if the worker has not finished yet, and the
+/// worker clears the booking when it eventually returns (2026-11-12 Codex
+/// audit: the timeout/late-result race previously inflated the count).
+#[derive(Default)]
+struct WatchdogTicket {
+    /// The worker finished executing (outcome sent or receiver gone).
+    worker_done: bool,
+    /// The main thread booked one leaked-worker count for this execution.
+    booked: bool,
+}
+
 fn execute_with_deadline(
     executor: Arc<dyn ActionExecutor>,
     action: &ActionSpec,
@@ -76,24 +95,50 @@ fn execute_with_deadline(
 ) -> ActionOutcome {
     let owned = action.clone();
     let (tx, rx) = std::sync::mpsc::channel();
+    let ticket = Arc::new(Mutex::new(WatchdogTicket::default()));
+    let worker_ticket = Arc::clone(&ticket);
     std::thread::spawn(move || {
         let outcome = executor.execute(&owned, timeout);
-        if tx.send(outcome).is_err() {
+        let _ = tx.send(outcome);
+        let mut state = worker_ticket.lock().unwrap_or_else(|e| e.into_inner());
+        state.worker_done = true;
+        if state.booked {
+            state.booked = false;
             LEAKED_WATCHDOG_WORKERS.fetch_sub(1, Ordering::Relaxed);
+            let leaked = LEAKED_WATCHDOG_WORKERS.load(Ordering::Relaxed);
+            drop(state);
             tracing::warn!(
                 target: "custos::engine",
-                leaked = LEAKED_WATCHDOG_WORKERS.load(Ordering::Relaxed),
+                leaked,
                 "action finished after the watchdog gave up; result discarded"
             );
         }
     });
     match rx.recv_timeout(deadline) {
         Ok(outcome) => outcome,
-        Err(_) => {
-            LEAKED_WATCHDOG_WORKERS.fetch_add(1, Ordering::Relaxed);
+        Err(RecvTimeoutError::Timeout) => {
+            let mut state = ticket.lock().unwrap_or_else(|e| e.into_inner());
+            // A worker that already finished is not parked: recv_timeout
+            // may report Timeout even though the send landed first, and
+            // booking that worker would inflate the count forever.
+            if !state.worker_done {
+                state.booked = true;
+                LEAKED_WATCHDOG_WORKERS.fetch_add(1, Ordering::Relaxed);
+                drop(state);
+                tracing::warn!(
+                    target: "custos::engine",
+                    "action exceeded its watchdog deadline; outcome unknown (§6.6)"
+                );
+            }
+            ActionOutcome::OutcomeUnknown
+        }
+        Err(RecvTimeoutError::Disconnected) => {
+            // tx dropped without a send: the worker panicked mid-execute.
+            // A dead thread is not parked — nothing to count — but the
+            // outcome is still unknowable (§6.6).
             tracing::warn!(
                 target: "custos::engine",
-                "action exceeded its watchdog deadline; outcome unknown (§6.6)"
+                "executor thread died before reporting; outcome unknown (§6.6)"
             );
             ActionOutcome::OutcomeUnknown
         }
@@ -226,6 +271,27 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// A worker that panics mid-execute drops `tx` without sending: the
+    /// channel disconnects, the thread is gone — dead, not parked — so the
+    /// leak counter must stay at baseline (2026-11-12 Codex audit).
+    #[test]
+    fn watchdog_does_not_count_a_panicked_executor_as_leaked() {
+        let _order = LEAK_COUNTER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let baseline = leaked_watchdog_workers();
+        let executor: Arc<dyn ActionExecutor> = Arc::new(|_: &ActionSpec, _: Duration| {
+            panic!("executor exploded before reporting");
+        });
+        let outcome = execute_with_watchdog(executor, &action(), Duration::from_millis(50));
+        assert_eq!(outcome, ActionOutcome::OutcomeUnknown);
+        assert_eq!(
+            leaked_watchdog_workers(),
+            baseline,
+            "a panicked executor thread is dead, not parked"
+        );
     }
 
     #[test]

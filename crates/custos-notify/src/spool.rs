@@ -71,16 +71,21 @@ impl<Q: NotificationQueue + Send + Sync + 'static> SpooledDispatch<Q> {
         match &self.tx {
             Some(tx) => match tx.try_send(event.clone()) {
                 Ok(()) => {}
-                Err(TrySendError::Full(event)) => self.inline(&event),
-                Err(TrySendError::Disconnected(event)) => self.inline(&event),
+                Err(TrySendError::Full(event)) => self.inline(&event, "spool saturated"),
+                Err(TrySendError::Disconnected(event)) => {
+                    self.inline(&event, "dispatch worker gone")
+                }
             },
-            None => self.inline(event),
+            None => self.inline(event, "no dispatch worker"),
         }
     }
 
     /// One synchronous dispatch on the caller thread (the pre-C18 behavior),
-    /// used only when the worker cannot take the event.
-    fn inline(&self, event: &NotificationEvent) {
+    /// used only when the worker cannot take the event. `why` names the
+    /// actual degradation path — a saturated spool, a worker that died, or
+    /// no worker at all — so the log does not blame the spool for every
+    /// inline fallback (2026-11-12 Codex audit).
+    fn inline(&self, event: &NotificationEvent, why: &'static str) {
         let report = self.engine.dispatch(event, event.occurred_at_unix_ms);
         if report.enqueued > 0 || report.suppressed > 0 {
             tracing::debug!(
@@ -88,7 +93,8 @@ impl<Q: NotificationQueue + Send + Sync + 'static> SpooledDispatch<Q> {
                 event = event.event_type.as_str(),
                 enqueued = report.enqueued,
                 suppressed = report.suppressed,
-                "notification dispatched inline (spool saturated)"
+                why,
+                "notification dispatched inline"
             );
         }
     }
