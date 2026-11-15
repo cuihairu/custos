@@ -1,22 +1,24 @@
 //! Drives the real sunlogin plugin binary through the host session.
-//! No sunlogin client runs in CI: probe answers healthy=false with the
-//! failing stage named; restart refuses with a clear detail; unknown
-//! operations are protocol errors, never executed actions.
+//! Host-agnostic contract: pinning the service to a missing unit makes the
+//! service layer fail on ANY host (clean CI/dev box or a machine with a
+//! real install), so probe answers healthy=false, restart refuses with the
+//! pinned name in the detail; unknown operations are protocol errors,
+//! never executed actions. The `#[ignore]`d live test verifies positive
+//! health on a machine that actually runs sunlogin/AweSun.
 
 use custos_plugin_host::{PluginConfig, PluginSession};
 use std::time::Duration;
 
 fn config() -> PluginConfig {
     let mut config = PluginConfig::new(env!("CARGO_BIN_EXE_sunlogin-plugin"));
-    // Point discovery at an empty directory so the probe fails fast at the
-    // discovery stage instead of scanning real system logs.
-    let empty = std::env::temp_dir().join("custos-sunlogin-it-empty");
-    std::fs::create_dir_all(&empty).expect("empty log dir");
+    // Pin the service candidates so the failing stage is deterministic on
+    // any host, and clear discovery overrides.
     config
         .env
-        .insert("SUNLOGIN_LOG_DIR".into(), empty.to_string_lossy().into_owned());
-    config.env.insert("SUNLOGIN_SERVICE".into(), "custos-missing-unit".into());
-    config.request_timeout = Duration::from_secs(8);
+        .insert("SUNLOGIN_SERVICE".into(), "custos-missing-unit".into());
+    config.env.insert("SUNLOGIN_CONFIG".into(), "".into());
+    config.env.insert("SUNLOGIN_API".into(), "".into());
+    config.request_timeout = Duration::from_secs(15);
     config
 }
 
@@ -37,24 +39,21 @@ fn probe_restart_and_unknown_operation_contract() {
         .call_with_timeout(
             custos_plugin_api::Method::Probe,
             serde_json::json!({"resource_id": "sunlogin"}),
-            Duration::from_secs(8),
+            Duration::from_secs(15),
         )
         .expect("probe");
+    // Host-agnostic: the pinned missing service fails the service layer on
+    // any host — a clean box fails every layer, a real install still fails
+    // the pinned service — so healthy=false holds everywhere.
     assert_eq!(probe["healthy"], serde_json::json!(false), "{probe}");
-    assert!(
-        probe["observation"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("not discovered"),
-        "{}",
-        probe["observation"]
-    );
+    let observation = probe["observation"].as_str().unwrap_or_default();
+    assert!(observation.contains("custos-missing-unit"), "{}", observation);
 
     let restart = session
         .call_with_timeout(
             custos_plugin_api::Method::ExecuteRecoveryAction,
             serde_json::json!({"operation_id": "sunlogin.restart", "resource_id": "sunlogin"}),
-            Duration::from_secs(8),
+            Duration::from_secs(30),
         )
         .expect("restart action");
     assert_eq!(restart["succeeded"], serde_json::json!(false), "{restart}");
@@ -62,11 +61,7 @@ fn probe_restart_and_unknown_operation_contract() {
         restart["detail"]
             .as_str()
             .unwrap_or_default()
-            .contains("custos-missing-unit")
-            || restart["detail"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("oray-sunlogin"),
+            .contains("custos-missing-unit"),
         "{}",
         restart["detail"]
     );
@@ -101,6 +96,90 @@ fn relogin_reports_not_implemented_through_the_session() {
             .contains("not implemented"),
         "{}",
         action["detail"]
+    );
+    session.shutdown().ok();
+}
+
+/// LIVE restart on the real machine (ignored by default): executes the
+/// real `sc stop`/`start` (or systemctl restart) through the plugin and
+/// polls until the probe is healthy again. NOTE: restarting a remote-access
+/// client drops live sunlogin sessions — run only where that is acceptable
+/// (SSH access stays unaffected). Run:
+///   cargo test -p custos-sunlogin-plugin --test plugin -- --ignored --nocapture
+#[test]
+#[ignore]
+fn live_restart_recovers_the_real_service() {
+    let mut config = PluginConfig::new(env!("CARGO_BIN_EXE_sunlogin-plugin"));
+    config.request_timeout = Duration::from_secs(30);
+    let session = PluginSession::start(&config).expect("spawn sunlogin plugin");
+    session.initialize().expect("handshake");
+
+    let probe = |timeout: Duration| {
+        session
+            .call_with_timeout(
+                custos_plugin_api::Method::Probe,
+                serde_json::json!({"resource_id": "sunlogin"}),
+                timeout,
+            )
+            .expect("probe")
+    };
+    let baseline = probe(Duration::from_secs(20));
+    assert_eq!(baseline["healthy"], serde_json::json!(true), "{baseline}");
+
+    let restart = session
+        .call_with_timeout(
+            custos_plugin_api::Method::ExecuteRecoveryAction,
+            serde_json::json!({"operation_id": "sunlogin.restart", "resource_id": "sunlogin"}),
+            Duration::from_secs(120),
+        )
+        .expect("restart action");
+    println!("restart outcome: {}", restart);
+    assert_eq!(restart["succeeded"], serde_json::json!(true), "{restart}");
+
+    // The service manager accepts the start request while the service is
+    // still START_PENDING — poll the probe until the ladder is healthy
+    // again (processes + cloud session re-established).
+    let mut recovered = false;
+    for _ in 0..10 {
+        std::thread::sleep(Duration::from_secs(3));
+        let verify = probe(Duration::from_secs(20));
+        println!("verify: {}", verify["observation"]);
+        if verify["healthy"] == serde_json::json!(true) {
+            recovered = true;
+            break;
+        }
+    }
+    assert!(recovered, "service did not return to healthy after restart");
+    session.shutdown().ok();
+}
+
+/// LIVE read-only probe on a real machine WITH sunlogin/awesun installed
+/// (ignored by default) — positive evidence on the actual deployment.
+#[test]
+#[ignore]
+fn live_probe_reports_the_real_client_state() {
+    let mut config = PluginConfig::new(env!("CARGO_BIN_EXE_sunlogin-plugin"));
+    config.request_timeout = Duration::from_secs(20);
+    let session = PluginSession::start(&config).expect("spawn sunlogin plugin");
+    session.initialize().expect("handshake");
+    let probe = session
+        .call_with_timeout(
+            custos_plugin_api::Method::Probe,
+            serde_json::json!({"resource_id": "sunlogin"}),
+            Duration::from_secs(20),
+        )
+        .expect("live probe");
+    println!("live observation: {}", probe["observation"]);
+    assert_eq!(probe["healthy"], serde_json::json!(true), "{probe}");
+    let observation = probe["observation"].as_str().unwrap_or_default();
+    assert!(observation.contains("RUNNING"), "{}", observation);
+    assert!(observation.contains("ESTABLISHED"), "{}", observation);
+    // The plugin must never count ITSELF as the sunlogin client (its own
+    // binary name contains "sunlogin") — self-detection false positive.
+    assert!(
+        !observation.contains("sunlogin-plugin"),
+        "{}",
+        observation
     );
     session.shutdown().ok();
 }

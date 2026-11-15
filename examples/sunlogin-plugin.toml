@@ -1,20 +1,23 @@
-# Sunlogin (向日葵) supervision via the sunlogin PLUGIN — wrapping a
+# Sunlogin (向日葵/AweSun) supervision via the sunlogin PLUGIN — wrapping a
 # closed-source client that offers no official API.
 #
-# The de-facto API is the client's own loopback status surface: the client
-# listens on a random high port (40000-65535, 127.0.0.1) and the plugin
-# discovers it deterministically (client logs → socket table), then queries
-# the read-only `login-type` endpoint the client's own UI uses. The plugin
-# NEVER touches command endpoints (the CNVD-2022-10270 RCE surface) and the
-# version it reports doubles as a stale-install audit.
+# Health model (verified live on AweSun 16.5 / Windows, 2026-11-16):
+# the 16.x client's loopback listeners are GUI↔service private IPC — the
+# legacy HTTP status surface is GONE. Observable layers instead:
+#   1. service RUNNING            (`sc query AweSunService` / systemctl)
+#   2. client processes alive     (AweSun.exe, awesun_guard.exe / sunloginclient)
+#   3. cloud session ESTABLISHED  (client pid → :443) — THE health signal:
+#                                  the machine is remotely controllable now
+#   4. config.ini facts           (full_version, account = binding)
+# Old 11.x-era installs still answer `/cgi-bin/rpc?action=login-type` on a
+# loopback port; point SUNLOGIN_API/SUNLOGIN_PORT at it for extra facts
+# (optional, non-fatal).
 #
-# Ladder: probe unhealthy ("not discovered" / "status unreachable") →
-# restart the client service → verify. Account re-login is declared but
-# pending real-machine UI-automation work; it must stay behind
-# allow_high_risk.
-#
-# The Windows twin of this deployment (C:\ProgramData paths,
-# SunloginService, UI automation) follows the same shape.
+# Ladder: probe unhealthy (names the failing layer) → restart the client
+# service → verify. Restarting a remote-access client kills live remote
+# sessions — the capability declares interrupts_remote_admin. Account
+# re-login is declared but pending real-machine UI-automation work; it must
+# stay behind allow_high_risk.
 version = 1
 
 [permissions]
@@ -29,12 +32,20 @@ binary = "/usr/local/bin/sunlogin-plugin"
 request_timeout_ms = 10000
 
 [plugins.env]
-# Linux systemd unit managing the client (`systemctl list-units | grep -i sunlogin`).
+# Service/unit managing the client. This PINS exactly one candidate — no
+# fallbacks (a wrong fallback would be restarted by the plan!). Find it with
+# `systemctl list-units | grep -i -e sunlogin -e awesun` (Linux) or
+# `sc query AweSunService` (Windows). Default: sunloginclient / AweSunService.
 SUNLOGIN_SERVICE = "sunloginclient"
-# Optional overrides, normally empty: discovery reads the client's own logs
-# (default dirs per platform) and falls back to the socket table.
-# SUNLOGIN_LOG_DIR = "/var/log"
-# SUNLOGIN_PORT = ""
+# Optional client config.ini override (version/binding facts). Default paths:
+#   Windows  C:\Program Files\Oray\AweSun\config.ini (16.x)
+#            C:\ProgramData\Oray\SunloginClient\config.ini (11.x)
+#   Linux    /usr/local/sunlogin/config.ini
+# SUNLOGIN_CONFIG = "C:\\Program Files\\Oray\\AweSun\\config.ini"
+# Optional LEGACY (11.x-era) loopback status surface, e.g. discovered via
+# client logs. 16.x installs don't answer it — leave unset there.
+# SUNLOGIN_API = "http://127.0.0.1:49181"
+# SUNLOGIN_PORT = "49181"
 
 [[resources]]
 id = "sunlogin"
@@ -47,10 +58,11 @@ probe_operation = "sunlogin.probe"
 failure_threshold = 3
 success_threshold = 2
 
-# Client process dead or status surface unreachable → restart the service.
-# NOTE: restarting a remote-access client kills live remote sessions; the
-# capability declares interrupts_remote_admin — risk "medium" and verify
-# gates it. Plugin-probe faults map to unknown_failure / probe_timeout.
+# Any failing layer (service down / client dead / cloud session lost) →
+# restart the service. NOTE: restarting a remote-access client kills live
+# remote sessions; the capability declares interrupts_remote_admin — risk
+# "medium" and verify gates it. Plugin-probe faults map to unknown_failure /
+# probe_timeout.
 [[resources.recovery_policy.plans]]
 plan_id = "restart-sunlogin"
 applicable_faults = ["unknown_failure", "probe_timeout"]
