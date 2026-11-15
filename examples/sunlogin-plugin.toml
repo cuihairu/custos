@@ -1,0 +1,91 @@
+# Sunlogin (向日葵) supervision via the sunlogin PLUGIN — wrapping a
+# closed-source client that offers no official API.
+#
+# The de-facto API is the client's own loopback status surface: the client
+# listens on a random high port (40000-65535, 127.0.0.1) and the plugin
+# discovers it deterministically (client logs → socket table), then queries
+# the read-only `login-type` endpoint the client's own UI uses. The plugin
+# NEVER touches command endpoints (the CNVD-2022-10270 RCE surface) and the
+# version it reports doubles as a stale-install audit.
+#
+# Ladder: probe unhealthy ("not discovered" / "status unreachable") →
+# restart the client service → verify. Account re-login is declared but
+# pending real-machine UI-automation work; it must stay behind
+# allow_high_risk.
+#
+# The Windows twin of this deployment (C:\ProgramData paths,
+# SunloginService, UI automation) follows the same shape.
+version = 1
+
+[permissions]
+default_allow_high_risk = false
+
+[[plugins]]
+name = "sunlogin"
+# CHANGE_ME: path of the built plugin binary
+# (cargo build -p custos-sunlogin-plugin --release →
+#  target/release/sunlogin-plugin).
+binary = "/usr/local/bin/sunlogin-plugin"
+request_timeout_ms = 10000
+
+[plugins.env]
+# Linux systemd unit managing the client (`systemctl list-units | grep -i sunlogin`).
+SUNLOGIN_SERVICE = "sunloginclient"
+# Optional overrides, normally empty: discovery reads the client's own logs
+# (default dirs per platform) and falls back to the socket table.
+# SUNLOGIN_LOG_DIR = "/var/log"
+# SUNLOGIN_PORT = ""
+
+[[resources]]
+id = "sunlogin"
+type = "sunlogin"
+display_name = "向日葵远控客户端"
+plugin = "sunlogin"
+probe_operation = "sunlogin.probe"
+
+[resources.health_policy]
+failure_threshold = 3
+success_threshold = 2
+
+# Client process dead or status surface unreachable → restart the service.
+# NOTE: restarting a remote-access client kills live remote sessions; the
+# capability declares interrupts_remote_admin — risk "medium" and verify
+# gates it. Plugin-probe faults map to unknown_failure / probe_timeout.
+[[resources.recovery_policy.plans]]
+plan_id = "restart-sunlogin"
+applicable_faults = ["unknown_failure", "probe_timeout"]
+risk = "medium"
+idempotent = true
+timeout_ms = 60000
+max_attempts = 2
+cooldown_ms = 120000
+
+[resources.recovery_policy.plans.action]
+plugin = "sunlogin"
+operation_id = "sunlogin.restart"
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+
+# Account re-login (UI automation) is declared but NOT implemented yet.
+# Once it lands on a verified Windows host, add it here as the LAST plan,
+# high risk, behind an explicit allow_high_risk opt-in:
+#
+# [resources.recovery_policy]
+# allow_high_risk = true
+#
+# [[resources.recovery_policy.plans]]
+# plan_id = "relogin-oray-account"
+# applicable_faults = ["unknown_failure"]
+# risk = "high"
+# idempotent = false
+# timeout_ms = 120000
+# max_attempts = 1
+# cooldown_ms = 600000
+#
+# [resources.recovery_policy.plans.action]
+# plugin = "sunlogin"
+# operation_id = "sunlogin.relogin"
+#
+# [resources.recovery_policy.plans.verification]
+# status_is = "healthy"

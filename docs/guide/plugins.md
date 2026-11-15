@@ -228,3 +228,15 @@ OpenClash runs a clash core on OpenWrt; its external controller is the same REST
 ### 5.7 Worked example
 
 `examples/openclash-failover.toml` (validates with `custos validate`): `wan` (detection only — a dead line must not churn proxy nodes), `openclash` (plugin-served probe + high-risk restart plan behind `allow_high_risk`), `google` / `github` (builtin proxy probes through the mixed port, plans dispatching `openclash.switch_best_node`; proxy authentication failures deliberately have no plan — switching nodes cannot fix wrong credentials).
+
+### 5.8 Wrapping closed-source clients: the sunlogin plugin
+
+向日葵 (Sunlogin) ships no official API. The wrapper principle is the one clash-api already follows: **the de-facto API is whatever surface the product's own UI talks to**. For Sunlogin that is a loopback HTTP surface: the client listens on a random high port (40000–65535, 127.0.0.1) and the port is written into the client's own logs, so discovery is deterministic (logs → socket table), and `/cgi-bin/rpc?action=login-type` answers version/binding/platform — read-only.
+
+`plugins/sunlogin` implements exactly that and nothing more:
+
+- `sunlogin.probe` — discovery + read-only status query; the observation names the failing stage and carries the version (a free stale-install audit).
+- `sunlogin.restart` — service-manager restart (Linux units first, Windows service-control path pending real-machine verification); declares `interrupts_remote_admin` because restarting a remote-access client kills live sessions.
+- `sunlogin.relogin` — account re-login via UI automation: declared for a complete capability list, NOT implemented; Windows-only, fragile (dialogs/updates break selectors), must stay behind `allow_high_risk` as the last plan.
+
+Security contract: status endpoints only, loopback only; the plugin never touches historical command endpoints (`/check` — the CNVD-2022-10270 RCE surface, fixed upstream). See `examples/sunlogin-plugin.toml` for the deployment shape on Linux; the Windows twin follows the same structure.

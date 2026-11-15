@@ -1,0 +1,21 @@
+[package]
+name = "custos-sunlogin-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Sunlogin (向日葵) plugin — wrapping a closed-source client without an
+# official API. The de-facto API is the loopback HTTP surface the client's
+# own UI talks to (status queries only); see docs/guide/plugins.md §5.8.
+[[bin]]
+name = "sunlogin-plugin"
+path = "src/main.rs"
+
+[dependencies]
+custos-plugin-api = { path = "../../crates/custos-plugin-api" }
+custos-probe = { path = "../../crates/custos-probe" }
+serde_json = { workspace = true }
+ureq = "3"
+
+[dev-dependencies]
+custos-plugin-host = { path = "../../crates/custos-plugin-host" }

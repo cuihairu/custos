@@ -54,6 +54,7 @@ pnpm run docs:build  # 构建
 - [dependency-chain.toml](examples/dependency-chain.toml) — tunnel → proxy → network 的恢复顺序。
 - [notifications.toml](examples/notifications.toml) — webhook / local-log / Herald 通知接线。
 - [sunlogin.toml](examples/sunlogin.toml) — 向日葵远程桌面监控：PC 离线检测、只恢复向日葵，自愈的经典场景（Windows `SunloginService`，Linux `oray-sunlogin.service`）。
+- [sunlogin-plugin.toml](examples/sunlogin-plugin.toml) — 插件封装版：走客户端回环状态面探测（无需官方 API）、服务重启方案、重登录预留高风险位；见 docs/guide/plugins.md §5.8。
 - [remote-desktop.toml](examples/remote-desktop.toml) — RustDesk + TeamViewer + 向日葵统一挂在同一网络依赖下：断网时只修网络，网络正常时只重启挂掉的远程桌面服务。
 - [network-outage.toml](examples/network-outage.toml) — 断网检测与分层恢复：局域网网关探测与公网 DNS 锚点组成依赖链，先修内网链路再修外网。
 - [openclash-failover.toml](examples/openclash-failover.toml) — OpenClash 故障转移：google/github 代理探测 + 插件派发恢复（按实测延迟 `openclash.switch_best_node`，高风险兜底 `openclash.restart`）；完整的插件接线示例（CHANGE_ME 占位，无脚本）。

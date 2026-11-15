@@ -54,6 +54,7 @@ Ready-to-run monitoring configurations in `examples/` (each validates with `cust
 - [dependency-chain.toml](examples/dependency-chain.toml) — tunnel → proxy → network recovery order.
 - [notifications.toml](examples/notifications.toml) — webhook / local-log / Herald notification wiring.
 - [sunlogin.toml](examples/sunlogin.toml) — 向日葵 (Sunlogin) remote-desktop supervision: PC offline detection and only-Sunlogin recovery, the canonical self-healing scenario (Windows `SunloginService`, Linux `oray-sunlogin.service`).
+- [sunlogin-plugin.toml](examples/sunlogin-plugin.toml) — the plugin-wrapped twin: loopback status-surface probe (no official API needed), service restart plan, re-login reserved as high risk; see docs/guide/plugins.md §5.8.
 - [remote-desktop.toml](examples/remote-desktop.toml) — RustDesk + TeamViewer + 向日葵 behind one network dependency: if the network is down only network recovery runs; otherwise only the dead remote-desktop service is restarted.
 - [network-outage.toml](examples/network-outage.toml) — 断网 detection with layered recovery: LAN gateway probe and public-DNS anchor as a dependency chain, so the LAN link is fixed before the WAN side.
 - [openclash-failover.toml](examples/openclash-failover.toml) — OpenClash failover: google/github proxy probes with plugin-dispatched recovery (`openclash.switch_best_node` by measured delay, `openclash.restart` as the high-risk plan); the full plugin wiring example (CHANGE_ME placeholders, no shell scripts).

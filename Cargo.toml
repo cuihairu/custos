@@ -17,6 +17,7 @@ members = [
     "crates/custos-cli",
     "crates/custos-dashboard",
     "plugins/clash-api",
+    "plugins/sunlogin",
     "plugins/mihomo",
     "plugins/openclash",
     "plugins/cloudflared",
