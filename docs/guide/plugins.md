@@ -201,7 +201,7 @@ The plugin name and operation id are validated at load (unknown plugin, empty op
 ### 5.4 Process model: clean environment, budgets, shutdown
 
 - **Lazy spawn**: a plugin process starts on its first probe or action call, not at configuration load.
-- **Clean environment**: the child never inherits the host environment; it gets the declared `[plugins.env]` entries only. Credentials reach plugins explicitly (§5.1) instead of through inheritance.
+- **Clean environment**: the child never inherits the host environment; it gets the declared `[plugins.env]` entries plus a fixed OS baseline only (`PATH`, and on Windows `SystemRoot`/`SystemDrive`/`ComSpec`/`TEMP`/`TMP` — without them Windows system tools like `tasklist` fail to load their DLLs; caught by the real-machine sunlogin live test). Values come from the host environment when present, standard defaults otherwise; declared entries override the baseline. Credentials reach plugins explicitly (§5.1) instead of through inheritance.
 - **Per-request budget**: `request_timeout_ms` bounds every RPC; the watchdog kills a wedged plugin and the supervisor restarts it per its restart policy (§4.5).
 - **Shutdown**: the runtime assembly (`Assembled`, `crates/custos-core/src/assemble.rs`) holds every supervisor and shuts plugins down on drop — no orphaned children.
 
@@ -231,12 +231,19 @@ OpenClash runs a clash core on OpenWrt; its external controller is the same REST
 
 ### 5.8 Wrapping closed-source clients: the sunlogin plugin
 
-向日葵 (Sunlogin) ships no official API. The wrapper principle is the one clash-api already follows: **the de-facto API is whatever surface the product's own UI talks to**. For Sunlogin that is a loopback HTTP surface: the client listens on a random high port (40000–65535, 127.0.0.1) and the port is written into the client's own logs, so discovery is deterministic (logs → socket table), and `/cgi-bin/rpc?action=login-type` answers version/binding/platform — read-only.
+向日葵 (Sunlogin) ships no official API. The wrapper principle is the one clash-api already follows: **the de-facto API is whatever surface the product's own UI talks to** — and that surface is version-dependent, so the plugin models the generations that exist in the wild:
 
-`plugins/sunlogin` implements exactly that and nothing more:
+- **AweSun 16.x (current, verified live on a real Windows machine, 2026-11-16)**: the client's loopback listeners (127.0.0.1:49679/49680) are the GUI↔service *private IPC* — they accept TCP but speak no HTTP (curl answers code 000). The observable health model is layered, and the probe names every fact:
+  1. service RUNNING (`sc query AweSunService`; Linux: the systemd unit),
+  2. client processes alive (`tasklist`: `AweSun.exe`, `awesun_guard.exe`),
+  3. **cloud session ESTABLISHED** (`netstat -ano`: client pid → :443) — this is THE health signal: it means the machine is remotely controllable from outside *right now*,
+  4. `config.ini` facts (`full_version`, `account` = binding), best-effort.
+- **Legacy 11.x installs**: a loopback HTTP status surface, `/cgi-bin/rpc?action=login-type` (version/binding/platform) on a random high port written into the client logs. Kept as OPTIONAL enrichment: point `SUNLOGIN_API` / `SUNLOGIN_PORT` at it; failures are non-fatal.
 
-- `sunlogin.probe` — discovery + read-only status query; the observation names the failing stage and carries the version (a free stale-install audit).
-- `sunlogin.restart` — service-manager restart (Linux units first, Windows service-control path pending real-machine verification); declares `interrupts_remote_admin` because restarting a remote-access client kills live sessions.
+`plugins/sunlogin` implements read-only observation over those layers plus the two recovery actions:
+
+- `sunlogin.probe` — the layered ladder above; `healthy` = service ∧ processes ∧ cloud session. The observation names the failing layer (never a bare false), and the reported version doubles as a stale-install audit.
+- `sunlogin.restart` — service-manager restart (`sc stop`/`start` on Windows, `systemctl restart` on Linux); declares `interrupts_remote_admin` because restarting a remote-access client kills live sessions. `sc start` returns the moment the SCM accepts the request, so the Windows path then polls `sc query` until the service is actually RUNNING (45 s budget) — the real-machine live run showed a START_PENDING "success" racing the plan's verification into a false Escalation. `SUNLOGIN_SERVICE` **pins exactly one service** (no fallbacks — a wrong fallback must never be restarted); unset, it tries the platform default plus alternates.
 - `sunlogin.relogin` — account re-login via UI automation: declared for a complete capability list, NOT implemented; Windows-only, fragile (dialogs/updates break selectors), must stay behind `allow_high_risk` as the last plan.
 
-Security contract: status endpoints only, loopback only; the plugin never touches historical command endpoints (`/check` — the CNVD-2022-10270 RCE surface, fixed upstream). See `examples/sunlogin-plugin.toml` for the deployment shape on Linux; the Windows twin follows the same structure.
+Security contract: read-only observation surfaces only, loopback only; the plugin never touches historical command endpoints (`/check` — the CNVD-2022-10270 RCE surface, fixed upstream). See `examples/sunlogin-plugin.toml`; parsers are unit-tested against real-device fixtures, and the `#[ignore]`d live test (`cargo test -p custos-sunlogin-plugin -- --ignored`) probes the actual machine.

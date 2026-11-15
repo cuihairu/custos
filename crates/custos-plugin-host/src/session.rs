@@ -158,6 +158,50 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// OS baseline applied on top of the clean environment: Windows system
+/// tools (`tasklist`, `netstat`, PowerShell) fail to load their dependent
+/// DLLs when `SystemRoot`/`PATH` are missing — the real-machine live test
+/// caught exactly that (`tasklist exit 1: 找不到指定的模块`). Only fixed,
+/// non-secret OS keys pass; values come from the host environment when
+/// present, standard defaults otherwise. `[plugins.env]` entries override
+/// these, so a deployment can still pin its own tools on PATH.
+fn baseline_env() -> Vec<(String, String)> {
+    let host = |key: &str, default: String| std::env::var(key).unwrap_or(default);
+    #[cfg(windows)]
+    {
+        let root = host("SystemRoot", r"C:\Windows".into());
+        vec![
+            ("SystemRoot".into(), root.clone()),
+            ("SystemDrive".into(), host("SystemDrive", "C:".into())),
+            (
+                "ComSpec".into(),
+                host("ComSpec", format!(r"{root}\System32\cmd.exe")),
+            ),
+            (
+                "PATH".into(),
+                host(
+                    "PATH",
+                    format!(
+                        r"{root}\System32;{root};{root}\System32\Wbem;{root}\System32\WindowsPowerShell\v1.0"
+                    ),
+                ),
+            ),
+            ("TEMP".into(), host("TEMP", format!(r"{root}\TEMP"))),
+            ("TMP".into(), host("TMP", format!(r"{root}\TEMP"))),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![(
+            "PATH".into(),
+            host(
+                "PATH",
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".into(),
+            ),
+        )]
+    }
+}
+
 impl PluginSession {
     /// Spawns the plugin and starts the transport threads. The session is
     /// not usable until [`PluginSession::initialize`] succeeds.
@@ -169,6 +213,10 @@ impl PluginSession {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // Clean environment + OS baseline (§5.4); declared env wins.
+        for (key, value) in baseline_env() {
+            command.env(key, value);
+        }
         for (key, value) in &config.env {
             command.env(key, value);
         }
@@ -677,6 +725,18 @@ fn read_capped_line<R: BufRead>(reader: &mut R, cap: usize) -> std::io::Result<O
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn baseline_carries_the_os_minimum_and_nothing_secret() {
+        let baseline: Vec<(String, String)> = baseline_env();
+        let keys: Vec<&str> = baseline.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(keys.contains(&"PATH"), "keys: {keys:?}");
+        #[cfg(windows)]
+        assert!(keys.contains(&"SystemRoot"), "keys: {keys:?}");
+        // Fixed OS keys only — never a wholesale env dump.
+        assert!(keys.len() <= 6, "keys: {keys:?}");
+        assert!(baseline.iter().all(|(k, _)| !k.contains("KEY") && !k.contains("TOKEN")));
+    }
 
     fn read_all(input: &'static [u8], cap: usize) -> Vec<CappedLine> {
         let mut cursor = Cursor::new(input);
