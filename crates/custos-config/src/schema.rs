@@ -205,6 +205,13 @@ pub(super) struct RawResource {
     pub(crate) depends_on: Vec<String>,
     #[serde(default)]
     pub(crate) dependencies: Vec<RawDependency>,
+    /// Probe served by this plugin's `probe_provider` capability instead of
+    /// a builtin probe; references a `[[plugins]]` entry by name.
+    #[serde(default)]
+    pub(crate) plugin: Option<String>,
+    /// Which of the plugin's probe operations to call (default `probe`).
+    #[serde(default)]
+    pub(crate) probe_operation: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -257,6 +264,11 @@ pub(super) struct RawConfig {
     pub(crate) permissions: Option<RawPermissions>,
     #[serde(default)]
     pub(crate) resources: Vec<RawResource>,
+    /// Plugin process declarations (docs/guide/plugins.md §5.1): binaries
+    /// speaking the `custos/v1` stdio protocol, referenced by name from
+    /// resource probes and recovery-plan actions.
+    #[serde(default)]
+    pub(crate) plugins: Vec<RawPlugin>,
     #[serde(default)]
     pub(crate) alternative_groups: Vec<RawAlternativeGroup>,
     /// Independent notification section (docs/guide/notification.md §8.5).
@@ -265,6 +277,30 @@ pub(super) struct RawConfig {
     /// Optional web dashboard, disabled by default (docs/guide/dashboard-cli-config.md §9.1).
     #[serde(default)]
     pub(crate) dashboard: Option<dashboard::RawDashboard>,
+}
+
+/// One declared plugin process ([[plugins]]).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawPlugin {
+    /// Registry name; resources and actions reference plugins by this name.
+    pub(crate) name: String,
+    /// Plugin binary path (stdio JSON-RPC `custos/v1` protocol).
+    pub(crate) binary: String,
+    #[serde(default)]
+    pub(crate) args: Vec<String>,
+    /// Extra environment for the child. The plugin gets a CLEAN environment
+    /// plus these entries only (§4.4), so credentials reach the plugin
+    /// explicitly instead of through host inheritance.
+    #[serde(default)]
+    pub(crate) env: std::collections::BTreeMap<String, String>,
+    /// Per-request deadline for plugin RPCs (probe and recovery actions).
+    #[serde(default = "default_plugin_request_timeout_ms")]
+    pub(crate) request_timeout_ms: u64,
+}
+
+fn default_plugin_request_timeout_ms() -> u64 {
+    30_000
 }
 
 /// Global authorization defaults (docs/guide/security.md §12.2). Per-resource

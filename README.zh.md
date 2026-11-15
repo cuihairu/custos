@@ -27,7 +27,7 @@ Custos 是一个用 Rust 编写的跨平台、本地自治、依赖感知的故�
 
 ## 插件口径（权威）
 
-一个插件 = 一种资源的完整监控与处理逻辑（探测、诊断、恢复动作、验证）。资源与其插件经资源依赖图组合；使用方只需简单配置即可启用，无需编写胶水代码。实现现状：内置适配器今天已可直接用 TOML 启用；已交付的插件二进制（mihomo、cloudflared、openclash）会说协议，但还无法从配置里接上——schema 里没有 `plugin` 键，运行时只装配内置探测（`crates/custos-core/src/assemble.rs:43-56`）。
+一个插件 = 一种资源的完整监控与处理逻辑（探测、诊断、恢复动作、验证）。资源与其插件经资源依赖图组合；使用方只需简单配置即可启用，无需编写胶水代码。实现现状：插件已端到端接入——`[[plugins]]` 声明插件进程（二进制、干净环境、单次 RPC 超时），资源用 `plugin` + `probe_operation` 接插件探测，恢复方案用 `plugin` + `operation_id` 派发插件操作（argv 与插件操作互斥，加载期校验）。核心按需拉起 supervisor、执行预算，并把 RPC 结果映射为恢复语义；clash/mihomo 共享客户端（`plugins/clash-api`）持有控制器 REST 面与节点选择策略——订阅注水节点（剩余流量/套餐到期/官网…）一律不作为切换目标。详见 [docs/guide/plugins.md](docs/guide/plugins.md) 与 [examples/openclash-failover.toml](examples/openclash-failover.toml)。
 
 ## 集成基础能力与 Python 脚本扩展（权威）
 
@@ -56,6 +56,7 @@ pnpm run docs:build  # 构建
 - [sunlogin.toml](examples/sunlogin.toml) — 向日葵远程桌面监控：PC 离线检测、只恢复向日葵，自愈的经典场景（Windows `SunloginService`，Linux `oray-sunlogin.service`）。
 - [remote-desktop.toml](examples/remote-desktop.toml) — RustDesk + TeamViewer + 向日葵统一挂在同一网络依赖下：断网时只修网络，网络正常时只重启挂掉的远程桌面服务。
 - [network-outage.toml](examples/network-outage.toml) — 断网检测与分层恢复：局域网网关探测与公网 DNS 锚点组成依赖链，先修内网链路再修外网。
+- [openclash-failover.toml](examples/openclash-failover.toml) — OpenClash 故障转移：google/github 代理探测 + 插件派发恢复（按实测延迟 `openclash.switch_best_node`，高风险兜底 `openclash.restart`）；完整的插件接线示例（CHANGE_ME 占位，无脚本）。
 
 English: [README.md](README.md)
 

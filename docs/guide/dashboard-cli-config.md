@@ -66,44 +66,36 @@ Configuration must be:
 
 The first version uses TOML (one primary format, `version = 1`).
 
-## 10.2 Example: a Cloudflare Tunnel depending on a proxy
+## 10.2 Example: a resource wired to a plugin
 
-The following is the target configuration shape, shown to illustrate architecture semantics. The `plugin:` / `config:` resource keys and the YAML form are target shape only — the TOML schema (`deny_unknown_fields`) rejects them today, because plugin wiring into configuration has not landed yet (`crates/custos-core/src/assemble.rs:43-56` assembles builtin probes only).
+The target shape below is now the implemented TOML schema. Plugin processes are declared under `[[plugins]]`; a resource references one with `plugin` (+ optional `probe_operation`), and recovery plans dispatch plugin operations with `plugin` + `operation_id` in the plan's action. The YAML form below is illustrative only — the canonical, validated form is TOML; see [docs/guide/plugins.md](plugins.md) and [examples/openclash-failover.toml](../../../examples/openclash-failover.toml) for the working example.
 
-```yaml
-version: 1
+```toml
+version = 1
 
-resources:
-  - id: proxy.egress
-    type: proxy
-    plugin: mihomo
-    config:
-      endpoint: http://127.0.0.1:7890
+[[plugins]]
+name = "mihomo"
+binary = "/usr/local/bin/mihomo-plugin"
+request_timeout_ms = 10000
 
-  - id: tunnel.egress
-    type: tunnel
-    plugin: cloudflared
-    config:
-      entry: https://api.example.com
-    dependencies:
-      - resource: proxy.egress
-        requirement: required
+[plugins.env]
+MIHOMO_API = "http://127.0.0.1:9090"
+MIHOMO_GROUP = "CHANGE_ME"
 
-notification:
-  rules:
-    - event: recovery.exhausted
-      severity_min: critical
-      channels:
-        - primary-webhook
+[[resources]]
+id = "proxy.egress"
+type = "mihomo"
+plugin = "mihomo"
+probe_operation = "mihomo.probe"
 ```
 
 Note that:
 
-1. Proxy health checks should distinguish proxy authentication failures, connection failures and target service failures wherever possible.
+1. Proxy health checks distinguish proxy authentication failures (407 → `proxy_authentication_failed`), connection failures (`proxy_connection_failed`) and target service failures (`remote_endpoint_unreachable`) — the builtin proxy probe classifies them, and plan ladders select by these codes.
 2. If the proxy is not a required dependency of the Tunnel, it must not be declared Required.
-3. HTTP probing is a native probe today (`crates/custos-probe/src/factory.rs:53`); the mihomo and cloudflared plugin binaries exist and speak the protocol, but they are not yet reachable from configuration (see the note above).
-4. The first version's configuration validator may define the complete configuration model up front, but unimplemented resource types must produce a clear capability-missing error instead of pretending to run.
-5. Recovery actions must match the plugin's declared capabilities.
+3. Plugin wiring is validated at load: unknown plugin names, `probe_operation` without `plugin`, and action forms mixing argv with plugin operation are startup errors, never runtime surprises.
+4. Recovery actions must match the plugin's declared capabilities.
+5. For node switching, plugins share one client (`plugins/clash-api`) whose selection policy filters subscription info nodes — members like 剩余流量/套餐到期 carry healthy delays but are not proxies.
 
 ## 10.3 Configuration loading process
 

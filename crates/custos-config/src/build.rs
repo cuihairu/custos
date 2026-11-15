@@ -10,6 +10,19 @@ use custos_model::{
     RecoveryPlan, RecoveryPolicy, Resource, ResourceId,
 };
 
+/// One declared plugin process, validated and ready for the runtime host
+/// (docs/guide/plugins.md §5.1): spawn config plus the per-request budget.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginDef {
+    pub name: String,
+    pub program: std::ffi::OsString,
+    pub args: Vec<String>,
+    /// Clean-environment additions for the child (§4.4: the plugin never
+    /// inherits host environment).
+    pub env: std::collections::BTreeMap<String, String>,
+    pub request_timeout: std::time::Duration,
+}
+
 /// Validated configuration ready for the runtime registry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidatedConfig {
@@ -22,6 +35,8 @@ pub struct ValidatedConfig {
     pub notification: NotificationConfig,
     /// Optional web dashboard (docs/guide/dashboard-cli-config.md §9.1).
     pub dashboard: DashboardConfig,
+    /// Declared plugin processes (docs/guide/plugins.md §5.1).
+    pub plugins: Vec<PluginDef>,
 }
 
 /// Global authorization defaults carried into the runtime.
@@ -57,6 +72,49 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
             .as_ref()
             .is_some_and(|p| p.default_allow_high_risk),
     };
+
+    // Plugin declarations: names and binaries are the registry keys that
+    // resources and actions reference, so validate them before anything
+    // points at them (reject at configuration stage, §3.5).
+    let mut plugin_names = std::collections::HashSet::new();
+    for (i, plugin) in raw.plugins.iter().enumerate() {
+        let path = format!("plugins[{i}]");
+        if plugin.name.is_empty() {
+            return Err(ConfigError::validation(
+                format!("{path}.name"),
+                "plugin name must not be empty",
+            ));
+        }
+        if !plugin_names.insert(plugin.name.as_str()) {
+            return Err(ConfigError::validation(
+                format!("{path}.name"),
+                format!("duplicate plugin name `{}`", plugin.name),
+            ));
+        }
+        if plugin.binary.is_empty() {
+            return Err(ConfigError::validation(
+                format!("{path}.binary"),
+                "plugin binary must not be empty",
+            ));
+        }
+        if plugin.request_timeout_ms == 0 {
+            return Err(ConfigError::validation(
+                format!("{path}.request_timeout_ms"),
+                "must be at least 1",
+            ));
+        }
+    }
+    let plugin_defs: Vec<PluginDef> = raw
+        .plugins
+        .iter()
+        .map(|plugin| PluginDef {
+            name: plugin.name.clone(),
+            program: plugin.binary.clone().into(),
+            args: plugin.args.clone(),
+            env: plugin.env.clone(),
+            request_timeout: std::time::Duration::from_millis(plugin.request_timeout_ms),
+        })
+        .collect();
 
     // Unique resource IDs.
     let mut seen = std::collections::HashSet::new();
@@ -251,6 +309,53 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
                     "must be at least 1",
                 ));
             }
+            // Action form: local argv XOR plugin operation
+            // (docs/guide/plugins.md §5.3 — one explicit mechanism, no
+            // silent mixing).
+            let action = &raw_plan.action;
+            if action.is_plugin_operation() {
+                if action.program.is_some() {
+                    return Err(ConfigError::validation(
+                        format!("{path}.action"),
+                        "action must be either a local argv (`program`) or a plugin \
+                         operation (`plugin` + `operation_id`), not both",
+                    ));
+                }
+                let (Some(plugin), Some(operation_id)) =
+                    (&action.plugin, &action.operation_id)
+                else {
+                    return Err(ConfigError::validation(
+                        format!("{path}.action"),
+                        "plugin operations need both `plugin` and `operation_id`",
+                    ));
+                };
+                if !plugin_names.contains(plugin.as_str()) {
+                    return Err(ConfigError::validation(
+                        format!("{path}.action.plugin"),
+                        format!("unknown plugin `{plugin}` (declare it under [[plugins]])"),
+                    ));
+                }
+                if operation_id.is_empty() {
+                    return Err(ConfigError::validation(
+                        format!("{path}.action.operation_id"),
+                        "operation id must not be empty",
+                    ));
+                }
+            } else {
+                let Some(program) = &action.program else {
+                    return Err(ConfigError::validation(
+                        format!("{path}.action.program"),
+                        "action needs `program` (local argv) or `plugin` + `operation_id` \
+                         (plugin operation)",
+                    ));
+                };
+                if program.is_empty() {
+                    return Err(ConfigError::validation(
+                        format!("{path}.action.program"),
+                        "program must not be empty",
+                    ));
+                }
+            }
             let risk = raw_plan.risk.unwrap_or(custos_model::RiskLevel::Low);
             if risk == custos_model::RiskLevel::High {
                 let allow = permissions.default_allow_high_risk
@@ -336,15 +441,41 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
                     success_threshold: h.success_threshold,
                 });
 
-        let probe_config = raw_resource.probe.clone().map_or_else(
-            || serde_json::Value::Null,
-            |p| {
-                // Carry the full probe table verbatim so the native probes
-                // (http/tcp/dns/tls-cert/disk/mem/cpu/log/docker/icmp/proxy/
-                // database/systemd) see their own fields at runtime.
-                serde_json::to_value(p).unwrap_or(serde_json::Value::Null)
-            },
-        );
+        // Plugin-backed probes (docs/guide/plugins.md §5.2): the reference
+        // and the probe operation are validated here so a broken wiring
+        // never reaches the supervisor at runtime.
+        if let Some(plugin) = &raw_resource.plugin {
+            if !plugin_names.contains(plugin.as_str()) {
+                return Err(ConfigError::validation(
+                    format!("{base}.plugin"),
+                    format!("unknown plugin `{plugin}` (declare it under [[plugins]])"),
+                ));
+            }
+        }
+        if raw_resource.probe_operation.is_some() && raw_resource.plugin.is_none() {
+            return Err(ConfigError::validation(
+                format!("{base}.probe_operation"),
+                "`probe_operation` requires `plugin`",
+            ));
+        }
+        let probe_config = if raw_resource.plugin.is_some() {
+            serde_json::json!({
+                "probe_operation": raw_resource
+                    .probe_operation
+                    .clone()
+                    .unwrap_or_else(|| "probe".to_owned()),
+            })
+        } else {
+            raw_resource.probe.clone().map_or_else(
+                || serde_json::Value::Null,
+                |p| {
+                    // Carry the full probe table verbatim so the native probes
+                    // (http/tcp/dns/tls-cert/disk/mem/cpu/log/docker/icmp/proxy/
+                    // database/systemd) see their own fields at runtime.
+                    serde_json::to_value(p).unwrap_or(serde_json::Value::Null)
+                },
+            )
+        };
 
         resources.push(Resource {
             id,
@@ -353,7 +484,7 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
                 .display_name
                 .clone()
                 .unwrap_or_else(|| raw_resource.id.clone()),
-            plugin_ref: None,
+            plugin_ref: raw_resource.plugin.clone(),
             config: probe_config,
             health_policy,
             recovery_policy,
@@ -396,5 +527,6 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
         permissions,
         notification,
         dashboard,
+        plugins: plugin_defs,
     })
 }

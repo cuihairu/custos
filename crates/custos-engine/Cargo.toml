@@ -7,7 +7,10 @@ license.workspace = true
 [dependencies]
 custos-config = { workspace = true }
 custos-model = { workspace = true }
+custos-plugin-api = { path = "../custos-plugin-api" }
+custos-plugin-host = { path = "../custos-plugin-host" }
 custos-probe = { path = "../custos-probe" }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = "0.1"
 

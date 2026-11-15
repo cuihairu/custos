@@ -14,6 +14,22 @@ impl Engine {
         let status = self.managed[id].snapshot.status;
         let fault = match probe_kind.as_str() {
             "process" => FaultCode::ProcessExited,
+            // Proxy verdicts distinguish the three failures that demand
+            // different actions (survey §26: 407 ≠ 宕机): switching nodes
+            // cannot fix wrong credentials, and restarting cannot fix a
+            // dead target — the plan ladder selects by these codes.
+            "proxy" => match status {
+                HealthStatus::Unreachable => FaultCode::ProxyConnectionFailed,
+                HealthStatus::Degraded => FaultCode::ProxyAuthenticationFailed,
+                _ => FaultCode::RemoteEndpointUnreachable,
+            },
+            // Plugin probe: an unprobeable plugin (degraded supervisor,
+            // §4.5) is a probe timeout of the management plane; an
+            // unhealthy verdict is the plugin's judgment about its backend.
+            "plugin" => match status {
+                HealthStatus::Unreachable => FaultCode::ProbeTimeout,
+                _ => FaultCode::UnknownFailure,
+            },
             "exec" => match status {
                 HealthStatus::Unreachable => FaultCode::ProbeTimeout,
                 _ => FaultCode::RemoteEndpointUnreachable,

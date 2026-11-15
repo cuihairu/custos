@@ -267,6 +267,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "clash-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "ureq",
+]
+
+[[package]]
 name = "cmov"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -435,6 +445,7 @@ dependencies = [
  "custos-engine",
  "custos-model",
  "custos-notify",
+ "custos-plugin-host",
  "custos-probe",
  "custos-store",
  "tracing",
@@ -460,6 +471,8 @@ version = "0.1.0"
 dependencies = [
  "custos-config",
  "custos-model",
+ "custos-plugin-api",
+ "custos-plugin-host",
  "custos-probe",
  "custos-store",
  "serde_json",
@@ -472,11 +485,11 @@ dependencies = [
 name = "custos-mihomo-plugin"
 version = "0.1.0"
 dependencies = [
+ "clash-api",
  "custos-plugin-api",
  "custos-plugin-host",
  "custos-probe",
  "serde_json",
- "ureq",
 ]
 
 [[package]]
@@ -509,11 +522,11 @@ dependencies = [
 name = "custos-openclash-plugin"
 version = "0.1.0"
 dependencies = [
+ "clash-api",
  "custos-plugin-api",
  "custos-plugin-host",
  "custos-probe",
  "serde_json",
- "ureq",
 ]
 
 [[package]]

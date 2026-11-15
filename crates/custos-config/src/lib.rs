@@ -41,7 +41,7 @@ impl ConfigError {
 mod build;
 mod schema;
 
-pub use build::{load, Permissions, ValidatedConfig};
+pub use build::{load, Permissions, PluginDef, ValidatedConfig};
 
 #[cfg(test)]
 mod tests;

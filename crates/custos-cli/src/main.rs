@@ -9,7 +9,6 @@
 mod init;
 
 use custos_config::ValidatedConfig;
-use custos_core::Assembled;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -181,18 +180,18 @@ fn start(path: &str, args: &[String]) -> ExitCode {
         Err(code) => return code,
     };
 
-    let Assembled {
-        mut engine,
-        notification,
-        store,
-        ..
-    } = match custos_core::assemble(&config, &options.db_path) {
+    let mut assembled = match custos_core::assemble(&config, &options.db_path) {
         Ok(assembled) => assembled,
         Err(err) => {
             eprintln!("error: {err}");
             return ExitCode::FAILURE;
         }
     };
+    // `Assembled` owns plugin shutdown (Drop), so its fields cannot be
+    // moved out: clone the shared `Arc`s first, then borrow the engine.
+    let notification = assembled.notification();
+    let store = assembled.store();
+    let engine = assembled.engine_mut();
 
     // Optional web dashboard: binds only when `[dashboard].enabled = true`;
     // disabled means zero listeners and no HTTP code path (ADR-0010).

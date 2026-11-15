@@ -11,4 +11,4 @@ pub use budget::{BudgetExceeded, BudgetState, RecoveryBudget};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use engine::{Engine, RecoverError};
 pub use events::{EngineEvent, MemoryStore, RunStore, Severity};
-pub use executor::{ActionExecutor, BuiltinExecExecutor, ScriptedExecutor};
+pub use executor::{ActionExecutor, BuiltinExecExecutor, PluginRoutingExecutor, ScriptedExecutor};

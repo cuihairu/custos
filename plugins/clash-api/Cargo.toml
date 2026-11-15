@@ -1,0 +1,15 @@
+[package]
+name = "clash-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Shared clash / mihomo external-controller client. Both custos proxy
+# plugins (openclash, mihomo) build on it: OpenClash runs a clash core whose
+# controller surface is identical, so client, URL encoding and the node
+# selection policy are defined once and tested once here.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+ureq = "3"

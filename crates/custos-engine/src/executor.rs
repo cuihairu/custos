@@ -2,6 +2,7 @@
 //! never bypass the core (docs/guide/agent-brief.md rule 4).
 
 use custos_model::{ActionOutcome, ActionSpec};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
@@ -147,12 +148,21 @@ fn execute_with_deadline(
 
 /// Builtin exec executor: runs the parameterized argv under the same
 /// controlled-execution rules as the Exec Probe (user ruling 2026-10-29:
-/// builtin base adapters).
+/// builtin base adapters). A plugin-dispatched action (no `program`)
+/// reaching this executor is a wiring gap, not a retryable failure (C21).
 pub struct BuiltinExecExecutor;
 
 impl ActionExecutor for BuiltinExecExecutor {
     fn execute(&self, action: &ActionSpec, timeout: Duration) -> ActionOutcome {
-        let argv: Vec<String> = std::iter::once(action.program.clone())
+        let Some(program) = &action.program else {
+            tracing::warn!(
+                target: "custos::engine",
+                "argv executor received an action without `program`; \
+                 plugin operations need the plugin-routing executor"
+            );
+            return ActionOutcome::NotStarted;
+        };
+        let argv: Vec<String> = std::iter::once(program.clone())
             .chain(action.args.iter().cloned())
             .collect();
         match custos_probe::exec::run_controlled(&argv, timeout, 64 * 1024) {
@@ -166,6 +176,81 @@ impl ActionExecutor for BuiltinExecExecutor {
             // never ran, so `Failed` would let the engine retry the same
             // doomed start until the ladder ran dry (C21).
             custos_probe::exec::ExecResult::StartFailed(_) => ActionOutcome::NotStarted,
+        }
+    }
+}
+
+/// Routes actions to their executor: plugin operations (`plugin` +
+/// `operation_id`) go to the named plugin's supervisor over the `custos/v1`
+/// protocol; argv actions fall through to the builtin exec executor
+/// (docs/guide/plugins.md §5.5: the host dispatches by operation id, the
+/// core owns execution and its budgets).
+pub struct PluginRoutingExecutor {
+    builtin: BuiltinExecExecutor,
+    plugins: HashMap<String, std::sync::Arc<custos_plugin_host::PluginSupervisor>>,
+}
+
+impl PluginRoutingExecutor {
+    /// One supervisor per declared `[[plugins]]` entry.
+    pub fn new(
+        plugins: HashMap<String, std::sync::Arc<custos_plugin_host::PluginSupervisor>>,
+    ) -> Self {
+        Self {
+            builtin: BuiltinExecExecutor,
+            plugins,
+        }
+    }
+}
+
+impl ActionExecutor for PluginRoutingExecutor {
+    fn execute(&self, action: &ActionSpec, timeout: Duration) -> ActionOutcome {
+        let Some(operation_id) = &action.operation_id else {
+            return self.builtin.execute(action, timeout);
+        };
+        let plugin = action.plugin.as_deref().unwrap_or_default();
+        let Some(supervisor) = self.plugins.get(plugin) else {
+            // Config validation rejects unknown plugin references; reaching
+            // here means a wiring layer skipped it — permanent for the plan
+            // (C21), never a retryable transient.
+            tracing::warn!(
+                target: "custos::engine",
+                "action references undeclared plugin `{plugin}`; refusing to start"
+            );
+            return ActionOutcome::NotStarted;
+        };
+        let _ = timeout; // deadline enforcement: watchdog + plugin request budget
+        let params = custos_plugin_api::OperationParams {
+            operation_id: operation_id.clone(),
+            resource_id: String::new(),
+            run_id: None,
+            args: Default::default(),
+        };
+        let params = serde_json::to_value(&params).unwrap_or_default();
+        match supervisor.call(custos_plugin_api::Method::ExecuteRecoveryAction, params) {
+            Ok(result) => {
+                let succeeded = result
+                    .get("succeeded")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                // The plugin ran and reported: `succeeded: false` is its
+                // verdict about the backend — retryable within the ladder.
+                if succeeded {
+                    ActionOutcome::Succeeded
+                } else {
+                    ActionOutcome::Failed
+                }
+            }
+            // Plugin crashed or degraded mid-call: whether the action ran
+            // is unknowable (§6.6) — never blindly repeat.
+            Err(custos_plugin_host::HostError::Unavailable) => ActionOutcome::OutcomeUnknown,
+            Err(custos_plugin_host::HostError::Rpc { code, .. })
+                if code == custos_plugin_api::RpcError::TIMED_OUT =>
+            {
+                ActionOutcome::TimedOut
+            }
+            // Unknown operation, malformed reply, protocol violation: the
+            // action never legitimately started (C21).
+            Err(_) => ActionOutcome::NotStarted,
         }
     }
 }
@@ -204,10 +289,7 @@ mod tests {
     use super::*;
 
     fn action() -> ActionSpec {
-        ActionSpec {
-            program: "true".to_owned(),
-            args: vec![],
-        }
+        ActionSpec::argv("true", &[])
     }
 
     #[test]

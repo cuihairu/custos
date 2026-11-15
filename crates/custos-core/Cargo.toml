@@ -9,6 +9,7 @@ custos-model = { workspace = true }
 custos-config = { path = "../custos-config" }
 custos-engine = { path = "../custos-engine" }
 custos-notify = { path = "../custos-notify" }
+custos-plugin-host = { path = "../custos-plugin-host" }
 custos-probe = { path = "../custos-probe" }
 custos-store = { path = "../custos-store" }
 tracing = "0.1"

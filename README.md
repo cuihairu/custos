@@ -27,7 +27,7 @@ Custos is a cross-platform, local-first, dependency-aware fault detection and au
 
 ## Plugin model (authoritative)
 
-One plugin = the complete monitoring + handling logic for ONE resource kind (probe, diagnosis, recovery actions, verification). Resources and their plugins are composed through the resource dependency graph; consumers enable them with simple configuration only — no glue code. Implementation status: the builtin adapters are enabled by plain TOML today; the shipped plugin binaries (mihomo, cloudflared, openclash) speak the protocol but are not yet reachable from configuration — the schema has no `plugin` key and the runtime assembles builtin probes only (`crates/custos-core/src/assemble.rs:43-56`).
+One plugin = the complete monitoring + handling logic for ONE resource kind (probe, diagnosis, recovery actions, verification). Resources and their plugins are composed through the resource dependency graph; consumers enable them with simple configuration only — no glue code. Implementation status: plugins are wired end to end — `[[plugins]]` declares the process (binary, clean env, per-RPC timeout), a resource probed by a plugin sets `plugin` + `probe_operation`, and a recovery plan dispatches a plugin operation with `plugin` + `operation_id` (argv XOR plugin form, validated at load). The core spawns supervisors lazily, enforces budgets and maps RPC outcomes to recovery semantics; the shared clash/mihomo client (`plugins/clash-api`) owns the controller REST surface and the node-selection policy that filters subscription info nodes (剩余流量/套餐到期/官网…) out of every switch. See [docs/guide/plugins.md](docs/guide/plugins.md) and [examples/openclash-failover.toml](examples/openclash-failover.toml).
 
 ## Builtin capabilities and Python script extension (authoritative)
 
@@ -56,6 +56,7 @@ Ready-to-run monitoring configurations in `examples/` (each validates with `cust
 - [sunlogin.toml](examples/sunlogin.toml) — 向日葵 (Sunlogin) remote-desktop supervision: PC offline detection and only-Sunlogin recovery, the canonical self-healing scenario (Windows `SunloginService`, Linux `oray-sunlogin.service`).
 - [remote-desktop.toml](examples/remote-desktop.toml) — RustDesk + TeamViewer + 向日葵 behind one network dependency: if the network is down only network recovery runs; otherwise only the dead remote-desktop service is restarted.
 - [network-outage.toml](examples/network-outage.toml) — 断网 detection with layered recovery: LAN gateway probe and public-DNS anchor as a dependency chain, so the LAN link is fixed before the WAN side.
+- [openclash-failover.toml](examples/openclash-failover.toml) — OpenClash failover: google/github proxy probes with plugin-dispatched recovery (`openclash.switch_best_node` by measured delay, `openclash.restart` as the high-risk plan); the full plugin wiring example (CHANGE_ME placeholders, no shell scripts).
 
 中文文档：[README.zh.md](README.zh.md)
 

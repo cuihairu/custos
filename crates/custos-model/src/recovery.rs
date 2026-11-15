@@ -24,13 +24,53 @@ pub enum ActionOutcome {
     NotStarted,
 }
 
-/// Explicit, parameterized action input (docs/guide/plugins.md §4.3: no
-/// arbitrary user input piped into shell commands).
+/// Explicit, parameterized action input (docs/guide/plugins.md §5.3: no
+/// arbitrary user input piped into shell commands). Exactly one form is
+/// valid: a local argv (`program` [+ `args`]) or a plugin operation
+/// (`plugin` + `operation_id`); the config layer enforces the pairing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionSpec {
-    pub program: String,
+    /// Local argv program; absent for plugin-dispatched actions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
+    /// Plugin serving the operation (with `operation_id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
+    /// Plugin operation id to dispatch (with `plugin`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+}
+
+impl ActionSpec {
+    /// Local argv form.
+    pub fn argv(program: impl Into<String>, args: &[&str]) -> Self {
+        Self {
+            program: Some(program.into()),
+            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+            plugin: None,
+            operation_id: None,
+        }
+    }
+
+    /// Plugin operation form.
+    pub fn plugin_operation(
+        plugin: impl Into<String>,
+        operation_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            program: None,
+            args: Vec::new(),
+            plugin: Some(plugin.into()),
+            operation_id: Some(operation_id.into()),
+        }
+    }
+
+    /// True when this action dispatches to a plugin operation.
+    pub fn is_plugin_operation(&self) -> bool {
+        self.plugin.is_some() || self.operation_id.is_some()
+    }
 }
 
 /// What happens when a plan's attempts are exhausted (§6.3 failure handling).
@@ -389,10 +429,7 @@ mod tests {
             applicable_faults: vec![FaultCode::ProcessExited, FaultCode::ServiceStopped],
             preconditions: vec![],
             risk_level: RiskLevel::Low,
-            action: ActionSpec {
-                program: "true".into(),
-                args: vec![],
-            },
+            action: ActionSpec::argv("true", &[]),
             timeout_ms: 5_000,
             max_attempts: 2,
             cooldown_ms: 10_000,

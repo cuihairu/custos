@@ -260,17 +260,21 @@ pub fn run_once(py: Python<'_>, config_path: &str, db_path: &str) -> PyResult<Py
     let text = std::fs::read_to_string(config_path)
         .map_err(|e| PyValueError::new_err(format!("cannot read {config_path}: {e}")))?;
     let config = load(&text).map_err(|e| PyValueError::new_err(e.to_string()))?;
-    let assembled = custos_core::assemble(&config, db_path).map_err(PyValueError::new_err)?;
-    let mut engine = assembled.engine;
+    let mut assembled = custos_core::assemble(&config, db_path).map_err(PyValueError::new_err)?;
+    // `Assembled` owns plugin shutdown (Drop); clone the `Arc`s first, then
+    // borrow the engine mutably.
+    let notification = assembled.notification();
+    let store = assembled.store();
+    let engine = assembled.engine_mut();
     engine.resume_unfinished();
     let runs = engine.tick();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    let delivery = assembled.notification.deliver_due(now, 32);
-    let queue = assembled.store.notification_counts().map_err(store_error)?;
-    run_once_summary(py, &assembled.store, runs, delivery, &queue)
+    let delivery = notification.deliver_due(now, 32);
+    let queue = store.notification_counts().map_err(store_error)?;
+    run_once_summary(py, &store, runs, delivery, &queue)
 }
 
 #[pymodule]

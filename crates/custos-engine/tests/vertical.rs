@@ -355,20 +355,14 @@ fn action_spec_runs_the_configured_program() {
     let exec = BuiltinExecExecutor;
     assert_eq!(
         exec.execute(
-            &ActionSpec {
-                program: "false".to_owned(),
-                args: vec![]
-            },
+            &ActionSpec::argv("false", &[]),
             Duration::from_millis(1_000)
         ),
         custos_model::ActionOutcome::Failed
     );
     assert_eq!(
         exec.execute(
-            &ActionSpec {
-                program: "sleep".to_owned(),
-                args: vec!["5".to_owned()]
-            },
+            &ActionSpec::argv("sleep", &["5"]),
             Duration::from_millis(100)
         ),
         custos_model::ActionOutcome::TimedOut

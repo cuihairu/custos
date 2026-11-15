@@ -265,10 +265,7 @@ mod tests {
             applicable_faults: vec![FaultCode::ProcessExited],
             preconditions: vec![],
             risk_level: risk,
-            action: ActionSpec {
-                program: "true".to_owned(),
-                args: vec![],
-            },
+            action: ActionSpec::argv("true", &[]),
             timeout_ms: 5_000,
             max_attempts: attempts,
             cooldown_ms: 1_000,
@@ -337,6 +334,7 @@ mod tests {
             permissions: Default::default(),
             notification: Default::default(),
             dashboard: Default::default(),
+            plugins: vec![],
         };
         let clock = Arc::new(crate::clock::FakeClock::new(1_000));
         let engine = Engine::new(&config, probes, executor, store.clone(), clock.clone());
@@ -390,6 +388,7 @@ mod tests {
                 permissions: Default::default(),
                 notification: Default::default(),
                 dashboard: Default::default(),
+                plugins: vec![],
             };
             let clock = Arc::new(crate::clock::FakeClock::new(1_000));
             let engine = Engine::new(&config, probes, executor, store.clone(), clock.clone());
@@ -637,6 +636,7 @@ mod tests {
             permissions: Default::default(),
             notification: Default::default(),
             dashboard: Default::default(),
+            plugins: vec![],
         };
         let mut engine = Engine::new(
             &config,
@@ -803,6 +803,7 @@ mod tests {
             permissions: Default::default(),
             notification: Default::default(),
             dashboard: Default::default(),
+            plugins: vec![],
         };
         let mut engine = Engine::new(
             &config,
@@ -849,10 +850,7 @@ mod tests {
         // succeed, so it must not consume the plan's whole attempt ladder
         // (§6.6: never repeat blindly).
         let mut broken = plan("broken", 3, RiskLevel::Low);
-        broken.action = ActionSpec {
-            program: "/nonexistent-custos-c21-binary".to_owned(),
-            args: vec![],
-        };
+        broken.action = ActionSpec::argv("/nonexistent-custos-c21-binary", &[]);
         let store = Arc::new(crate::MemoryStore::default());
         let mut probes = HashMap::new();
         probes.insert(
@@ -866,6 +864,7 @@ mod tests {
             permissions: Default::default(),
             notification: Default::default(),
             dashboard: Default::default(),
+            plugins: vec![],
         };
         let mut engine = Engine::new(
             &config,
@@ -893,10 +892,7 @@ mod tests {
         // start hands over to the next candidate plan instead of blocking
         // recovery entirely.
         let mut broken = plan("broken", 3, RiskLevel::Low);
-        broken.action = ActionSpec {
-            program: "/nonexistent-custos-c21-binary".to_owned(),
-            args: vec![],
-        };
+        broken.action = ActionSpec::argv("/nonexistent-custos-c21-binary", &[]);
         let fix = plan("fix", 1, RiskLevel::Low);
         let store = Arc::new(crate::MemoryStore::default());
         let mut probes = HashMap::new();
@@ -911,6 +907,7 @@ mod tests {
             permissions: Default::default(),
             notification: Default::default(),
             dashboard: Default::default(),
+            plugins: vec![],
         };
         let mut engine = Engine::new(
             &config,
