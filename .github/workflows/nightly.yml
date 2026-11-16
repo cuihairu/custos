@@ -92,7 +92,12 @@ jobs:
           - os: windows-2022
             target: x86_64-pc-windows-msvc
             artifact: custos-windows-x86_64
-          - os: macos-14
+          # 2026-11-17: macos-14 arm64 US pool rejects jobs with
+          # "configuration 'macos-14-arm64-us-default' is not supported"
+          # (dead since 11-09 nightly; 11-04 still built). macos-15 is the
+          # same arm64 hardware generation with a live pool — falcon/cage
+          # macos legs prove it. aarch64-apple-darwin target unchanged.
+          - os: macos-15
             target: aarch64-apple-darwin
             artifact: custos-macos-aarch64
     runs-on: ${{ matrix.os }}
