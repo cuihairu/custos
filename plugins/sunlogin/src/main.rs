@@ -15,6 +15,7 @@
 //!     2. client processes alive           (`tasklist`: AweSun.exe, awesun_guard)
 //!     3. cloud session ESTABLISHED        (`netstat -ano`: client pid → :443)
 //!     4. config.ini                       (full_version, account = binding)
+//!
 //!   "cloud session up" is THE health signal: the machine is remotely
 //!   controllable from outside right now.
 //!
@@ -139,10 +140,17 @@ pub fn netstat_cloud_session(line: &str, pids: &HashSet<u32>) -> bool {
     if fields.len() != 5 || !fields[3].contains("ESTABLISHED") {
         return false;
     }
-    if !fields[2].rsplit_once(':').map(|(_, p)| p == "443").unwrap_or(false) {
+    if !fields[2]
+        .rsplit_once(':')
+        .map(|(_, p)| p == "443")
+        .unwrap_or(false)
+    {
         return false;
     }
-    fields[4].parse::<u32>().map(|pid| pids.contains(&pid)).unwrap_or(false)
+    fields[4]
+        .parse::<u32>()
+        .map(|pid| pids.contains(&pid))
+        .unwrap_or(false)
 }
 
 /// True when an `ss -tnp` line is an ESTABLISHED :443 session whose process
@@ -254,7 +262,11 @@ fn service_candidates() -> Vec<String> {
 
 #[cfg(windows)]
 fn service_state(name: &str) -> Result<ServiceState, String> {
-    match run_controlled(&["sc".into(), "query".into(), name.into()], Duration::from_secs(10), 8 * 1024) {
+    match run_controlled(
+        &["sc".into(), "query".into(), name.into()],
+        Duration::from_secs(10),
+        8 * 1024,
+    ) {
         ExecResult::Succeeded { stdout, .. } => Ok(parse_sc_query(&stdout)),
         ExecResult::Failed { stdout, .. } => Ok(parse_sc_query(&stdout)),
         ExecResult::TimedOut => Err(format!("sc query {name} timed out")),
@@ -271,12 +283,14 @@ fn service_state(name: &str) -> Result<ServiceState, String> {
     ) {
         // is-active exits non-zero for inactive/missing units — the text is
         // still the state.
-        ExecResult::Succeeded { stdout, .. } | ExecResult::Failed { stdout, .. } => Ok(match stdout.trim() {
-            "active" => ServiceState::Running,
-            "activating" | "reloading" => ServiceState::Pending,
-            "not-found" => ServiceState::Missing,
-            _ => ServiceState::Stopped,
-        }),
+        ExecResult::Succeeded { stdout, .. } | ExecResult::Failed { stdout, .. } => {
+            Ok(match stdout.trim() {
+                "active" => ServiceState::Running,
+                "activating" | "reloading" => ServiceState::Pending,
+                "not-found" => ServiceState::Missing,
+                _ => ServiceState::Stopped,
+            })
+        }
         ExecResult::TimedOut => Err(format!("systemctl is-active {name} timed out")),
         ExecResult::StartFailed(err) => Err(format!("systemctl not runnable: {err}")),
     }
@@ -296,7 +310,9 @@ fn client_processes() -> Result<Vec<ProcessEntry>, String> {
             .filter(|p| is_client_process(p, own_pid, own_name.as_deref()))
             .collect()),
         ExecResult::TimedOut => Err("tasklist timed out".into()),
-        ExecResult::Failed { code, stderr, .. } => Err(format!("tasklist exit {code}: {}", stderr.trim())),
+        ExecResult::Failed { code, stderr, .. } => {
+            Err(format!("tasklist exit {code}: {}", stderr.trim()))
+        }
         ExecResult::StartFailed(err) => Err(format!("tasklist not runnable: {err}")),
     }
 }
@@ -304,34 +320,54 @@ fn client_processes() -> Result<Vec<ProcessEntry>, String> {
 #[cfg(not(windows))]
 fn client_processes() -> Result<Vec<ProcessEntry>, String> {
     let (own_pid, own_name) = own_process_identity();
-    match run_controlled(&["ps".into(), "-eo".into(), "pid=,comm=".into()], Duration::from_secs(10), 256 * 1024) {
+    match run_controlled(
+        &["ps".into(), "-eo".into(), "pid=,comm=".into()],
+        Duration::from_secs(10),
+        256 * 1024,
+    ) {
         ExecResult::Succeeded { stdout, .. } => Ok(stdout
             .lines()
             .filter_map(parse_ps_line)
             .filter(|p| is_client_process(p, own_pid, own_name.as_deref()))
             .collect()),
         ExecResult::TimedOut => Err("ps timed out".into()),
-        ExecResult::Failed { code, stderr, .. } => Err(format!("ps exit {code}: {}", stderr.trim())),
+        ExecResult::Failed { code, stderr, .. } => {
+            Err(format!("ps exit {code}: {}", stderr.trim()))
+        }
         ExecResult::StartFailed(err) => Err(format!("ps not runnable: {err}")),
     }
 }
 
 #[cfg(windows)]
 fn cloud_session(pids: &HashSet<u32>) -> Result<bool, String> {
-    match run_controlled(&["netstat".into(), "-ano".into()], Duration::from_secs(15), 512 * 1024) {
-        ExecResult::Succeeded { stdout, .. } => Ok(stdout.lines().any(|l| netstat_cloud_session(l, pids))),
+    match run_controlled(
+        &["netstat".into(), "-ano".into()],
+        Duration::from_secs(15),
+        512 * 1024,
+    ) {
+        ExecResult::Succeeded { stdout, .. } => {
+            Ok(stdout.lines().any(|l| netstat_cloud_session(l, pids)))
+        }
         ExecResult::TimedOut => Err("netstat timed out".into()),
-        ExecResult::Failed { code, stderr, .. } => Err(format!("netstat exit {code}: {}", stderr.trim())),
+        ExecResult::Failed { code, stderr, .. } => {
+            Err(format!("netstat exit {code}: {}", stderr.trim()))
+        }
         ExecResult::StartFailed(err) => Err(format!("netstat not runnable: {err}")),
     }
 }
 
 #[cfg(not(windows))]
 fn cloud_session(_: &HashSet<u32>) -> Result<bool, String> {
-    match run_controlled(&["ss".into(), "-tnp".into()], Duration::from_secs(10), 512 * 1024) {
+    match run_controlled(
+        &["ss".into(), "-tnp".into()],
+        Duration::from_secs(10),
+        512 * 1024,
+    ) {
         ExecResult::Succeeded { stdout, .. } => Ok(stdout.lines().any(ss_cloud_session)),
         ExecResult::TimedOut => Err("ss timed out".into()),
-        ExecResult::Failed { code, stderr, .. } => Err(format!("ss exit {code}: {}", stderr.trim())),
+        ExecResult::Failed { code, stderr, .. } => {
+            Err(format!("ss exit {code}: {}", stderr.trim()))
+        }
         ExecResult::StartFailed(err) => Err(format!("ss not runnable: {err}")),
     }
 }
@@ -343,8 +379,12 @@ fn config_candidates() -> Vec<std::path::PathBuf> {
     }
     let mut candidates = Vec::new();
     if cfg!(windows) {
-        candidates.push(std::path::PathBuf::from(r"C:\Program Files\Oray\AweSun\config.ini"));
-        candidates.push(std::path::PathBuf::from(r"C:\ProgramData\Oray\SunloginClient\config.ini"));
+        candidates.push(std::path::PathBuf::from(
+            r"C:\Program Files\Oray\AweSun\config.ini",
+        ));
+        candidates.push(std::path::PathBuf::from(
+            r"C:\ProgramData\Oray\SunloginClient\config.ini",
+        ));
     } else {
         candidates.push(std::path::PathBuf::from("/usr/local/sunlogin/config.ini"));
     }
@@ -397,9 +437,15 @@ fn probe() -> (bool, String) {
                 service_facts = vec![format!("service {name} RUNNING")];
                 break;
             }
-            Ok(ServiceState::Pending) => service_facts.push(format!("service {name} START/STOP_PENDING")),
-            Ok(ServiceState::Stopped) => service_facts.push(format!("service {name} not running (STOPPED)")),
-            Ok(ServiceState::Missing) => service_facts.push(format!("service {name} not installed")),
+            Ok(ServiceState::Pending) => {
+                service_facts.push(format!("service {name} START/STOP_PENDING"))
+            }
+            Ok(ServiceState::Stopped) => {
+                service_facts.push(format!("service {name} not running (STOPPED)"))
+            }
+            Ok(ServiceState::Missing) => {
+                service_facts.push(format!("service {name} not installed"))
+            }
             Err(err) => service_facts.push(err),
         }
     }
@@ -460,7 +506,11 @@ fn probe() -> (bool, String) {
     if let Some(status) = legacy_login_type() {
         facts.push(format!(
             "legacy login-type: version {}, bound {}",
-            if status.version.is_empty() { "?" } else { &status.version },
+            if status.version.is_empty() {
+                "?"
+            } else {
+                &status.version
+            },
             status.bound
         ));
     }
@@ -500,14 +550,27 @@ fn restart_service() -> Result<String, String> {
     let mut last = String::new();
     for name in names {
         // `sc stop` may fail when already stopped — starting is what counts.
-        let _ = run_controlled(&["sc".into(), "stop".into(), name.clone()], Duration::from_secs(60), 8 * 1024);
-        match run_controlled(&["sc".into(), "start".into(), name.clone()], Duration::from_secs(60), 8 * 1024) {
-            ExecResult::Succeeded { .. } => match wait_for_running(&name, Duration::from_secs(45)) {
-                Ok(elapsed) => {
-                    return Ok(format!("sc start {name} done; RUNNING after {}s", elapsed.as_secs().max(1)))
+        let _ = run_controlled(
+            &["sc".into(), "stop".into(), name.clone()],
+            Duration::from_secs(60),
+            8 * 1024,
+        );
+        match run_controlled(
+            &["sc".into(), "start".into(), name.clone()],
+            Duration::from_secs(60),
+            8 * 1024,
+        ) {
+            ExecResult::Succeeded { .. } => {
+                match wait_for_running(&name, Duration::from_secs(45)) {
+                    Ok(elapsed) => {
+                        return Ok(format!(
+                            "sc start {name} done; RUNNING after {}s",
+                            elapsed.as_secs().max(1)
+                        ))
+                    }
+                    Err(err) => return Err(err),
                 }
-                Err(err) => return Err(err),
-            },
+            }
             ExecResult::Failed { code, stderr, .. } => {
                 last = format!("`sc start {name}` exit {code}: {}", stderr.trim())
             }
@@ -543,9 +606,11 @@ fn restart_service() -> Result<String, String> {
 /// break selectors) and must run behind `allow_high_risk`
 /// (docs/guide/plugins.md §5.8).
 fn relogin() -> Result<String, String> {
-    Err("sunlogin.relogin is not implemented yet: Windows UI automation, \
+    Err(
+        "sunlogin.relogin is not implemented yet: Windows UI automation, \
          pending real-machine verification"
-        .into())
+            .into(),
+    )
 }
 
 fn capabilities() -> Value {
@@ -644,12 +709,14 @@ mod tests {
     fn sc_query_real_fixture_states() {
         let running = "\nSERVICE_NAME: AweSunService \n        TYPE               : 110  WIN32_OWN_PROCESS  (interactive)\n        STATE              : 4  RUNNING \n                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)\n";
         assert_eq!(parse_sc_query(running), ServiceState::Running);
-        let stopped = "\nSERVICE_NAME: SunloginService \n        STATE              : 1  STOPPED \n";
+        let stopped =
+            "\nSERVICE_NAME: SunloginService \n        STATE              : 1  STOPPED \n";
         assert_eq!(parse_sc_query(stopped), ServiceState::Stopped);
         // Transition states observed live on the iMac right after `sc stop`.
         let pending = "\nSERVICE_NAME: AweSunService \n        STATE              : 3  STOP_PENDING \n                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)\n";
         assert_eq!(parse_sc_query(pending), ServiceState::Pending);
-        let starting = "\nSERVICE_NAME: AweSunService \n        STATE              : 2  START_PENDING \n";
+        let starting =
+            "\nSERVICE_NAME: AweSunService \n        STATE              : 2  START_PENDING \n";
         assert_eq!(parse_sc_query(starting), ServiceState::Pending);
         let missing = "\n[SC] EnumQueryServicesStatus:1060\n\nThe specified service does not exist as an installed service.\n";
         assert_eq!(parse_sc_query(missing), ServiceState::Missing);
@@ -662,8 +729,9 @@ mod tests {
         assert_eq!(entry.name, "awesun.exe");
         assert_eq!(entry.pid, 5124);
         assert!(entry.is_client());
-        let guard = parse_tasklist_line("\"awesun_guard.exe\",\"10104\",\"Services\",\"0\",\"157,624 K\"")
-            .expect("parses");
+        let guard =
+            parse_tasklist_line("\"awesun_guard.exe\",\"10104\",\"Services\",\"0\",\"157,624 K\"")
+                .expect("parses");
         assert!(guard.is_client());
         // Non-client rows are filtered by is_client, not by the parser.
         let other = parse_tasklist_line("\"explorer.exe\",\"4321\",\"Console\",\"1\",\"90,000 K\"")
@@ -674,12 +742,25 @@ mod tests {
 
     #[test]
     fn self_and_sibling_plugin_processes_are_not_clients() {
-        let real = ProcessEntry { name: "awesun.exe".into(), pid: 5124 };
-        let own = ProcessEntry { name: "sunlogin-plugin.exe".into(), pid: 1000 };
-        let sibling = ProcessEntry { name: "sunlogin-plugin.exe".into(), pid: 2000 };
+        let real = ProcessEntry {
+            name: "awesun.exe".into(),
+            pid: 5124,
+        };
+        let own = ProcessEntry {
+            name: "sunlogin-plugin.exe".into(),
+            pid: 1000,
+        };
+        let sibling = ProcessEntry {
+            name: "sunlogin-plugin.exe".into(),
+            pid: 2000,
+        };
         assert!(is_client_process(&real, 1000, Some("sunlogin-plugin.exe")));
         assert!(!is_client_process(&own, 1000, Some("sunlogin-plugin.exe")));
-        assert!(!is_client_process(&sibling, 1000, Some("sunlogin-plugin.exe")));
+        assert!(!is_client_process(
+            &sibling,
+            1000,
+            Some("sunlogin-plugin.exe")
+        ));
     }
 
     #[test]
@@ -718,7 +799,10 @@ mod tests {
         let info = parse_client_config(ini);
         assert_eq!(info.version, "16.5.0.30905");
         assert_eq!(info.account, "orkj5118796wjwsm");
-        assert_eq!(parse_client_config("[base]\nfoo=1"), ClientConfig::default());
+        assert_eq!(
+            parse_client_config("[base]\nfoo=1"),
+            ClientConfig::default()
+        );
     }
 
     #[test]
@@ -742,7 +826,10 @@ mod tests {
         let status = parse_login_type(&value);
         assert_eq!(status.version, "11.0.1.33826");
         assert!(status.bound);
-        assert_eq!(parse_login_type(&serde_json::json!({})), ClientStatus::default());
+        assert_eq!(
+            parse_login_type(&serde_json::json!({})),
+            ClientStatus::default()
+        );
     }
 
     #[test]
@@ -767,7 +854,10 @@ mod tests {
 
         let (healthy, observation) = probe();
         assert!(!healthy);
-        assert!(observation.contains("custos-missing-unit"), "got: {observation}");
+        assert!(
+            observation.contains("custos-missing-unit"),
+            "got: {observation}"
+        );
         std::env::remove_var("SUNLOGIN_SERVICE");
     }
 

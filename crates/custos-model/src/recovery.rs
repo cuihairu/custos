@@ -55,10 +55,7 @@ impl ActionSpec {
     }
 
     /// Plugin operation form.
-    pub fn plugin_operation(
-        plugin: impl Into<String>,
-        operation_id: impl Into<String>,
-    ) -> Self {
+    pub fn plugin_operation(plugin: impl Into<String>, operation_id: impl Into<String>) -> Self {
         Self {
             program: None,
             args: Vec::new(),

@@ -321,8 +321,7 @@ pub fn load(config_text: &str) -> Result<ValidatedConfig, ConfigError> {
                          operation (`plugin` + `operation_id`), not both",
                     ));
                 }
-                let (Some(plugin), Some(operation_id)) =
-                    (&action.plugin, &action.operation_id)
+                let (Some(plugin), Some(operation_id)) = (&action.plugin, &action.operation_id)
                 else {
                     return Err(ConfigError::validation(
                         format!("{path}.action"),

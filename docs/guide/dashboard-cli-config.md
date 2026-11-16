@@ -68,7 +68,7 @@ The first version uses TOML (one primary format, `version = 1`).
 
 ## 10.2 Example: a resource wired to a plugin
 
-The target shape below is now the implemented TOML schema. Plugin processes are declared under `[[plugins]]`; a resource references one with `plugin` (+ optional `probe_operation`), and recovery plans dispatch plugin operations with `plugin` + `operation_id` in the plan's action. The YAML form below is illustrative only — the canonical, validated form is TOML; see [docs/guide/plugins.md](plugins.md) and [examples/openclash-failover.toml](../../../examples/openclash-failover.toml) for the working example.
+The target shape below is now the implemented TOML schema. Plugin processes are declared under `[[plugins]]`; a resource references one with `plugin` (+ optional `probe_operation`), and recovery plans dispatch plugin operations with `plugin` + `operation_id` in the plan's action. The YAML form below is illustrative only — the canonical, validated form is TOML; see [docs/guide/plugins.md](plugins.md) and `examples/openclash-failover.toml` in the repo root for the working example.
 
 ```toml
 version = 1

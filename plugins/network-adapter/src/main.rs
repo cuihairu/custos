@@ -18,6 +18,7 @@
 //!   2. a CONNECTED interface is refused unless `NETADAPTER_ALLOW_ACTIVE=1`
 //!      — disabling the adapter that carries the current connection severs
 //!      SSH/sunlogin at once (self-lockout).
+//!
 //!   Every refusal names the reason.
 //!
 //! Configuration via environment (§4.4 clean env + OS baseline):
@@ -161,7 +162,9 @@ pub fn disable_allowed(
     allow_active: bool,
 ) -> Result<(), String> {
     if protected.iter().any(|p| p.eq_ignore_ascii_case(alias)) {
-        return Err(format!("interface {alias} is on the protected list (NETADAPTER_PROTECTED)"));
+        return Err(format!(
+            "interface {alias} is on the protected list (NETADAPTER_PROTECTED)"
+        ));
     }
     let Some(state) = state else {
         return Err(format!("interface {alias} not found"));
@@ -185,19 +188,31 @@ fn env(key: &str) -> Option<String> {
 
 fn protected_list() -> Vec<String> {
     env("NETADAPTER_PROTECTED")
-        .map(|s| s.split(',').map(|p| p.trim().to_owned()).filter(|p| !p.is_empty()).collect())
+        .map(|s| {
+            s.split(',')
+                .map(|p| p.trim().to_owned())
+                .filter(|p| !p.is_empty())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 #[cfg(windows)]
 fn list_interfaces() -> Result<Vec<InterfaceState>, String> {
     match run_controlled(
-        &["netsh".into(), "interface".into(), "show".into(), "interface".into()],
+        &[
+            "netsh".into(),
+            "interface".into(),
+            "show".into(),
+            "interface".into(),
+        ],
         Duration::from_secs(15),
         64 * 1024,
     ) {
         ExecResult::Succeeded { stdout, .. } => Ok(parse_netsh_interfaces(&stdout)),
-        ExecResult::Failed { code, stderr, .. } => Err(format!("netsh exit {code}: {}", stderr.trim())),
+        ExecResult::Failed { code, stderr, .. } => {
+            Err(format!("netsh exit {code}: {}", stderr.trim()))
+        }
         ExecResult::TimedOut => Err("netsh timed out".into()),
         ExecResult::StartFailed(err) => Err(format!("netsh not runnable: {err}")),
     }
@@ -205,9 +220,17 @@ fn list_interfaces() -> Result<Vec<InterfaceState>, String> {
 
 #[cfg(not(windows))]
 fn list_interfaces() -> Result<Vec<InterfaceState>, String> {
-    match run_controlled(&["ip".into(), "-o".into(), "link".into(), "show".into()], Duration::from_secs(10), 64 * 1024) {
-        ExecResult::Succeeded { stdout, .. } => Ok(stdout.lines().filter_map(parse_ip_link_row).collect()),
-        ExecResult::Failed { code, stderr, .. } => Err(format!("ip exit {code}: {}", stderr.trim())),
+    match run_controlled(
+        &["ip".into(), "-o".into(), "link".into(), "show".into()],
+        Duration::from_secs(10),
+        64 * 1024,
+    ) {
+        ExecResult::Succeeded { stdout, .. } => {
+            Ok(stdout.lines().filter_map(parse_ip_link_row).collect())
+        }
+        ExecResult::Failed { code, stderr, .. } => {
+            Err(format!("ip exit {code}: {}", stderr.trim()))
+        }
         ExecResult::TimedOut => Err("ip timed out".into()),
         ExecResult::StartFailed(err) => Err(format!("ip not runnable: {err}")),
     }
@@ -239,9 +262,10 @@ fn resolve_alias(spec: &IfSpec) -> Result<String, String> {
                         Ok(alias)
                     }
                 }
-                ExecResult::Failed { code, stderr, .. } => {
-                    Err(format!("cannot resolve ifIndex {index} (exit {code}): {}", stderr.trim()))
-                }
+                ExecResult::Failed { code, stderr, .. } => Err(format!(
+                    "cannot resolve ifIndex {index} (exit {code}): {}",
+                    stderr.trim()
+                )),
                 ExecResult::TimedOut => Err(format!("resolving ifIndex {index} timed out")),
                 ExecResult::StartFailed(err) => Err(format!("powershell not runnable: {err}")),
             }
@@ -253,7 +277,9 @@ fn resolve_alias(spec: &IfSpec) -> Result<String, String> {
 fn resolve_alias(spec: &IfSpec) -> Result<String, String> {
     match spec {
         IfSpec::Name(name) => Ok(name.clone()),
-        IfSpec::IfIndex(index) => Err(format!("ifIndex addressing is Windows-only (got if:{index})")),
+        IfSpec::IfIndex(index) => Err(format!(
+            "ifIndex addressing is Windows-only (got if:{index})"
+        )),
     }
 }
 
@@ -279,9 +305,10 @@ fn set_admin_state(alias: &str, enable: bool) -> Result<(), String> {
         8 * 1024,
     ) {
         ExecResult::Succeeded { .. } => Ok(()),
-        ExecResult::Failed { code, stderr, .. } => {
-            Err(format!("netsh set {state} \"{alias}\" exit {code}: {}", stderr.trim()))
-        }
+        ExecResult::Failed { code, stderr, .. } => Err(format!(
+            "netsh set {state} \"{alias}\" exit {code}: {}",
+            stderr.trim()
+        )),
         ExecResult::TimedOut => Err(format!("netsh set {state} timed out")),
         ExecResult::StartFailed(err) => Err(format!("netsh not runnable: {err}")),
     }
@@ -292,14 +319,22 @@ fn set_admin_state(alias: &str, enable: bool) -> Result<(), String> {
 fn set_admin_state(alias: &str, enable: bool) -> Result<(), String> {
     let state = if enable { "up" } else { "down" };
     match run_controlled(
-        &["ip".into(), "link".into(), "set".into(), "dev".into(), alias.into(), state.into()],
+        &[
+            "ip".into(),
+            "link".into(),
+            "set".into(),
+            "dev".into(),
+            alias.into(),
+            state.into(),
+        ],
         Duration::from_secs(10),
         8 * 1024,
     ) {
         ExecResult::Succeeded { .. } => Ok(()),
-        ExecResult::Failed { code, stderr, .. } => {
-            Err(format!("ip link set {alias} {state} exit {code}: {}", stderr.trim()))
-        }
+        ExecResult::Failed { code, stderr, .. } => Err(format!(
+            "ip link set {alias} {state} exit {code}: {}",
+            stderr.trim()
+        )),
         ExecResult::TimedOut => Err(format!("ip link set {state} timed out")),
         ExecResult::StartFailed(err) => Err(format!("ip not runnable: {err}")),
     }
@@ -327,7 +362,12 @@ fn enable_interface(spec: &IfSpec) -> Result<String, String> {
 fn disable_interface(spec: &IfSpec) -> Result<String, String> {
     let alias = resolve_alias(spec)?;
     let state = list_interfaces()?.into_iter().find(|i| i.alias == alias);
-    disable_allowed(&alias, state.as_ref(), &protected_list(), env("NETADAPTER_ALLOW_ACTIVE").as_deref() == Some("1"))?;
+    disable_allowed(
+        &alias,
+        state.as_ref(),
+        &protected_list(),
+        env("NETADAPTER_ALLOW_ACTIVE").as_deref() == Some("1"),
+    )?;
     set_admin_state(&alias, false)?;
     Ok(format!("interface {alias} admin-disabled"))
 }
@@ -346,15 +386,25 @@ fn probe() -> (bool, String) {
     let facts: Vec<String> = interfaces
         .iter()
         .map(|i| {
-            let admin = if i.admin_enabled { "enabled" } else { "disabled" };
-            let conn = if i.connected { "connected" } else { "disconnected" };
+            let admin = if i.admin_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            };
+            let conn = if i.connected {
+                "connected"
+            } else {
+                "disconnected"
+            };
             format!("{}: {admin}/{conn}", i.alias)
         })
         .collect();
 
     match env("NETADAPTER_INTERFACE").map(|raw| parse_if_spec(&raw)) {
         Some(IfSpec::Name(name)) => {
-            let state = interfaces.iter().find(|i| i.alias.eq_ignore_ascii_case(&name));
+            let state = interfaces
+                .iter()
+                .find(|i| i.alias.eq_ignore_ascii_case(&name));
             let healthy = state.is_some_and(|i| i.admin_enabled && i.connected);
             let verb = match state {
                 None => "not found",
@@ -362,13 +412,18 @@ fn probe() -> (bool, String) {
                 Some(i) if !i.connected => "not connected",
                 _ => "enabled and connected",
             };
-            (healthy, format!("interface {name}: {verb}; {}", facts.join("; ")))
+            (
+                healthy,
+                format!("interface {name}: {verb}; {}", facts.join("; ")),
+            )
         }
         Some(spec @ IfSpec::IfIndex(_)) => {
             // ifIndex supervision resolves via the alias, best-effort.
             match resolve_alias(&spec) {
                 Ok(alias) => {
-                    let state = interfaces.iter().find(|i| i.alias.eq_ignore_ascii_case(&alias));
+                    let state = interfaces
+                        .iter()
+                        .find(|i| i.alias.eq_ignore_ascii_case(&alias));
                     let healthy = state.is_some_and(|i| i.admin_enabled && i.connected);
                     let verb = match state {
                         None => "not found",
@@ -376,7 +431,17 @@ fn probe() -> (bool, String) {
                         Some(i) if !i.connected => "not connected",
                         _ => "enabled and connected",
                     };
-                    (healthy, format!("interface if#{} ({alias}): {verb}; {}", match spec { IfSpec::IfIndex(n) => n.to_string(), _ => String::new() }, facts.join("; ")))
+                    (
+                        healthy,
+                        format!(
+                            "interface if#{} ({alias}): {verb}; {}",
+                            match spec {
+                                IfSpec::IfIndex(n) => n.to_string(),
+                                _ => String::new(),
+                            },
+                            facts.join("; ")
+                        ),
+                    )
                 }
                 Err(err) => (false, format!("{err}; {}", facts.join("; "))),
             }
@@ -387,7 +452,11 @@ fn probe() -> (bool, String) {
                 any_connected,
                 format!(
                     "any-connected policy: {}; {}",
-                    if any_connected { "a connected interface exists" } else { "NO connected interface" },
+                    if any_connected {
+                        "a connected interface exists"
+                    } else {
+                        "NO connected interface"
+                    },
                     facts.join("; ")
                 ),
             )
@@ -464,11 +533,17 @@ fn main() {
                 .unwrap_or_default();
             let spec = params
                 .get("args")
-                .and_then(|args| args.get("interface").and_then(Value::as_str).map(|s| parse_if_spec(s)))
+                .and_then(|args| {
+                    args.get("interface")
+                        .and_then(Value::as_str)
+                        .map(parse_if_spec)
+                })
                 .or_else(|| {
-                    params
-                        .get("args")
-                        .and_then(|args| args.get("if_index").and_then(Value::as_u64).map(|n| IfSpec::IfIndex(n as u32)))
+                    params.get("args").and_then(|args| {
+                        args.get("if_index")
+                            .and_then(Value::as_u64)
+                            .map(|n| IfSpec::IfIndex(n as u32))
+                    })
                 })
                 .or_else(|| env("NETADAPTER_INTERFACE").map(|raw| parse_if_spec(&raw)));
             let Some(spec) = spec else {
@@ -520,7 +595,10 @@ mod tests {
         let ethernet = &list[0];
         assert_eq!(ethernet.alias, "以太网");
         assert!(ethernet.admin_enabled && ethernet.connected);
-        let zerotier = list.iter().find(|i| i.alias.contains("ZeroTier")).expect("zerotier");
+        let zerotier = list
+            .iter()
+            .find(|i| i.alias.contains("ZeroTier"))
+            .expect("zerotier");
         assert_eq!(zerotier.alias, "ZeroTier One [db64858fedb29f06]");
         assert!(zerotier.connected);
         let wlan = list.iter().find(|i| i.alias == "WLAN").expect("wlan");
@@ -588,7 +666,10 @@ Disabled       Disconnected   Dedicated        Wi-Fi
         };
         // Connected interface: refused, reason names the self-lockout risk.
         let err = disable_allowed("以太网", Some(&connected), &[], false).unwrap_err();
-        assert!(err.contains("CONNECTED") && err.contains("self-lockout"), "{err}");
+        assert!(
+            err.contains("CONNECTED") && err.contains("self-lockout"),
+            "{err}"
+        );
         // Explicit override unlocks it.
         assert!(disable_allowed("以太网", Some(&connected), &[], true).is_ok());
         // Idle interface: fine.

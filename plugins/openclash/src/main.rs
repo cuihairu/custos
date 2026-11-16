@@ -76,18 +76,17 @@ fn switch_best_node() -> Result<String, String> {
         .group_delays(&group, "https://www.gstatic.com/generate_204", 3000)
         .ok();
     let empty = std::collections::BTreeMap::new();
-    let chosen =
-        match best_by_delay(&members, delays.as_ref().unwrap_or(&empty)) {
-            Some((node, delay)) => {
-                client.select(&group, node).map_err(|e| e.to_string())?;
-                format!("{node} (delay {delay} ms)")
-            }
-            None => {
-                let node = members[0].clone();
-                client.select(&group, &node).map_err(|e| e.to_string())?;
-                format!("{node} (no delay data)")
-            }
-        };
+    let chosen = match best_by_delay(&members, delays.as_ref().unwrap_or(&empty)) {
+        Some((node, delay)) => {
+            client.select(&group, node).map_err(|e| e.to_string())?;
+            format!("{node} (delay {delay} ms)")
+        }
+        None => {
+            let node = members[0].clone();
+            client.select(&group, &node).map_err(|e| e.to_string())?;
+            format!("{node} (no delay data)")
+        }
+    };
     Ok(format!("switched {group} from {current} to {chosen}"))
 }
 

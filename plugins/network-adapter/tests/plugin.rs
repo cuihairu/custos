@@ -16,7 +16,9 @@ fn config() -> PluginConfig {
         .env
         .insert("NETADAPTER_INTERFACE".into(), "custos-missing-if".into());
     config.env.insert("NETADAPTER_PROTECTED".into(), "".into());
-    config.env.insert("NETADAPTER_ALLOW_ACTIVE".into(), "".into());
+    config
+        .env
+        .insert("NETADAPTER_ALLOW_ACTIVE".into(), "".into());
     config.request_timeout = Duration::from_secs(30);
     config
 }
@@ -29,9 +31,15 @@ fn probe_enable_disable_and_unknown_operation_contract() {
         "1"
     );
     let capabilities = session.capabilities().expect("capabilities");
-    assert!(capabilities.iter().any(|c| c.operation_id == "network.probe"));
-    assert!(capabilities.iter().any(|c| c.operation_id == "network.enable"));
-    assert!(capabilities.iter().any(|c| c.operation_id == "network.disable"));
+    assert!(capabilities
+        .iter()
+        .any(|c| c.operation_id == "network.probe"));
+    assert!(capabilities
+        .iter()
+        .any(|c| c.operation_id == "network.enable"));
+    assert!(capabilities
+        .iter()
+        .any(|c| c.operation_id == "network.disable"));
 
     // Probe: the supervised interface does not exist anywhere -> unhealthy,
     // but the adapter inventory itself is real (any host reports SOMETHING).
@@ -58,7 +66,10 @@ fn probe_enable_disable_and_unknown_operation_contract() {
         .expect("enable action");
     assert_eq!(enable["succeeded"], serde_json::json!(false), "{enable}");
     assert!(
-        enable["detail"].as_str().unwrap_or_default().contains("custos-missing-if"),
+        enable["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("custos-missing-if"),
         "{}",
         enable["detail"]
     );
@@ -74,7 +85,10 @@ fn probe_enable_disable_and_unknown_operation_contract() {
         .expect("disable action");
     assert_eq!(disable["succeeded"], serde_json::json!(false), "{disable}");
     let detail = disable["detail"].as_str().unwrap_or_default();
-    assert!(detail.contains("custos-missing-if") && detail.contains("not found"), "{detail}");
+    assert!(
+        detail.contains("custos-missing-if") && detail.contains("not found"),
+        "{detail}"
+    );
 
     // Protected list refuses before any existence check.
     let mut protected = config();
@@ -94,7 +108,10 @@ fn probe_enable_disable_and_unknown_operation_contract() {
         .expect("disable action");
     assert_eq!(disable["succeeded"], serde_json::json!(false), "{disable}");
     assert!(
-        disable["detail"].as_str().unwrap_or_default().contains("protected"),
+        disable["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("protected"),
         "{}",
         disable["detail"]
     );

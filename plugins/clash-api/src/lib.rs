@@ -189,7 +189,10 @@ impl ClashClient {
 
 /// Pseudo-members that are routing directives, never switch targets.
 fn is_pseudo_node(name: &str) -> bool {
-    matches!(name, "DIRECT" | "REJECT" | "REJECT-DROP" | "PASS" | "GLOBAL")
+    matches!(
+        name,
+        "DIRECT" | "REJECT" | "REJECT-DROP" | "PASS" | "GLOBAL"
+    )
 }
 
 /// True when a member may serve as a switch target: not a routing
@@ -260,7 +263,11 @@ fn encode(value: &str, query: bool) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         let unreserved = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~');
-        let extra = !query && matches!(byte, b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b':');
+        let extra = !query
+            && matches!(
+                byte,
+                b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b':'
+            );
         if unreserved || extra {
             out.push(byte as char);
         } else {
@@ -300,8 +307,7 @@ mod tests {
 
     #[test]
     fn parses_group_fixture() {
-        let group: ProxyGroup =
-            serde_json::from_value(selector_fixture()).expect("fixture parses");
+        let group: ProxyGroup = serde_json::from_value(selector_fixture()).expect("fixture parses");
         assert_eq!(group.kind, "Selector");
         assert_eq!(group.now.as_deref(), Some("🇭🇰 香港 01"));
         assert_eq!(group.all.len(), 8);
@@ -309,8 +315,7 @@ mod tests {
 
     #[test]
     fn candidates_exclude_pseudo_auto_and_info_nodes() {
-        let group: ProxyGroup =
-            serde_json::from_value(selector_fixture()).expect("fixture parses");
+        let group: ProxyGroup = serde_json::from_value(selector_fixture()).expect("fixture parses");
         let candidates = real_candidates(&group);
         // The real bug (2026-11-15): info nodes carry healthy delays and
         // used to win best-node selection. They must never be candidates.
@@ -365,8 +370,14 @@ mod tests {
 
     #[test]
     fn path_segments_and_query_values_are_percent_encoded() {
-        assert_eq!(encode_path_segment("三毛机场"), "%E4%B8%89%E6%AF%9B%E6%9C%BA%E5%9C%BA");
-        assert_eq!(encode_path_segment("♻️ 自动选择"), "%E2%99%BB%EF%B8%8F%20%E8%87%AA%E5%8A%A8%E9%80%89%E6%8B%A9");
+        assert_eq!(
+            encode_path_segment("三毛机场"),
+            "%E4%B8%89%E6%AF%9B%E6%9C%BA%E5%9C%BA"
+        );
+        assert_eq!(
+            encode_path_segment("♻️ 自动选择"),
+            "%E2%99%BB%EF%B8%8F%20%E8%87%AA%E5%8A%A8%E9%80%89%E6%8B%A9"
+        );
         assert_eq!(encode_path_segment("US (Premium)"), "US%20(Premium)");
         assert_eq!(
             encode_query_component("https://www.gstatic.com/generate_204"),
@@ -462,7 +473,11 @@ mod tests {
 
         let group = client.proxy_group(&group_name).expect("group");
         let current = group.now.clone().expect("group has a current selection");
-        println!("group {} via {current}, {} members", group.name, group.all.len());
+        println!(
+            "group {} via {current}, {} members",
+            group.name,
+            group.all.len()
+        );
 
         // Real candidates must exclude the injected info members — assert
         // the policy holds on the LIVE group, not just on fixtures.
@@ -485,7 +500,9 @@ mod tests {
         });
 
         // Write path, non-disruptive: select the current node again.
-        client.select(&group_name, &current).expect("same-node select");
+        client
+            .select(&group_name, &current)
+            .expect("same-node select");
         let after = client.proxy_group(&group_name).expect("group after select");
         assert_eq!(after.now.as_deref(), Some(current.as_str()));
         println!("select path OK: {current} re-selected (no-op by value)");

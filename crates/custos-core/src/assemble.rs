@@ -122,8 +122,7 @@ pub fn build_probes(
                     .unwrap_or("probe");
                 Box::new(PluginProbe::new(supervisor.clone(), operation, "plugin"))
             }
-            None => custos_probe::factory::build_probe(resource)
-                .map_err(|err| err.to_string())?,
+            None => custos_probe::factory::build_probe(resource).map_err(|err| err.to_string())?,
         };
         probes.insert(resource.id.clone(), probe);
     }

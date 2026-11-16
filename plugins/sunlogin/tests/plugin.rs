@@ -30,7 +30,9 @@ fn probe_restart_and_unknown_operation_contract() {
         "1"
     );
     let capabilities = session.capabilities().expect("capabilities");
-    assert!(capabilities.iter().any(|c| c.operation_id == "sunlogin.probe"));
+    assert!(capabilities
+        .iter()
+        .any(|c| c.operation_id == "sunlogin.probe"));
     assert!(capabilities
         .iter()
         .any(|c| c.operation_id == "sunlogin.restart"));
@@ -47,7 +49,11 @@ fn probe_restart_and_unknown_operation_contract() {
     // the pinned service — so healthy=false holds everywhere.
     assert_eq!(probe["healthy"], serde_json::json!(false), "{probe}");
     let observation = probe["observation"].as_str().unwrap_or_default();
-    assert!(observation.contains("custos-missing-unit"), "{}", observation);
+    assert!(
+        observation.contains("custos-missing-unit"),
+        "{}",
+        observation
+    );
 
     let restart = session
         .call_with_timeout(
@@ -176,10 +182,6 @@ fn live_probe_reports_the_real_client_state() {
     assert!(observation.contains("ESTABLISHED"), "{}", observation);
     // The plugin must never count ITSELF as the sunlogin client (its own
     // binary name contains "sunlogin") — self-detection false positive.
-    assert!(
-        !observation.contains("sunlogin-plugin"),
-        "{}",
-        observation
-    );
+    assert!(!observation.contains("sunlogin-plugin"), "{}", observation);
     session.shutdown().ok();
 }

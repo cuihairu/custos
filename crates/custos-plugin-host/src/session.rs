@@ -735,7 +735,9 @@ mod tests {
         assert!(keys.contains(&"SystemRoot"), "keys: {keys:?}");
         // Fixed OS keys only — never a wholesale env dump.
         assert!(keys.len() <= 6, "keys: {keys:?}");
-        assert!(baseline.iter().all(|(k, _)| !k.contains("KEY") && !k.contains("TOKEN")));
+        assert!(baseline
+            .iter()
+            .all(|(k, _)| !k.contains("KEY") && !k.contains("TOKEN")));
     }
 
     fn read_all(input: &'static [u8], cap: usize) -> Vec<CappedLine> {
