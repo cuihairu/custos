@@ -1,0 +1,99 @@
+# Network adapter supervision via the network-adapter PLUGIN — admin
+# enable/disable through the surface the Windows settings UI itself drives
+# (`netsh interface set interface ...`), `ip link set dev ... up|down` on
+# Linux.
+#
+# WARNING — this is the most dangerous recovery class in custos:
+# * disabling the adapter that carries your connection severs SSH/sunlogin
+#   at once (self-lockout). The plugin REFUSES to disable a CONNECTED
+#   interface unless NETADAPTER_ALLOW_ACTIVE=1, and always refuses names on
+#   NETADAPTER_PROTECTED.
+# * an adapter left disabled cannot be re-enabled over itself — remote
+#   enable needs interface redundancy (e.g. Wi-Fi up while Ethernet down)
+#   or out-of-band access.
+# Put the interface your sessions ride on into NETADAPTER_PROTECTED.
+version = 1
+
+[permissions]
+default_allow_high_risk = false
+
+[[plugins]]
+name = "network-adapter"
+# CHANGE_ME: path of the built plugin binary
+# (cargo build -p custos-network-adapter-plugin --release →
+#  target/release/network-adapter-plugin).
+binary = "/usr/local/bin/network-adapter-plugin"
+request_timeout_ms = 15000
+
+[plugins.env]
+# Supervision target: interface name, or Windows ifIndex as "if:19"
+# (numeric — immune to codepage mangling of non-ASCII aliases). Empty =
+# ANY connected interface counts as healthy.
+NETADAPTER_INTERFACE = ""
+# Comma-separated names the disable action refuses unconditionally.
+# CHANGE_ME: protect the interface your remote sessions ride on!
+NETADAPTER_PROTECTED = "以太网"
+# Only set to 1 if you understand the self-lockout risk (usually NEVER on
+# a remote-managed host).
+# NETADAPTER_ALLOW_ACTIVE = "1"
+
+[[resources]]
+id = "lan-adapter"
+type = "network-adapter"
+display_name = "主网卡 (以太网)"
+plugin = "network-adapter"
+probe_operation = "network.probe"
+
+[resources.health_policy]
+failure_threshold = 3
+success_threshold = 2
+
+# Admin-disabled adapter → enable it. NOTE: enable tears down nothing that
+# is working, but the capability declares interrupts_network/interrupts_
+# remote_admin because an enable on the wrong host is still a network
+# event; risk "medium", verify gates it.
+[[resources.recovery_policy.plans]]
+plan_id = "enable-adapter"
+applicable_faults = ["unknown_failure", "probe_timeout"]
+risk = "medium"
+idempotent = true
+timeout_ms = 30000
+max_attempts = 2
+cooldown_ms = 60000
+
+[resources.recovery_policy.plans.action]
+plugin = "network-adapter"
+operation_id = "network.enable"
+# Target interface; falls back to the plugin env when omitted.
+# [resources.recovery_policy.plans.action.args]
+# if_index = 19
+
+[resources.recovery_policy.plans.verification]
+status_is = "healthy"
+
+# The disable action exists for deliberate use (maintenance, failover
+# drills) and is NOT wired into any plan here. It refuses connected
+# interfaces (guard) unless NETADAPTER_ALLOW_ACTIVE=1, and its
+# compensation_operation is network.enable. Manual/high-risk wiring only:
+#
+# [resources.recovery_policy]
+# allow_high_risk = true
+#
+# [[resources.recovery_policy.plans]]
+# plan_id = "reset-idle-adapter"
+# applicable_faults = ["unknown_failure"]
+# risk = "high"
+# idempotent = true
+# timeout_ms = 30000
+# max_attempts = 1
+# cooldown_ms = 300000
+#
+# [resources.recovery_policy.plans.action]
+# plugin = "network-adapter"
+# operation_id = "network.disable"
+#
+# [resources.recovery_policy.plans.action.args]
+# if_index = 19
+#
+# [resources.recovery_policy.plans.verification]
+# status_is = "healthy"

@@ -1,0 +1,22 @@
+[package]
+name = "custos-network-adapter-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Network adapter supervision plugin — the enable/disable API is the same
+# surface the Windows settings UI drives (netsh interface set interface),
+# verified live on the iMac (2026-11-16). Disable is guarded: a connected
+# interface is the remote-management path itself, so disabling it defaults
+# to a refusal. See docs/guide/plugins.md §5.9.
+[[bin]]
+name = "network-adapter-plugin"
+path = "src/main.rs"
+
+[dependencies]
+custos-plugin-api = { path = "../../crates/custos-plugin-api" }
+custos-probe = { path = "../../crates/custos-probe" }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+custos-plugin-host = { path = "../../crates/custos-plugin-host" }

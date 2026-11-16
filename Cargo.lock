@@ -502,6 +502,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "custos-network-adapter-plugin"
+version = "0.1.0"
+dependencies = [
+ "custos-plugin-api",
+ "custos-plugin-host",
+ "custos-probe",
+ "serde_json",
+]
+
+[[package]]
 name = "custos-notify"
 version = "0.1.0"
 dependencies = [

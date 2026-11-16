@@ -230,7 +230,6 @@ OpenClash runs a clash core on OpenWrt; its external controller is the same REST
 `examples/openclash-failover.toml` (validates with `custos validate`): `wan` (detection only — a dead line must not churn proxy nodes), `openclash` (plugin-served probe + high-risk restart plan behind `allow_high_risk`), `google` / `github` (builtin proxy probes through the mixed port, plans dispatching `openclash.switch_best_node`; proxy authentication failures deliberately have no plan — switching nodes cannot fix wrong credentials).
 
 ### 5.8 Wrapping closed-source clients: the sunlogin plugin
-
 向日葵 (Sunlogin) ships no official API. The wrapper principle is the one clash-api already follows: **the de-facto API is whatever surface the product's own UI talks to** — and that surface is version-dependent, so the plugin models the generations that exist in the wild:
 
 - **AweSun 16.x (current, verified live on a real Windows machine, 2026-11-16)**: the client's loopback listeners (127.0.0.1:49679/49680) are the GUI↔service *private IPC* — they accept TCP but speak no HTTP (curl answers code 000). The observable health model is layered, and the probe names every fact:
@@ -249,3 +248,14 @@ OpenClash runs a clash core on OpenWrt; its external controller is the same REST
 Security contract: read-only observation surfaces only, loopback only; the plugin never touches historical command endpoints (`/check` — the CNVD-2022-10270 RCE surface, fixed upstream). See `examples/sunlogin-plugin.toml`; parsers are unit-tested against real-device fixtures, and the `#[ignore]`d live test (`cargo test -p custos-sunlogin-plugin -- --ignored`) probes the actual machine.
 
 **Deployment on the real machine (iMac, Windows)**: the supervisor runs as a SYSTEM scheduled task (service-control rights for the restart action; boot trigger; `RestartCount 999` @ 1 min for crash restarts; logs via a `powershell.exe -Command "… *>> log"` wrapper). Two Windows gotchas caught live: `-ExecutionTimeLimit ([TimeSpan]::Zero)` ("no limit", PT0S) makes Task Scheduler kill the task at start (exit 1, no log ever written) — set a finite long limit instead; and re-registering a task with `-Force` does not kill the old instance, so restart chains can briefly run beside the new one — teardown (disable, kill, unregister) before reinstall. End-to-end acceptance: `sc stop` fault injected, the daemon detected and healed it unattended in ~4 s (`recovery.started` → `action_finished` → `recovery.succeeded`, audit trail complete).
+
+### 5.9 The network-adapter plugin: the self-lockout class
+
+Enabling/disabling a network adapter is the most dangerous recovery class custos wraps: the adapter that carries the management connection is also the thing a disable action would take away. `plugins/network-adapter` therefore pairs the control API with hard-coded guards:
+
+- **API choice**: `netsh interface set interface "<name>" admin=enable|disable` — the surface the Windows settings UI drives (Linux: `ip link set dev <if> up|down`). The PowerShell `Enable-NetAdapter`/`Disable-NetAdapter` cmdlets were tested on the iMac and **silently did nothing** (they take the CIM/`MSFT_NetAdapter` path; netsh takes SetupDi/NDIS) — a reminder that the de-facto API is what actually works on the machine, not what the docs advertise. Non-ASCII interface names (`以太网 2`) get mangled through transport layers; address adapters by ifIndex (`if:19`, args `if_index`) and let the plugin resolve the alias locally.
+- `network.probe` — adapter inventory with admin/connection state (`netsh interface show interface`, zh-CN and en-US headers; `ip -o link show` on Linux). Supervision target via `NETADAPTER_INTERFACE` (default: ANY connected interface).
+- `network.enable` — recovery action for the fault that cannot be healed over itself: a disabled adapter is unreachable remotely too, so enable needs interface redundancy (Wi-Fi up while Ethernet down) or out-of-band access. Declares `interrupts_network` + `interrupts_remote_admin`.
+- `network.disable` — guarded, in order: (1) names on `NETADAPTER_PROTECTED` are refused unconditionally, (2) CONNECTED interfaces are refused unless `NETADAPTER_ALLOW_ACTIVE=1` — disabling the carrying adapter severs SSH/sunlogin at once. `compensation_operation: network.enable`. Not wired into any example plan; deliberate use only.
+
+Live acceptance on the iMac: the idle 10G adapter (ifIndex 19) flipped disable → `AdminStatus Down/Disabled` → enable → `Up/Disconnected` over netsh while the SSH path (ifIndex 13) stayed untouched; see `examples/network-adapter.toml`.
