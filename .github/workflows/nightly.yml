@@ -45,6 +45,10 @@ jobs:
             echo "fresh=true" >> "$GITHUB_OUTPUT"
           fi
       - uses: dtolnay/rust-toolchain@stable
+      # custos-python links -lpython3.x: the 26.04 runner image no longer
+      # ships the dev headers the 24.04 image had.
+      - name: install python dev headers
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq python3-dev
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
