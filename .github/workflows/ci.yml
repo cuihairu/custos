@@ -17,7 +17,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -43,7 +43,7 @@ jobs:
     # The Windows (gnu) build is a supported target: keep it compiling.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: install mingw (bundled sqlite3 cross-compiles)
         run: sudo apt-get update && sudo apt-get install -y mingw-w64
       - uses: dtolnay/rust-toolchain@stable
