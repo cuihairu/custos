@@ -264,23 +264,20 @@ pub mod launchd {
 
         fn start(&self, unit: &str) -> PlatformResult<()> {
             let target = self.target(unit);
-            launchctl(&["kickstart", &target])
-                .map(|_| ())
-                .map_err(Into::into)
+            let _ = launchctl(&["kickstart", &target])?;
+            Ok(())
         }
 
         fn stop(&self, unit: &str) -> PlatformResult<()> {
             let target = self.target(unit);
-            launchctl(&["kill", "SIGTERM", &target])
-                .map(|_| ())
-                .map_err(Into::into)
+            let _ = launchctl(&["kill", "SIGTERM", &target])?;
+            Ok(())
         }
 
         fn restart(&self, unit: &str) -> PlatformResult<()> {
             let target = self.target(unit);
-            launchctl(&["kickstart", "-k", &target])
-                .map(|_| ())
-                .map_err(Into::into)
+            let _ = launchctl(&["kickstart", "-k", &target])?;
+            Ok(())
         }
     }
 }
