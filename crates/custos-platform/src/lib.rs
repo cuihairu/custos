@@ -22,6 +22,10 @@ pub mod error;
 pub mod init_systems;
 #[cfg(not(target_os = "macos"))]
 pub mod linux;
+// macOS adapters (ifconfig listing, shutdown reboot) live here instead of
+// the linux module: they are a parallel platform, not a linux variant.
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod openwrt;
 pub mod windows;
 
@@ -48,28 +52,15 @@ pub fn default_reboot_controller() -> std::sync::Arc<dyn RebootController> {
     }
     #[cfg(target_os = "macos")]
     {
-        std::sync::Arc::new(MacosRebootController)
-    }
-}
-
-#[cfg(target_os = "macos")]
-struct MacosRebootController;
-
-#[cfg(target_os = "macos")]
-impl RebootController for MacosRebootController {
-    fn reboot(&self) -> PlatformResult<()> {
-        Err(PlatformError::Unsupported(
-            "no macOS reboot controller is implemented yet".into(),
-        ))
+        std::sync::Arc::new(macos::MacosRebootController)
     }
 }
 
 /// The default network interface controller for THIS host (todo.md 209
 /// 网络控制矩阵). On Windows the `netsh` adapter; on Unix the sysfs/proc
-/// controller; macOS has no adapter yet, so it answers `Unsupported` for
-/// every operation (绝不误执行). The toolbox registers its built-in
-/// platform tools with this controller so the permission-gated dispatch
-/// path runs the real adapter rather than nothing.
+/// controller; on macOS the `ifconfig` adapter. The toolbox registers its
+/// built-in platform tools with this controller so the permission-gated
+/// dispatch path runs the real adapter rather than nothing.
 pub fn default_network_controller() -> std::sync::Arc<dyn NetworkInterfaceController> {
     #[cfg(windows)]
     {
@@ -81,24 +72,7 @@ pub fn default_network_controller() -> std::sync::Arc<dyn NetworkInterfaceContro
     }
     #[cfg(target_os = "macos")]
     {
-        std::sync::Arc::new(MacosNetworkController)
-    }
-}
-
-#[cfg(target_os = "macos")]
-struct MacosNetworkController;
-
-#[cfg(target_os = "macos")]
-impl NetworkInterfaceController for MacosNetworkController {
-    fn list(&self) -> PlatformResult<Vec<InterfaceStatus>> {
-        Err(PlatformError::Unsupported(
-            "no macOS network adapter is implemented yet".into(),
-        ))
-    }
-    fn reset(&self, _name: &str) -> PlatformResult<()> {
-        Err(PlatformError::Unsupported(
-            "no macOS network adapter is implemented yet".into(),
-        ))
+        std::sync::Arc::new(macos::MacosNetworkController)
     }
 }
 
