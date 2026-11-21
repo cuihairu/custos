@@ -62,10 +62,11 @@ jobs:
     # (their parsers are covered by the ubuntu leg on the same cfg branch).
     # Test-only: releases stay user-triggered; binaries roll via nightly.
     runs-on: macos-15
-    # nextest gives every test a hard timeout: a hung test reports its name
-    # in ~2 minutes instead of stalling the job to the cap (the opaque
-    # `cargo test` step stalled for 30+ min on the first macos runs, unable
-    # to name the hanging crate from outside). Job timeout bounds the same.
+    # nextest's per-test timeout (from .config/nextest.toml) makes a hung
+    # test report its name in ~2 minutes instead of stalling the job to the
+    # cap (the opaque `cargo test` step stalled for 30+ min on the first
+    # macos runs, unable to name the hanging crate from outside). Job
+    # timeout bounds the same.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7.0.1
@@ -75,4 +76,4 @@ jobs:
       - name: build
         run: cargo build --workspace
       - name: test
-        run: cargo nextest run --workspace --exclude custos-sunlogin-plugin --exclude custos-network-adapter-plugin --timeout=120s
+        run: cargo nextest run --workspace --exclude custos-sunlogin-plugin --exclude custos-network-adapter-plugin

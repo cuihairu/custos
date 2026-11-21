@@ -1,0 +1,8 @@
+# Nextest profile: per-test hard timeout. A hung test reports its name in
+# ~2 minutes instead of stalling the job to the cap (the opaque
+# `cargo test` step stalled for 30+ min on the first macos runs, unable
+# to name the hanging crate from outside). Read by `cargo nextest run`
+# from the repo root; the macos leg carries the same bound in its job
+# timeout as a backstop.
+[profile.default]
+timeout = "120s"
