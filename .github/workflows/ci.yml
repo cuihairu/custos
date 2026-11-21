@@ -62,9 +62,15 @@ jobs:
     # (their parsers are covered by the ubuntu leg on the same cfg branch).
     # Test-only: releases stay user-triggered; binaries roll via nightly.
     runs-on: macos-15
+    # The step split (build, then test) makes a hang locatable in the log:
+    # a step that never ends names its phase instead of hiding behind one
+    # opaque test step. The job timeout bounds the same way.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: build
+        run: cargo build --workspace
       - name: test
-        run: cargo test --workspace --exclude custos-sunlogin-plugin --exclude custos-network-adapter-plugin
+        run: cargo test --workspace --no-fail-fast --exclude custos-sunlogin-plugin --exclude custos-network-adapter-plugin
