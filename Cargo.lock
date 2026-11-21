@@ -475,6 +475,7 @@ dependencies = [
  "custos-plugin-host",
  "custos-probe",
  "custos-store",
+ "libc",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",

@@ -171,6 +171,10 @@ mod tests {
         Resource::new(id, "process")
     }
 
+    // The RSS threshold semantics below are /proc/statm-backed (Linux only);
+    // off Linux the honest verdict is Unreachable (see the refusal test at
+    // the end — the macos CI leg surfaced this split).
+    #[cfg(target_os = "linux")]
     #[test]
     fn rss_threshold_under_a_huge_limit_is_healthy_with_facts() {
         // Our own pid: any real process's RSS is well under 1 GiB.
@@ -193,6 +197,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn rss_threshold_over_a_tiny_limit_is_unhealthy() {
         // 1 KiB: no live process fits — the threshold must trip.
@@ -283,5 +288,35 @@ mod tests {
         .probe(&resource("worker"));
         assert!(!report.succeeded);
         assert_eq!(report.status, HealthStatus::Unhealthy);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn rss_threshold_is_declared_unsupported_off_linux() {
+        // §11.1 不伪造支持: there is no /proc/statm off Linux, so a threshold
+        // must surface Unreachable ("not supported") — never a faked "exited"
+        // or a healthy reading. (The macos CI leg runs this honest refusal.)
+        let dir =
+            std::env::temp_dir().join(format!("custos-probe-rss-offlinux-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pid_file = dir.join("self.pid");
+        std::fs::write(&pid_file, format!("{}\n", std::process::id())).unwrap();
+        let report = ProcessProbe {
+            pid_file,
+            rss_threshold_kb: Some(1),
+        }
+        .probe(&resource("self"));
+        assert_eq!(
+            report.status,
+            HealthStatus::Unreachable,
+            "{}",
+            report.observation
+        );
+        assert!(
+            report.observation.contains("not supported"),
+            "{}",
+            report.observation
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

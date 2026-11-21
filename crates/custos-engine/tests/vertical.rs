@@ -18,11 +18,15 @@ use std::time::{Duration, Instant};
 
 /// Spawn a detached `sleep` that writes its own pid to `pid_file`; returns
 /// immediately. The engine's respawn action uses the same trick.
+///
+/// Portable: the `setsid` binary is util-linux and does not exist on macOS,
+/// so the worker is backgrounded from a plain shell instead (the process
+/// group is not killed on a successful action, so the worker survives).
 fn spawn_worker(pid_file: &str) {
     let status = Command::new("sh")
         .arg("-c")
         .arg(format!(
-            "setsid sh -c 'echo $$ > {pid_file}; exec sleep 30' >/dev/null 2>&1 </dev/null &"
+            "sh -c 'echo $$ > {pid_file}; exec sleep 30' >/dev/null 2>&1 </dev/null &"
         ))
         .status()
         .expect("spawn worker");
@@ -34,7 +38,23 @@ fn read_pid(pid_file: &str) -> Option<u32> {
 }
 
 fn alive(pid: u32) -> bool {
-    std::path::Path::new("/proc").join(pid.to_string()).exists()
+    #[cfg(target_os = "linux")]
+    {
+        std::path::Path::new("/proc").join(pid.to_string()).exists()
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        // macOS/BSD have no /proc. `kill(pid, 0)` sends no signal: 0 = alive,
+        // EPERM = alive but not ours, ESRCH = gone (same as the probe).
+        unsafe {
+            let ret = libc::kill(pid as libc::pid_t, 0);
+            ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+        }
+    }
+    #[cfg(windows)]
+    {
+        std::path::Path::new("/proc").join(pid.to_string()).exists()
+    }
 }
 
 fn build(config_toml: &str, db_path: Option<&std::path::Path>) -> (Engine, Arc<MemoryStore>) {
@@ -108,7 +128,7 @@ cooldown_ms = 60_000
 
 [resources.recovery_policy.plans.action]
 program = "sh"
-args = ["-c", "rm -f {pid_file}; setsid sh -c 'echo $$ > {pid_file}; exec sleep 30' >/dev/null 2>&1 </dev/null & i=0; while [ $i -lt 200 ]; do [ -s {pid_file} ] && kill -0 $(cat {pid_file}) 2>/dev/null && break; i=$((i+1)); sleep 0.01; done"]
+args = ["-c", "rm -f {pid_file}; sh -c 'echo $$ > {pid_file}; exec sleep 30' >/dev/null 2>&1 </dev/null & i=0; while [ $i -lt 200 ]; do [ -s {pid_file} ] && kill -0 $(cat {pid_file}) 2>/dev/null && break; i=$((i+1)); sleep 0.01; done"]
 
 [resources.recovery_policy.plans.verification]
 status_is = "healthy"
@@ -117,10 +137,17 @@ status_is = "healthy"
 
     // A live worker first: the engine observes health, nothing runs.
     spawn_worker(pid_file);
+    // Bounded: an unbounded wait here is exactly how the macos leg hung
+    // (setsid is absent there, the pid file never appeared).
+    let spawn_deadline = Instant::now() + Duration::from_secs(5);
     let first_pid = loop {
         if let Some(pid) = read_pid(pid_file) {
             break pid;
         }
+        assert!(
+            Instant::now() < spawn_deadline,
+            "worker never wrote {pid_file}"
+        );
         std::thread::sleep(Duration::from_millis(5));
     };
     let (mut engine, store) = build(&config, None);

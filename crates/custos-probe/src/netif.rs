@@ -706,6 +706,9 @@ Disabled      Disconnected  Ethernet       Ethernet 4
         );
     }
 
+    // The sysfs NotFound mapping is Linux-only; off Linux the honest verdict
+    // for a missing interface is Unreachable (unsupported query).
+    #[cfg(target_os = "linux")]
     #[test]
     fn netif_missing_is_unhealthy() {
         let probe = NetifProbe {
@@ -724,10 +727,12 @@ Disabled      Disconnected  Ethernet       Ethernet 4
     fn gateway_probe_on_this_host_is_a_verdict_not_a_panic() {
         let probe = GatewayProbe { connect_port: None };
         let report = probe.probe(&Resource::new("gw", "default-gateway"));
+        // Any concrete verdict, never a panic. Unreachable covers platforms
+        // where the route query is honestly unsupported (macOS leg).
         assert!(
             matches!(
                 report.status,
-                HealthStatus::Healthy | HealthStatus::Unhealthy
+                HealthStatus::Healthy | HealthStatus::Unhealthy | HealthStatus::Unreachable
             ),
             "{}",
             report.observation
