@@ -14,9 +14,11 @@
 pub mod capability;
 pub mod controller;
 pub mod error;
-#[cfg(target_os = "linux")]
-pub mod init_systems;
-#[cfg(windows)]
+// Per-init-system adapters, partitioned inside: systemd/SysV (Linux),
+// launchd (macOS), SCM (Windows). macOS compiles it too — before this gate
+// the launchd module was unreachable: its parent never compiled on macOS
+// (found by the macos CI leg).
+#[cfg(any(unix, windows))]
 pub mod init_systems;
 #[cfg(not(target_os = "macos"))]
 pub mod linux;
