@@ -208,6 +208,12 @@
 - [x] 平台权限检查（高风险动作无授权即拒绝） `7d9e8f9`（RebootTool/InterfaceResetTool 注册进 toolbox：required_permission（host.reboot/host.network）在 dispatch 层先于适配器执行，测试断言未授权时适配器零调用；reboot 另需 confirm 双闸）
 - [x] 平台特有错误 → 统一故障结果转换 `7d9e8f9`（PlatformError 六类：Unsupported/NotFound/PermissionDenied/TimedOut/Busy/Failed；From<ExecResult>：工具缺失=Unsupported、systemctl 未装载退出码=NotFound、输出截断封顶）
 - [x] 平台适配器集成测试（Linux + Windows 各一套） `c2f7325`（Linux 套件活体 /proc、/sys、init 矩阵、loopback、连通性拒绝归一化；Windows 套件以真实格式 fixture 测全部解析器并抓出两处真 bug（sc STATE 缩进、状态码+名归一）；执行路径 cfg(windows) 并过 mingw 交叉检查）
+- [ ] **power 探针族（inhibit / wakealarm / downtime 三模式）**【立项 2026-11-22，用户令「做」；动机=fleet 实案：work-runner 睡眠/假死致 ZT 失联，WireGuard/ZT 唤醒重收敛 10-20 分钟不可接受】
+  - 模式① inhibit（监测+自愈）：读 logind inhibitor locks / `systemctl is-enabled sleep.target`（Linux）、`powercfg /q SUB_SLEEP`（Windows）、`pmset -g`（macOS）→ 报告「这台机器可不可睡」；探到会睡 → 动作层执行禁睡（`systemctl mask sleep.target suspend.target` / `powercfg /change standby-timeout-ac 0` / `pmset -a disablesleep 1`）——动作改电源策略=risk high + confirm gate（高危操作协议）
+  - 模式② wakealarm（定时唤醒）：读 `/sys/class/rtc/rtc0/wakealarm`（Linux rtcwake 底座）/ Windows 计划任务唤醒位 / macOS `pmset -g sched` → 报告下次唤醒计划；动作=写 RTC 唤醒计划（Linux `rtcwake -m mem -t`；Win schtasks 勾「唤醒计算机」；mac `pmset schedule`）——risk high + confirm
+  - 模式③ downtime（策略窗）：探当前时刻是否在允许睡眠窗内；窗外 suspend 请求 → `systemd-inhibit --what=sleep --mode=block`（Linux）阻断，窗内放行——组合出「夜里定时睡+RTC 定时醒回 fleet、白天永醒」策略
+  - 探针只读先行，动作面进 confirm 双闸；cfg 平台差异全走 Capability 明报（不伪造支持）；每模式带解析 fixture 测试（对齐 Windows 套件纪律）
+  - 验收：① 真机 Linux（hub）读 inhibitor locks 出真实状态；② rtcwake 写入 wakealarm 后 `/sys/class/rtc/rtc0/wakealarm` 非零且可清除；③ 全绿门禁（fmt/clippy/test/交叉 check）
 
 ## P3 网络、代理与真实自愈场景
 
