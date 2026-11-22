@@ -26,9 +26,12 @@ binary = "/usr/local/bin/network-adapter-plugin"
 request_timeout_ms = 15000
 
 [plugins.env]
-# Supervision target: interface name, or Windows ifIndex as "if:19"
-# (numeric — immune to codepage mangling of non-ASCII aliases). Empty =
-# ANY connected interface counts as healthy.
+# Supervision target: PREFER THE STABLE INTERFACE NAME. Non-ASCII names
+# (e.g. "以太网 2") travel fine as plugin env. Windows ifIndex as "if:19" is
+# also accepted but changes across reboots (caught live: a pinned ifIndex
+# silently pointed at nothing after a reboot) — use it only as a fallback,
+# never as a permanent pin. Empty = ANY connected interface counts as
+# healthy.
 NETADAPTER_INTERFACE = ""
 # Comma-separated names the disable action refuses unconditionally.
 # CHANGE_ME: protect the interface your remote sessions ride on!
