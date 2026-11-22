@@ -352,18 +352,176 @@ where
 }
 
 fn html_shell() -> String {
+    // The shell is a self-contained page (no external assets, no CDN): it
+    // renders the JSON APIs into a friendly zh-CN status view and polls
+    // every 5s. Read-only by design — the config file stays the single
+    // source of truth and nothing on this page can mutate state.
     r#"<!doctype html>
-<html><head><meta charset="utf-8"><title>Custos Dashboard</title></head>
-<body><h1>Custos</h1><p>Read-only dashboard (default disabled).</p>
-<ul>
-<li><a href="/api/health">health</a></li>
-<li><a href="/api/resources">resources</a></li>
-<li><a href="/api/graph">dependency graph</a></li>
-<li><a href="/api/runs">runs</a></li>
-<li><a href="/api/timeline">timeline</a></li>
-<li><a href="/api/notifications">notifications</a></li>
-<li><a href="/api/config">config check</a></li>
-</ul></body></html>"#
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Custos 监控面板</title>
+<style>
+:root { --ok:#2f9e44; --bad:#e03131; --run:#1971c2; --idle:#868e96; }
+* { box-sizing:border-box; }
+body { margin:0; background:#f5f6f8; color:#1c1e21;
+  font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif; font-size:14px; }
+header { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  padding:16px 24px; background:#fff; border-bottom:1px solid #e3e6ea; }
+header h1 { font-size:18px; margin:0; }
+.pill { padding:3px 12px; border-radius:999px; font-weight:600; color:#fff; }
+.pill.good { background:var(--ok); }
+.pill.bad  { background:var(--bad); }
+.pill.idle { background:var(--idle); }
+.stamp { margin-left:auto; color:#868e96; font-size:12px; }
+main { padding:20px 24px; max-width:1100px; margin:0 auto; }
+h2 { font-size:15px; margin:20px 0 10px; }
+#cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:12px; }
+.card { background:#fff; border:1px solid #e3e6ea; border-radius:10px; padding:12px 14px; }
+.cardhead { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.cardhead b { font-size:15px; }
+.sub { color:#868e96; font-size:12px; margin-top:2px; }
+.obs { margin-top:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  font-size:12px; color:#495057; }
+.foot { margin-top:8px; font-size:12px; color:#adb5bd; }
+.badge { padding:2px 10px; border-radius:999px; font-size:12px; font-weight:600; color:#fff; white-space:nowrap; }
+.badge.good { background:var(--ok); }
+.badge.bad  { background:var(--bad); }
+.badge.run  { background:var(--run); }
+.badge.idle { background:var(--idle); }
+table { width:100%; border-collapse:collapse; background:#fff;
+  border:1px solid #e3e6ea; border-radius:10px; overflow:hidden; }
+th, td { text-align:left; padding:8px 12px; border-bottom:1px solid #eef0f2; font-size:13px; }
+th { background:#f1f3f5; font-weight:600; }
+.muted { color:#adb5bd; }
+#err { margin:12px 0; padding:10px 14px; border-radius:8px; background:#fff5f5;
+  border:1px solid #ffc9c9; color:#c92a2a; }
+footer { padding:14px 24px; color:#adb5bd; font-size:12px; }
+details { margin-top:6px; }
+summary { cursor:pointer; color:#495057; }
+details a { margin-right:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Custos 监控面板</h1>
+  <span id="pill" class="pill idle">加载中…</span>
+  <span class="stamp">每 5 秒自动刷新 · 上次更新 <span id="stamp">—</span></span>
+</header>
+<main>
+  <div id="err" hidden>无法连接引擎（custos 可能没有在运行），稍后自动重试。</div>
+  <h2>监控的资源</h2>
+  <div id="cards"></div>
+  <h2>恢复动作记录（最近 20 条）</h2>
+  <table>
+    <thead><tr><th>时间</th><th>资源</th><th>触发原因</th><th>结果</th></tr></thead>
+    <tbody id="runsbody"></tbody>
+  </table>
+  <details>
+    <summary>原始数据接口</summary>
+    <p>
+      <a href="/api/resources">resources</a>
+      <a href="/api/health">health</a>
+      <a href="/api/runs">runs</a>
+      <a href="/api/graph">graph</a>
+      <a href="/api/permissions">permissions</a>
+      <a href="/api/notifications">notifications</a>
+      <a href="/api/config">config</a>
+    </p>
+  </details>
+</main>
+<footer>只读视图：本页面不会修改任何配置或触发任何动作；配置以 TOML 文件为准。</footer>
+<script>
+'use strict';
+var $ = function (s) { return document.querySelector(s); };
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+function fmtTime(ms) {
+  if (!ms) return '—';
+  return new Date(ms).toLocaleTimeString('zh-CN', { hour12: false });
+}
+function fmtAgo(ms) {
+  if (!ms) return '';
+  var s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 60) return Math.floor(s) + ' 秒前';
+  if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+  if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+  return Math.floor(s / 86400) + ' 天前';
+}
+function j(url) {
+  return fetch(url).then(function (r) {
+    if (!r.ok) throw new Error(url + ': ' + r.status);
+    return r.json();
+  });
+}
+var cache = { res: null, health: null, runs: null };
+function refresh() {
+  Promise.all([j('/api/resources'), j('/api/health'), j('/api/runs')])
+    .then(function (all) {
+      cache = { res: all[0], health: all[1], runs: all[2] };
+      $('#err').hidden = true;
+      render();
+    })
+    .catch(function () { $('#err').hidden = false; })
+    .finally(function () {
+      $('#stamp').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    });
+}
+function runBadge(s) {
+  s = s || '';
+  if (s.indexOf('recover') >= 0) return 'good';
+  if (s.indexOf('escalat') >= 0 || s.indexOf('fail') >= 0) return 'bad';
+  if (s.indexOf('progress') >= 0 || s.indexOf('pending') >= 0) return 'run';
+  return 'idle';
+}
+function runLabel(s) {
+  var m = { recovered: '已恢复', escalated: '已升级人工', in_progress: '进行中',
+            pending: '等待中', cancelled: '已取消', failed: '失败' };
+  return m[s] || s || '—';
+}
+function render() {
+  if (!cache.res) return;
+  var rs = cache.res.resources || [];
+  var hs = cache.health.resources || [];
+  var runs = (cache.runs.runs || []).slice(0, 20);
+  var hm = {};
+  hs.forEach(function (h) { hm[h.resource_id] = h; });
+  var known = rs.filter(function (r) { return hm[r.id]; }).length;
+  var ok = rs.filter(function (r) { return hm[r.id] && hm[r.id].succeeded; }).length;
+  var pill = $('#pill');
+  if (!known) { pill.className = 'pill idle'; pill.textContent = '尚无探测结果'; }
+  else if (ok === known) { pill.className = 'pill good'; pill.textContent = '全部健康（' + ok + '/' + known + '）'; }
+  else { pill.className = 'pill bad'; pill.textContent = '需要关注（' + ok + '/' + known + ' 健康）'; }
+  $('#cards').innerHTML = rs.map(function (r) {
+    var h = hm[r.id];
+    var st = !h ? 'idle' : (h.succeeded ? 'good' : 'bad');
+    var label = !h ? '无数据' : (h.succeeded ? '健康' : '异常');
+    var obs = (h && h.observation) ? h.observation : '等待探测结果';
+    var foot = (h ? (fmtAgo(h.collected_at_unix_ms) + '探测 · ') : '') +
+               r.plans + ' 个恢复计划' + (r.enabled ? '' : ' · 已停用');
+    return '<div class="card">' +
+      '<div class="cardhead"><b>' + esc(r.display_name || r.id) + '</b>' +
+      '<span class="badge ' + st + '">' + label + '</span></div>' +
+      '<div class="sub">' + esc(r.id) + ' · ' + esc(r.type) + '</div>' +
+      '<div class="obs" title="' + esc(obs) + '">' + esc(obs) + '</div>' +
+      '<div class="foot">' + foot + '</div></div>';
+  }).join('');
+  $('#runsbody').innerHTML = runs.length ? runs.map(function (x) {
+    return '<tr><td>' + fmtTime(x.started_at_unix_ms) + '</td>' +
+      '<td>' + esc(x.resource_id) + '</td>' +
+      '<td>' + esc(x.trigger || '—') + '</td>' +
+      '<td><span class="badge ' + runBadge(x.status) + '">' + runLabel(x.status) + '</span></td></tr>';
+  }).join('') : '<tr><td colspan="4" class="muted">还没有触发过恢复动作 — 一切平静</td></tr>';
+}
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>"#
         .to_owned()
 }
 
@@ -387,6 +545,18 @@ mod tests {
         let config = load_config_for_test();
         let (status, _, _) = route("/nope", &dummy_store(), &config);
         assert!(status.contains("404"), "{status}");
+    }
+
+    #[test]
+    fn shell_is_a_friendly_self_contained_page() {
+        let html = html_shell();
+        // zh-CN status view, not the old bare API link list.
+        assert!(html.contains("监控面板"), "missing zh-CN title");
+        assert!(html.contains("j('/api/health')"), "does not poll health");
+        assert!(html.contains("setInterval(refresh, 5000)"), "no auto-refresh");
+        // Self-contained: no external origins (no CDN phone-home).
+        assert!(!html.contains("http://") && !html.contains("https://"));
+        assert!(html.trim_end().ends_with("</html>"), "truncated shell");
     }
 
     fn dummy_store() -> Store {
