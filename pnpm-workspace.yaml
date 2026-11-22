@@ -1,0 +1,7 @@
+# Transitive-dependency security floor (dependabot/cargo-audit follow-up):
+# GHSA-238p-pmpm-9mq7 / CVE-2026-103923 — katex <0.18.2 lets an inherited
+# `trust` option bypass trusted-rendering defaults when Object.prototype is
+# polluted. mermaid pins the old ^0.16 line; this floor forces the patched
+# release into the docs build.
+overrides:
+  katex: ">=0.18.2"

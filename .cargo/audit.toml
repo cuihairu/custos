@@ -1,0 +1,15 @@
+# cargo-audit policy: accepted advisories with reasons. Everything else
+# must stay clean (CI and pre-push checks run `cargo audit`).
+[advisories]
+ignore = [
+    # glib 0.18 unsoundness (VariantStrIter iterators). Reaches the lock via
+    # tray-icon's Linux-only libappindicator branch (gtk 0.18 stack); the
+    # Linux tray is a compile-time stub in custos-tray, so this code is not
+    # built on any shipped target. tray-icon 0.26.1 (latest) still pins the
+    # 0.18 stack - re-evaluate when tray-icon bumps libappindicator.
+    "RUSTSEC-2024-0429",
+    # proc-macro-error unmaintained. Transitive only (no direct usage);
+    # replacement requires upstream dependents to migrate to
+    # proc-macro-error2. Re-evaluate as they release.
+    "RUSTSEC-2024-0370",
+]
