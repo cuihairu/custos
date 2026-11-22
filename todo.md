@@ -583,3 +583,12 @@
     - validate 失败回滚：raw op 未闭合字符串 → 服务端回显 "TOML parse error at line 9, column 18"、md5 不变、无临时文件、服务未重启 ✓
     - 终态：4 原始资源在位、gateway=10000 还原、服务 running、md5 52e92d9455bf7567a8c3422804610809（38 行，唯一增量=gateway 显式 `enabled = true`，语义同原配置）✓
   - ⑦ 门禁：`luac -p` 三 lua 文件 rc=0；设备 Lua 5.1 语法门（设备无 luac，`lua -e "assert(loadfile(...))"` 过）；44/44 lua 单测；文档 docs/zh/guide/platforms.md「LuCI 界面」节补编辑器说明（五型表单/直编逃生口/tomledit 保真/写回安全/high 双闸/零预设动作）+ README.md/README.zh.md luci-app-custos 行同步；Rust 零改动（workspace 沿用 `1464fc5` 基线 629 passed / 0 failed）
+
+## 2026-11-22 用户反馈批：dashboard 时间无日期 + 疑似乱序（已落 b9a3c34）
+- 现象：恢复动作记录表「06:52:42 排在 20:36:05 上面」，时间列红框追问。
+- 归因（SQL 排序本来是对的，显示层骗人）：
+  1. `custos-dashboard/src/lib.rs` `fmtTime` 用 `toLocaleTimeString` 只渲染 `HH:MM:SS`——跨天记录（今早 06:52:42 vs 昨晚 20:36:05）肉眼看是乱序，实际 `updated_at_unix_ms DESC` 排序正确；
+  2. 次要混淆：列表按 `updated_at` 排、时间列显示 `started_at`，跨午夜 run（午夜前开始、后更新）两个键交错加剧「乱序感」。
+- 处置：①`fmtTime` 同天保留时刻、跨天渲染完整本地日期（`toLocaleString zh-CN`）；②前端对过滤后的行按 `started_at DESC` 再排一次，可见列顺序与排序键完全对齐。
+- 验证：`cargo check -p custos-dashboard` 绿；`cargo test -p custos-dashboard` 绿（0 tests，无 rust 逻辑面）；node 脚本实测 fmtTime 四档 PASS（今天 08:16:43→`08:16:43`、昨天 20:36:05→`2026/11/21 20:36:05`、3 天前→`2026/11/19 06:52:42`、null→`—`）。
+- 边界：dashboard 是嵌入二进制的只读页面，需重新构建部署 custos 才在浏览器生效；通知表用同一 `fmtTime` 一并受益。
