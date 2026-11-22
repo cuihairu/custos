@@ -22,9 +22,10 @@
 //!   Every refusal names the reason.
 //!
 //! Configuration via environment (§4.4 clean env + OS baseline):
-//!   NETADAPTER_INTERFACE  interface to supervise (name, or Windows
-//!                         ifIndex as `if:19`); default: ANY connected
-//!                         non-loopback interface
+//!   NETADAPTER_INTERFACE  interface to supervise (stable name preferred;
+//!                         Windows ifIndex as `if:19` also accepted, but
+//!                         ifIndex changes across reboots — caught live);
+//!                         default: ANY connected non-loopback interface
 //!   NETADAPTER_PROTECTED  comma-separated names never allowed to disable
 //!   NETADAPTER_ALLOW_ACTIVE  `1` unlocks disabling connected interfaces
 
@@ -153,6 +154,46 @@ pub fn parse_if_spec(raw: &str) -> IfSpec {
     IfSpec::Name(raw.trim().to_owned())
 }
 
+/// `(ifIndex, alias)` rows from `netsh int ipv4 show interfaces` — the
+/// Idx→name map used to resolve `if:N` specs. Deliberately NOT the
+/// PowerShell `Get-NetAdapter` CIM path: on this class of hosts it
+/// silently no-ops (adapter toggles) and misses lookups under SYSTEM
+/// (caught live on the iMac). IPv4-unbound interfaces are absent from
+/// this table — acceptable for NIC supervision.
+pub fn parse_netsh_idx_aliases(output: &str) -> Vec<(u32, String)> {
+    let mut rows = Vec::new();
+    for line in output.lines() {
+        let line = line.trim();
+        let mut tokens = line.split_whitespace();
+        // First token must be the numeric Idx.
+        let Some(first) = tokens.next() else {
+            continue;
+        };
+        let Ok(index) = first.parse::<u32>() else {
+            continue;
+        };
+        let rest: Vec<&str> = tokens.collect();
+        // Skip Met + MTU (numeric), anchor on the state word; everything
+        // after it is the name (may contain spaces).
+        let mut name_start = None;
+        for (i, t) in rest.iter().enumerate() {
+            if matches!(*t, "connected" | "disconnected" | "已连接" | "已断开连接") {
+                name_start = Some(i + 1);
+                break;
+            }
+        }
+        let Some(start) = name_start else {
+            continue;
+        };
+        let alias = rest[start..].join(" ");
+        if alias.is_empty() {
+            continue;
+        }
+        rows.push((index, alias));
+    }
+    rows
+}
+
 /// Disable guard — the self-lockout protection, evaluated BEFORE any state
 /// change. `state` is None when the interface does not exist.
 pub fn disable_allowed(
@@ -236,9 +277,11 @@ fn list_interfaces() -> Result<Vec<InterfaceState>, String> {
     }
 }
 
-/// Resolves an IfSpec::IfIndex to its alias via PowerShell (transport-safe:
-/// the numeric index survives any codepage mangling, the alias is fetched
-/// locally by the OS itself).
+/// Resolves an IfSpec::IfIndex to its alias through the `netsh int ipv4
+/// show interfaces` Idx table. Deliberately NOT the PowerShell
+/// `Get-NetAdapter` cmdlet: the CIM surface is unreliable on this class
+/// of hosts (silent no-op toggles; missed lookups under SYSTEM — caught
+/// live on the iMac). netsh works everywhere the probe works.
 #[cfg(windows)]
 fn resolve_alias(spec: &IfSpec) -> Result<String, String> {
     match spec {
@@ -246,28 +289,41 @@ fn resolve_alias(spec: &IfSpec) -> Result<String, String> {
         IfSpec::IfIndex(index) => {
             match run_controlled(
                 &[
-                    "powershell".into(),
-                    "-NoProfile".into(),
-                    "-Command".into(),
-                    format!("(Get-NetAdapter -InterfaceIndex {index}).InterfaceAlias"),
+                    "netsh".into(),
+                    "int".into(),
+                    "ipv4".into(),
+                    "show".into(),
+                    "interfaces".into(),
                 ],
                 Duration::from_secs(30),
-                8 * 1024,
+                16 * 1024,
             ) {
                 ExecResult::Succeeded { stdout, .. } => {
-                    let alias = stdout.trim().to_owned();
-                    if alias.is_empty() {
-                        Err(format!("interface with ifIndex {index} not found"))
-                    } else {
-                        Ok(alias)
-                    }
+                    let rows = parse_netsh_idx_aliases(&stdout);
+                    let found = rows
+                        .iter()
+                        .find(|(idx, _)| *idx == *index)
+                        .map(|(_, alias)| alias.clone());
+                    found.ok_or_else(|| {
+                        let known: Vec<String> =
+                            rows.iter().map(|(i, a)| format!("{i}: {a}")).collect();
+                        let detail = if known.is_empty() {
+                            "netsh idx table empty".to_string()
+                        } else {
+                            format!("netsh idx table: {}", known.join("; "))
+                        };
+                        format!(
+                            "interface with ifIndex {index} not found ({detail}); \
+                             ifIndex changes across reboots — prefer a stable interface name"
+                        )
+                    })
                 }
                 ExecResult::Failed { code, stderr, .. } => Err(format!(
-                    "cannot resolve ifIndex {index} (exit {code}): {}",
+                    "cannot resolve ifIndex {index} (netsh exit {code}): {}",
                     stderr.trim()
                 )),
                 ExecResult::TimedOut => Err(format!("resolving ifIndex {index} timed out")),
-                ExecResult::StartFailed(err) => Err(format!("powershell not runnable: {err}")),
+                ExecResult::StartFailed(err) => Err(format!("netsh not runnable: {err}")),
             }
         }
     }
@@ -650,6 +706,36 @@ Disabled       Disconnected   Dedicated        Wi-Fi
         assert_eq!(parse_if_spec("if:19"), IfSpec::IfIndex(19));
         assert_eq!(parse_if_spec(" 以太网 2 "), IfSpec::Name("以太网 2".into()));
         assert_eq!(parse_if_spec("if:abc"), IfSpec::Name("if:abc".into()));
+    }
+
+    #[test]
+    fn netsh_idx_table_fixture() {
+        // Verbatim `netsh int ipv4 show interfaces` output from the iMac
+        // (zh-CN header, spaces in names, zh-CN aliases).
+        let output = "\
+Idx     Met         MTU          \u{72b6}\u{6001}                \u{540d}\u{79f0}
+---  ----------  ----------  ------------  ---------------------------
+  1          75  4294967295  connected     Loopback Pseudo-Interface 1
+ 16          20        1500  connected     \u{4ee5}\u{592a}\u{7f51}
+  2           0        1420  connected     WireGuard
+ 23          25        1500  disconnected  WLAN
+ 14          25        1500  disconnected  \u{672c}\u{5730}\u{8fde}\u{63a5}* 9
+ 21          35        2800  connected     ZeroTier One [db64858fedb29f06]
+";
+        let rows = parse_netsh_idx_aliases(output);
+        assert_eq!(
+            rows,
+            vec![
+                (1u32, "Loopback Pseudo-Interface 1".to_string()),
+                (16, "\u{4ee5}\u{592a}\u{7f51}".to_string()),
+                (2, "WireGuard".to_string()),
+                (23, "WLAN".to_string()),
+                (14, "\u{672c}\u{5730}\u{8fde}\u{63a5}* 9".to_string()),
+                (21, "ZeroTier One [db64858fedb29f06]".to_string()),
+            ]
+        );
+        // Separator dashes and header line must not parse as rows.
+        assert!(parse_netsh_idx_aliases("Idx Met MTU State Alias\n--- ---").is_empty());
     }
 
     #[test]
