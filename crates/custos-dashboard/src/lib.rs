@@ -553,7 +553,10 @@ mod tests {
         // zh-CN status view, not the old bare API link list.
         assert!(html.contains("监控面板"), "missing zh-CN title");
         assert!(html.contains("j('/api/health')"), "does not poll health");
-        assert!(html.contains("setInterval(refresh, 5000)"), "no auto-refresh");
+        assert!(
+            html.contains("setInterval(refresh, 5000)"),
+            "no auto-refresh"
+        );
         // Self-contained: no external origins (no CDN phone-home).
         assert!(!html.contains("http://") && !html.contains("https://"));
         assert!(html.trim_end().ends_with("</html>"), "truncated shell");

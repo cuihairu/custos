@@ -657,7 +657,6 @@ dependencies = [
 name = "custos-tray"
 version = "0.1.0"
 dependencies = [
- "custos-config",
  "custos-model",
  "custos-store",
  "muda",

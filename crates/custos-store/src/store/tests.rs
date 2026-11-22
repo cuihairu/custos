@@ -35,9 +35,7 @@ fn attempt(action_id: &str, outcome: Option<ActionOutcome>) -> ActionAttempt {
 fn exec(store: &Store, sql: impl Into<String>) {
     let sql = sql.into();
     store
-        .block(|pool| async move {
-            query(AssertSqlSafe(sql)).execute(&pool).await.map(|_| ())
-        })
+        .block(|pool| async move { query(AssertSqlSafe(sql)).execute(&pool).await.map(|_| ()) })
         .expect("test sql");
 }
 
@@ -275,14 +273,14 @@ fn purge_removes_only_expired_inactive_rows() {
 
     // Audit: one old, one recent.
     for (at, id) in [(old, 1), (recent, 2)] {
-        exec(&store, &format!(
+        exec(&store, format!(
                 "INSERT INTO audit_events (id, at_unix_ms, event_type, severity, resource_id, payload) \
                  VALUES ({id}, {at}, 'recovery.started', 'Info', 'svc', '{{}}')"
             ));
     }
     // Probe results: one old, one recent.
     for (at, id) in [(old, 1), (recent, 2)] {
-        exec(&store, &format!(
+        exec(&store, format!(
                 "INSERT INTO probe_results (id, resource_id, probe_name, succeeded, observation, collected_at_unix_ms) \
                  VALUES ({id}, 'svc', 'cmd', 1, 'ok', {at})"
             ));
@@ -301,30 +299,30 @@ fn purge_removes_only_expired_inactive_rows() {
     store.save_run(&active);
     store.save_attempt(&active.id, &attempt("a-live", None));
     // Incidents: closed+old (purgeable), open+old (must survive).
-    exec(&store, &format!(
+    exec(&store, format!(
             "INSERT INTO incidents (id, resource_id, fault_code, summary, opened_at_unix_ms, closed_at_unix_ms) \
              VALUES ('inc-closed', 'svc', 'process_exited', 'closed', {old}, {old})"
         ));
     exec(
         &store,
-        &format!(
+        format!(
             "INSERT INTO incidents (id, resource_id, fault_code, summary, opened_at_unix_ms) \
              VALUES ('inc-open', 'svc', 'process_exited', 'still open', {old})"
         ),
     );
     // Notifications: delivered+old (purgeable), undelivered+old (must
     // survive), with an attempt history row.
-    exec(&store, &format!(
+    exec(&store, format!(
             "INSERT INTO notification_queue (id, resource_id, channel, payload, created_at_unix_ms, delivered_at_unix_ms) \
              VALUES (1, 'svc', 'desktop', '{{}}', {old}, {old})"
         ));
-    exec(&store, &format!(
+    exec(&store, format!(
             "INSERT INTO notification_queue (id, resource_id, channel, payload, created_at_unix_ms) \
              VALUES (2, 'svc', 'desktop', '{{}}', {old})"
         ));
     exec(
         &store,
-        &format!(
+        format!(
             "INSERT INTO notification_attempts (notification_id, outcome, detail, at_unix_ms) \
              VALUES (1, 'delivered', 'ok', {old})"
         ),
@@ -570,7 +568,7 @@ fn live_lease_blocks_reclaim_but_lapsed_lease_reclaims() {
     let event = serde_json::to_string(&notification_event("evt-legacy")).unwrap();
     exec(
         &store,
-        &format!(
+        format!(
             "INSERT INTO notification_queue \
              (id, channel, payload, created_at_unix_ms, updated_at_unix_ms, state) \
              VALUES (99, 'web', '{event}', 1000, 1000, 'sending')"
@@ -594,6 +592,9 @@ fn terminal_list_embedded() {
         "('recovered','escalated','suppressed','cancelled','interrupted','outcome_unknown')";
     use super::retention::{DELETE_ATTEMPTS_SQL, DELETE_RUNS_SQL};
     for sql in [DELETE_ATTEMPTS_SQL, DELETE_RUNS_SQL] {
-        assert!(sql.contains(TERMINAL), "{sql}\ndrifted from TERMINAL: {TERMINAL}");
+        assert!(
+            sql.contains(TERMINAL),
+            "{sql}\ndrifted from TERMINAL: {TERMINAL}"
+        );
     }
 }

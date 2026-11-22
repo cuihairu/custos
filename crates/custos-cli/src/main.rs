@@ -99,8 +99,7 @@ fn load_config(path: &str) -> Result<ValidatedConfig, ExitCode> {
 /// human-readable reason (shared by `validate`, which prints it, and the
 /// start path, which may fall back).
 fn read_and_validate(path: &str) -> Result<ValidatedConfig, String> {
-    let text =
-        std::fs::read_to_string(path).map_err(|err| format!("cannot read {path}: {err}"))?;
+    let text = std::fs::read_to_string(path).map_err(|err| format!("cannot read {path}: {err}"))?;
     custos_config::load(&text).map_err(|err| err.to_string())
 }
 
