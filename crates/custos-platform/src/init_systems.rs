@@ -382,3 +382,129 @@ pub mod scm {
         }
     }
 }
+
+/// FreeBSD rc.d via `/usr/sbin/service <unit> onestatus|onestart|onestop|
+/// onerestart`. The `one` prefix runs the verb without consulting rc.conf
+/// enablement, matching how an operator drives a service directly. The
+/// status vocabulary is rc.subr's, normalized by [`classify_status`].
+#[cfg(target_os = "freebsd")]
+pub mod rcd {
+    use super::*;
+    use custos_probe::exec::{run_controlled, ExecResult};
+    use std::time::Duration;
+
+    const TIMEOUT: Duration = Duration::from_secs(10);
+    const OUTPUT_CAP: usize = 64 * 1024;
+
+    pub const SERVICE: &str = "/usr/sbin/service";
+
+    fn service(args: &[&str]) -> ExecResult {
+        let owned: Vec<String> = [SERVICE.into()]
+            .into_iter()
+            .chain(args.iter().map(|s| (*s).to_owned()))
+            .collect();
+        run_controlled(&owned, TIMEOUT, OUTPUT_CAP)
+    }
+
+    /// Normalizes `service <unit> onestatus` output. rc.subr prints
+    /// "is running as pid N" (exit 0) and "is not running" (exit 1); an
+    /// unknown script is `service: unknown service <unit>`. Anything else
+    /// is carried verbatim or reported as a failure — never guessed.
+    pub fn classify_status(
+        code: Option<i32>,
+        stdout: &str,
+        stderr: &str,
+        unit: &str,
+    ) -> PlatformResult<ServiceState> {
+        let combined = format!("{stdout}{stderr}");
+        if combined.contains("unknown service") {
+            return Err(PlatformError::NotFound(format!(
+                "service {unit} not installed"
+            )));
+        }
+        if stdout.contains("is running as pid") {
+            return Ok(ServiceState::Running);
+        }
+        if stdout.contains("is not running") {
+            return Ok(ServiceState::Stopped);
+        }
+        match code {
+            Some(0) => Ok(ServiceState::Unknown(stdout.trim().to_owned())),
+            _ => Err(PlatformError::Failed(format!("exit {code:?}: {combined}"))),
+        }
+    }
+
+    fn expect_success(result: ExecResult) -> PlatformResult<()> {
+        match result {
+            ExecResult::Succeeded { .. } => Ok(()),
+            other => Err(other.into()),
+        }
+    }
+
+    /// FreeBSD rc.d controller.
+    pub struct RcdController;
+
+    impl ServiceController for RcdController {
+        fn status(&self, unit: &str) -> PlatformResult<ServiceState> {
+            let (code, stdout, stderr) = match service(&[unit, "onestatus"]) {
+                ExecResult::Succeeded { stdout, .. } => (Some(0), stdout, String::new()),
+                ExecResult::Failed {
+                    code,
+                    stdout,
+                    stderr,
+                    ..
+                } => (Some(code), stdout, stderr),
+                other => return Err(other.into()),
+            };
+            classify_status(code, &stdout, &stderr, unit)
+        }
+
+        fn start(&self, unit: &str) -> PlatformResult<()> {
+            expect_success(service(&[unit, "onestart"]))
+        }
+
+        fn stop(&self, unit: &str) -> PlatformResult<()> {
+            expect_success(service(&[unit, "onestop"]))
+        }
+
+        fn restart(&self, unit: &str) -> PlatformResult<()> {
+            expect_success(service(&[unit, "onerestart"]))
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn running_is_normalized() {
+            assert_eq!(
+                classify_status(Some(0), "sshd is running as pid 1234.\n", "", "sshd").unwrap(),
+                ServiceState::Running
+            );
+        }
+
+        #[test]
+        fn stopped_is_normalized() {
+            assert_eq!(
+                classify_status(Some(1), "sshd is not running.\n", "", "sshd").unwrap(),
+                ServiceState::Stopped
+            );
+        }
+
+        #[test]
+        fn unknown_service_is_not_found() {
+            assert!(matches!(
+                classify_status(Some(1), "", "service: unknown service nope\n", "nope"),
+                Err(PlatformError::NotFound(_))
+            ));
+        }
+
+        #[test]
+        fn unknown_vocabulary_is_never_guessed() {
+            let state = classify_status(Some(0), "weird answer\n", "", "x").unwrap();
+            assert_eq!(state, ServiceState::Unknown("weird answer".into()));
+            assert!(classify_status(Some(2), "boom\n", "", "x").is_err());
+        }
+    }
+}

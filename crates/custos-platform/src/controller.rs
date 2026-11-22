@@ -111,6 +111,40 @@ pub fn resolve_target(host: &str, port: u16) -> PlatformResult<std::net::SocketA
         .ok_or_else(|| unresolved("empty answer".into()))
 }
 
+/// DNS resolution check shared by the unix adapters (Linux, macOS,
+/// FreeBSD): resolves `host:port` via the platform resolver; the answer is
+/// normalized, never raw tool output.
+pub fn dns_resolves(host: &str, port: u16) -> PlatformResult<bool> {
+    use std::net::ToSocketAddrs;
+    Ok((host, port)
+        .to_socket_addrs()
+        .map(|mut addrs| addrs.next().is_some())
+        .unwrap_or(false))
+}
+
+/// TCP connectivity probe shared by the unix adapters (Linux, macOS,
+/// FreeBSD): resolves the target (bare or bracketed IPv6 literals take the
+/// literal path and never hit DNS), makes one connect attempt bounded by
+/// `timeout`, and normalizes the answer. Refusal is distinct from an
+/// unreachable network — a refused port is not downtime.
+pub fn tcp_connectivity(
+    target: &ConnectivityTarget,
+    timeout: std::time::Duration,
+) -> PlatformResult<Connectivity> {
+    use std::net::TcpStream;
+    let start = std::time::Instant::now();
+    let addr = resolve_target(&target.host, target.port)?;
+    match TcpStream::connect_timeout(&addr, timeout) {
+        Ok(_) => Ok(Connectivity::Reachable {
+            latency_ms: start.elapsed().as_millis() as u64,
+        }),
+        Err(err) => match err.kind() {
+            std::io::ErrorKind::ConnectionRefused => Ok(Connectivity::Refused),
+            _ => Ok(Connectivity::Unreachable(err.to_string())),
+        },
+    }
+}
+
 /// Checks network connectivity using this platform's primitives.
 pub trait NetworkConnectivityProbe: Send + Sync {
     fn probe_tcp(&self, target: &ConnectivityTarget) -> PlatformResult<Connectivity>;

@@ -72,12 +72,16 @@ Still pending:
 
 ## 11.5 BSD
 
-Later support:
+Implemented (`crates/custos-platform/src/init_systems.rs` rcd module, `crates/custos-platform/src/bsd.rs`, `crates/custos-platform/src/ifconfig.rs`, `crates/custos-platform/src/lib.rs`):
 
-- Process detection.
-- rc.d service management.
-- Network interface and route state.
-- System reboot.
+- rc.d service management via `/usr/sbin/service <unit> onestatus|onestart|onestop|onerestart` (the `one` prefix bypasses rc.conf enablement; status normalized by the pure classifier).
+- Network interface and connectivity state through the FreeBSD network controller (`ifconfig -a`, shared BSD-family parser).
+- System reboot through the FreeBSD reboot controller (`shutdown -r now`).
+
+Still pending:
+
+- Wi-Fi reconnection (no FreeBSD Wi-Fi adapter path).
+- Acceptance on real hardware for any item above (the CI freebsd leg runs the read-only/probe paths; reset/reboot are privileged).
 
 ## 11.6 OpenWrt
 

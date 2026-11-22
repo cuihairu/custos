@@ -77,3 +77,22 @@ jobs:
         run: cargo build --workspace
       - name: test
         run: cargo nextest run --workspace --exclude custos-sunlogin-plugin --exclude custos-network-adapter-plugin
+
+  freebsd:
+    # Real FreeBSD leg (vmactions VM): runs the cfg(target_os = "freebsd")
+    # paths — the rc.d init-system controller, the ifconfig adapters — at
+    # run level on a FreeBSD guest. Scope is the platform crate: it is the
+    # only one with FreeBSD-native code (the rest follow the Linux adapter
+    # branch, which FreeBSD deliberately does not take). Test-only: releases
+    # stay user-triggered; binaries roll via nightly.
+    runs-on: ubuntu-latest
+    # The vmactions VM boots FreeBSD from a qemu-style image over SSH; the
+    # cap bounds a hung pkg/compile the same way it does the macos leg.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: pkg install -y -q rust
+          run: cargo test -p custos-platform

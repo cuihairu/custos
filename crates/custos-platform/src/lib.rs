@@ -20,8 +20,16 @@ pub mod error;
 // (found by the macos CI leg).
 #[cfg(any(unix, windows))]
 pub mod init_systems;
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(target_os = "freebsd")))]
 pub mod linux;
+// FreeBSD adapters (rc.d services, ifconfig listing, shutdown reboot) are a
+// parallel platform, not a linux variant: the rc.d vocabulary is its own
+// (init_systems::rcd), the ifconfig listing is shared via the parser below.
+#[cfg(target_os = "freebsd")]
+pub mod bsd;
+// The pure BSD-family ifconfig parser: ungated so its fixture tests run on
+// every platform; the live adapters are cfg-gated in macos/bsd.
+pub mod ifconfig;
 // macOS adapters (ifconfig listing, shutdown reboot) live here instead of
 // the linux module: they are a parallel platform, not a linux variant.
 #[cfg(target_os = "macos")]
@@ -46,9 +54,13 @@ pub fn default_reboot_controller() -> std::sync::Arc<dyn RebootController> {
     {
         std::sync::Arc::new(windows::WindowsRebootController)
     }
-    #[cfg(all(not(windows), not(target_os = "macos")))]
+    #[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "freebsd")))]
     {
         std::sync::Arc::new(linux::LinuxRebootController::detect())
+    }
+    #[cfg(target_os = "freebsd")]
+    {
+        std::sync::Arc::new(bsd::BsdRebootController)
     }
     #[cfg(target_os = "macos")]
     {
@@ -66,9 +78,13 @@ pub fn default_network_controller() -> std::sync::Arc<dyn NetworkInterfaceContro
     {
         std::sync::Arc::new(windows::NetshNetworkController)
     }
-    #[cfg(all(not(windows), not(target_os = "macos")))]
+    #[cfg(all(not(windows), not(target_os = "macos"), not(target_os = "freebsd")))]
     {
         std::sync::Arc::new(linux::SysnetInterfaceController)
+    }
+    #[cfg(target_os = "freebsd")]
+    {
+        std::sync::Arc::new(bsd::BsdNetworkController)
     }
     #[cfg(target_os = "macos")]
     {

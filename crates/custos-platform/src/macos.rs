@@ -11,6 +11,7 @@ use crate::controller::{
     NetworkInterfaceController, RebootController, ServiceController,
 };
 use crate::error::PlatformResult;
+use crate::ifconfig::parse_ifconfig;
 use custos_probe::exec::{run_controlled, ExecResult};
 use std::time::Duration;
 
@@ -28,95 +29,6 @@ fn expect_success(result: ExecResult) -> PlatformResult<()> {
         ExecResult::Succeeded { .. } => Ok(()),
         other => Err(other.into()),
     }
-}
-
-/// True when an `ifconfig` block header carries the `UP` flag (admin up).
-fn flags_have_up(header: &str) -> bool {
-    // header like "flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST>"
-    let Some(open) = header.find('<') else {
-        return false;
-    };
-    let Some(close) = header[open..].find('>') else {
-        return false;
-    };
-    header[open + 1..open + close].split(',').any(|f| f == "UP")
-}
-
-/// Parses `ifconfig -a` output into interface statuses. Pure so fixture
-/// strings test it anywhere. An interface is `up` when its flags carry UP
-/// AND (when a `status:` line exists) the link is `active` — a radio with
-/// no carrier reports `status: inactive` and must not read as up. The
-/// `%zone` suffix on IPv6 link-local addresses is stripped for clean
-/// reporting.
-pub fn parse_ifconfig(output: &str) -> Vec<InterfaceStatus> {
-    let mut interfaces: Vec<InterfaceStatus> = Vec::new();
-    let mut name: Option<String> = None;
-    let mut flags_up = false;
-    let mut status_active = true;
-    let mut has_status = false;
-    let mut addresses: Vec<String> = Vec::new();
-
-    let flush = |interfaces: &mut Vec<InterfaceStatus>,
-                 name: &mut Option<String>,
-                 flags_up: &mut bool,
-                 status_active: &mut bool,
-                 has_status: &mut bool,
-                 addresses: &mut Vec<String>| {
-        if let Some(n) = name.take() {
-            let up = *flags_up && (!*has_status || *status_active);
-            interfaces.push(InterfaceStatus {
-                name: n,
-                up,
-                addresses: std::mem::take(addresses),
-            });
-        }
-        *flags_up = false;
-        *status_active = true;
-        *has_status = false;
-    };
-
-    for line in output.lines() {
-        if line.starts_with(char::is_whitespace) {
-            // Continuation line of the current block (indented).
-            if name.is_none() {
-                continue;
-            }
-            let t = line.trim();
-            if let Some(rest) = t.strip_prefix("status:") {
-                has_status = true;
-                status_active = rest.trim() == "active";
-            } else if let Some(rest) = t.strip_prefix("inet ") {
-                if let Some(addr) = rest.split_whitespace().next() {
-                    addresses.push(addr.split('%').next().unwrap_or(addr).to_owned());
-                }
-            } else if let Some(rest) = t.strip_prefix("inet6 ") {
-                if let Some(addr) = rest.split_whitespace().next() {
-                    addresses.push(addr.split('%').next().unwrap_or(addr).to_owned());
-                }
-            }
-        } else if let Some(colon) = line.find(':') {
-            // New block header: "<device>: flags=..."
-            flush(
-                &mut interfaces,
-                &mut name,
-                &mut flags_up,
-                &mut status_active,
-                &mut has_status,
-                &mut addresses,
-            );
-            name = Some(line[..colon].trim().to_owned());
-            flags_up = flags_have_up(&line[colon + 1..]);
-        }
-    }
-    flush(
-        &mut interfaces,
-        &mut name,
-        &mut flags_up,
-        &mut status_active,
-        &mut has_status,
-        &mut addresses,
-    );
-    interfaces
 }
 
 /// The default macOS service controller: launchd is macOS's init system,
@@ -151,31 +63,12 @@ impl NetworkInterfaceController for MacosNetworkController {
 
 impl NetworkConnectivityProbe for MacosNetworkController {
     fn probe_tcp(&self, target: &ConnectivityTarget) -> PlatformResult<Connectivity> {
-        use std::net::TcpStream;
-        let start = std::time::Instant::now();
-        // Bare IPv6 literals resolve via the tuple form (R16); the old
-        // `format!("{}:{}", ...).parse()` string form rejected them.
-        let addr = crate::controller::resolve_target(&target.host, target.port)?;
-        match TcpStream::connect_timeout(&addr, TOOL_TIMEOUT) {
-            Ok(_) => Ok(Connectivity::Reachable {
-                latency_ms: start.elapsed().as_millis() as u64,
-            }),
-            Err(err) => match err.kind() {
-                std::io::ErrorKind::ConnectionRefused => Ok(Connectivity::Refused),
-                _ => Ok(Connectivity::Unreachable(err.to_string())),
-            },
-        }
+        crate::controller::tcp_connectivity(target, TOOL_TIMEOUT)
     }
 }
 
 /// DNS resolution check (todo.md 202): the platform resolver, normalized.
-pub fn dns_resolves(host: &str, port: u16) -> PlatformResult<bool> {
-    use std::net::ToSocketAddrs;
-    Ok((host, port)
-        .to_socket_addrs()
-        .map(|mut addrs| addrs.next().is_some())
-        .unwrap_or(false))
-}
+pub use crate::controller::dns_resolves;
 
 /// Authorized reboot: `shutdown -r now`. Gated at dispatch (ADR-0012).
 pub struct MacosRebootController;
@@ -206,76 +99,6 @@ pub fn capabilities() -> PlatformCapabilitySet {
 mod tests {
     use super::*;
     use crate::error::PlatformError;
-
-    #[test]
-    fn parses_up_interface_with_addresses() {
-        let output = "\
-en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
-	ether b8:09:da:8a:55:b2
-	inet6 fe80::ba09:daff:fe8a:55b2%en0 prefixlen 64 secured scopeid 0x8
-	inet 192.168.1.5 netmask 0xffffff00 broadcast 192.168.1.255
-	status: active
-";
-        let list = parse_ifconfig(output);
-        assert_eq!(list.len(), 1);
-        let iface = &list[0];
-        assert_eq!(iface.name, "en0");
-        assert!(iface.up, "{iface:?}");
-        assert!(iface.addresses.contains(&"192.168.1.5".to_string()));
-        assert!(iface
-            .addresses
-            .contains(&"fe80::ba09:daff:fe8a:55b2".to_string()));
-    }
-
-    #[test]
-    fn inactive_link_is_down_despite_up_flag() {
-        // Radio off / no carrier: the UP flag is set but the link is not
-        // active — the interface must not read as up.
-        let output = "\
-en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
-	status: inactive
-";
-        let list = parse_ifconfig(output);
-        assert_eq!(list.len(), 1);
-        assert!(!list[0].up, "{list:?}");
-    }
-
-    #[test]
-    fn down_interface_has_no_up_flag() {
-        let output = "\
-en1: flags=8822<BROADCAST,SMART,SIMPLEX,MULTICAST> mtu 1500
-	status: inactive
-";
-        let list = parse_ifconfig(output);
-        assert_eq!(list[0].name, "en1");
-        assert!(!list[0].up, "{list:?}");
-    }
-
-    #[test]
-    fn loopback_is_listed_and_up() {
-        let output = "\
-lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
-	inet 127.0.0.1 netmask 0xff000000
-	status: active
-";
-        let list = parse_ifconfig(output);
-        assert!(list.iter().any(|i| i.name == "lo0" && i.up), "{list:?}");
-    }
-
-    #[test]
-    fn multiple_blocks_and_empty_output() {
-        let output = "\
-en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
-	status: active
-utun0: flags=8081<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1380
-";
-        let list = parse_ifconfig(output);
-        assert_eq!(list.len(), 2);
-        assert!(list[0].up);
-        // utun0 has no status line: the UP flag alone stands.
-        assert!(list[1].up);
-        assert!(parse_ifconfig("").is_empty());
-    }
 
     #[test]
     fn capabilities_declare_launchd_and_network_natively() {
