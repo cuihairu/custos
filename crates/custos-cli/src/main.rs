@@ -30,6 +30,8 @@ COMMANDS:
         --db PATH              Database file (default: custos.db)
         --interval MS          Tick interval override (default: 5s)
         --once                 Run one observation tick and exit
+        --strict-config        Fail on an invalid config instead of falling
+                               back to the <CONFIG>.last-good snapshot
     status [--db PATH] [--json]
                                Store counters, per-resource health and recent
                                audit events
@@ -87,17 +89,86 @@ fn missing_arg(command: &str, what: &str) -> ExitCode {
 }
 
 fn load_config(path: &str) -> Result<ValidatedConfig, ExitCode> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) => {
-            eprintln!("error: cannot read {path}: {err}");
-            return Err(ExitCode::FAILURE);
-        }
-    };
-    custos_config::load(&text).map_err(|err| {
+    read_and_validate(path).map_err(|err| {
         eprintln!("configuration invalid: {err}");
         ExitCode::FAILURE
     })
+}
+
+/// Reads a config file and runs the full validation gate; `Err` carries the
+/// human-readable reason (shared by `validate`, which prints it, and the
+/// start path, which may fall back).
+fn read_and_validate(path: &str) -> Result<ValidatedConfig, String> {
+    let text =
+        std::fs::read_to_string(path).map_err(|err| format!("cannot read {path}: {err}"))?;
+    custos_config::load(&text).map_err(|err| err.to_string())
+}
+
+/// Sibling snapshot path of the last config that parsed and validated
+/// cleanly (`<CONFIG>.last-good`).
+fn last_good_path(path: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{path}.last-good"))
+}
+
+/// Records `text` as the last-known-good config, atomically (temp file +
+/// rename, so a crash mid-write can never leave a truncated snapshot).
+/// Best-effort: failure to record is a warning, never a startup failure.
+fn persist_last_good(path: &str, text: &str) {
+    let target = last_good_path(path);
+    let tmp = std::path::PathBuf::from(format!("{path}.last-good.tmp"));
+    if let Err(err) = std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &target)) {
+        eprintln!(
+            "warning: could not record last-known-good config {}: {err}",
+            target.display()
+        );
+    }
+}
+
+/// Start-path config load with the last-known-good safety net (2026-11-22
+/// user rule: 验证不过不可以切换重启). A broken edit must never take a
+/// supervised machine from "watched" to "unwatched, no signal": when the
+/// live file fails validation and a usable `<CONFIG>.last-good` snapshot
+/// exists, the engine keeps running under the previous config with a loud
+/// warning instead of dying. `--strict-config` restores fail-fast. The
+/// snapshot is recorded ONLY from a clean load of the live file, so a
+/// broken file can never poison it.
+fn load_config_for_start(path: &str, strict: bool) -> Result<ValidatedConfig, String> {
+    match read_and_validate(path) {
+        Ok(config) => {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                persist_last_good(path, &text);
+            }
+            Ok(config)
+        }
+        Err(reason) => {
+            if strict {
+                return Err(format!(
+                    "configuration invalid: {reason} (--strict-config: no fallback)"
+                ));
+            }
+            let snapshot = last_good_path(path);
+            let snapshot_str = snapshot.to_string_lossy().into_owned();
+            match read_and_validate(&snapshot_str) {
+                Ok(config) => {
+                    // Through tracing (stdout), NOT eprintln: the SYSTEM-task
+                    // wrapper captures stdout into the daemon log — a warning
+                    // only a hidden console sees is no warning at all.
+                    tracing::warn!(
+                        "config fallback engaged: live configuration invalid ({reason}); \
+                         continuing with last-known-good {} — machine STAYS supervised \
+                         under the previous config; fix {path} and restart to apply it",
+                        snapshot.display()
+                    );
+                    Ok(config)
+                }
+                Err(snapshot_reason) => Err(format!(
+                    "configuration invalid: {reason}; last-known-good {} also unusable: \
+                     {snapshot_reason}",
+                    snapshot.display()
+                )),
+            }
+        }
+    }
 }
 
 /// Startup gate: parse, validate and build the dependency graph. Any failure
@@ -122,6 +193,7 @@ struct StartOptions {
     db_path: String,
     interval_ms: u64,
     once: bool,
+    strict_config: bool,
 }
 
 fn parse_start_options(args: &[String]) -> Result<StartOptions, ExitCode> {
@@ -129,6 +201,7 @@ fn parse_start_options(args: &[String]) -> Result<StartOptions, ExitCode> {
         db_path: "custos.db".to_owned(),
         interval_ms: 5_000,
         once: false,
+        strict_config: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -158,6 +231,10 @@ fn parse_start_options(args: &[String]) -> Result<StartOptions, ExitCode> {
                 options.once = true;
                 i += 1;
             }
+            "--strict-config" => {
+                options.strict_config = true;
+                i += 1;
+            }
             other => {
                 eprintln!("error: unknown option `{other}` for `start`");
                 return Err(ExitCode::from(2));
@@ -175,9 +252,12 @@ fn start(path: &str, args: &[String]) -> ExitCode {
         Ok(options) => options,
         Err(code) => return code,
     };
-    let config = match load_config(path) {
+    let config = match load_config_for_start(path, options.strict_config) {
         Ok(config) => config,
-        Err(code) => return code,
+        Err(err) => {
+            eprintln!("error: {err}");
+            return ExitCode::FAILURE;
+        }
     };
 
     let mut assembled = match custos_core::assemble(&config, &options.db_path) {
@@ -915,6 +995,70 @@ mod tests {
         let path = temp_config("valid", &text);
         assert_eq!(validate(path.to_str().unwrap()), ExitCode::SUCCESS);
         std::fs::remove_file(path).ok();
+    }
+
+    /// A config that fails the validation gate deterministically.
+    const BROKEN_CONFIG: &str = "version = 1\n[dashboard]\nenabled = true\nlisten = \"bogus\"\n";
+
+    fn remove_with_snapshot(path: &std::path::Path) {
+        std::fs::remove_file(format!("{}.last-good", path.display())).ok();
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn broken_config_falls_back_to_last_known_good() {
+        // 验证不过不可以切换重启: a broken edit + restart must keep the
+        // machine supervised under the previous config, not leave it
+        // unwatched.
+        let path = temp_config("fallback-live", BROKEN_CONFIG);
+        let snapshot = format!("{}.last-good", path.display());
+        std::fs::write(&snapshot, "version = 1\n").expect("write snapshot");
+        let loaded = load_config_for_start(path.to_str().unwrap(), false);
+        remove_with_snapshot(&path);
+        let config = loaded.expect("fallback must succeed");
+        assert_eq!(config.resources.len(), 0, "snapshot config loaded");
+    }
+
+    #[test]
+    fn strict_start_refuses_fallback() {
+        let path = temp_config("fallback-strict", BROKEN_CONFIG);
+        let snapshot = format!("{}.last-good", path.display());
+        std::fs::write(&snapshot, "version = 1\n").expect("write snapshot");
+        let loaded = load_config_for_start(path.to_str().unwrap(), true);
+        remove_with_snapshot(&path);
+        assert!(loaded.is_err(), "--strict-config must fail fast");
+    }
+
+    #[test]
+    fn broken_snapshot_leaves_startup_failed() {
+        // Both the live file and the snapshot broken → no silent anything:
+        // the startup must fail loudly.
+        let path = temp_config("fallback-none", BROKEN_CONFIG);
+        let snapshot = format!("{}.last-good", path.display());
+        std::fs::write(&snapshot, BROKEN_CONFIG).expect("write snapshot");
+        let loaded = load_config_for_start(path.to_str().unwrap(), false);
+        remove_with_snapshot(&path);
+        assert!(loaded.is_err(), "unusable snapshot must surface the error");
+    }
+
+    #[test]
+    fn clean_load_records_last_good_snapshot() {
+        // Every successful start re-records the snapshot, atomically, so a
+        // later broken edit always has something valid to fall back to.
+        let path = temp_config("snapshot-record", "version = 1\n");
+        let snapshot = format!("{}.last-good", path.display());
+        let loaded = load_config_for_start(path.to_str().unwrap(), false);
+        let recorded = std::fs::read_to_string(&snapshot).ok();
+        remove_with_snapshot(&path);
+        assert!(loaded.is_ok(), "clean config loads");
+        assert_eq!(recorded.as_deref(), Some("version = 1\n"), "snapshot saved");
+    }
+
+    #[test]
+    fn start_options_parse_strict_config_flag() {
+        assert!(!parse_start_options(&[]).expect("defaults").strict_config);
+        let args = args(&["--strict-config"]);
+        assert!(parse_start_options(&args).expect("flag").strict_config);
     }
 
     #[test]

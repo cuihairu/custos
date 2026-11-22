@@ -33,7 +33,7 @@ custos validate <CONFIG>           Parse and validate the configuration (rejects
 custos init <TYPE> --id <ID> [--out PATH] [--force]
                                    Scaffold a complete configuration template for a resource type
                                    (placeholder values; edit before use, then validate)
-custos start <CONFIG> [OPTIONS]    Run the engine loop (--db PATH, --interval MS, --once)
+custos start <CONFIG> [OPTIONS]    Run the engine loop (--db PATH, --interval MS, --once, --strict-config)
 custos status [--db PATH] [--json]     Store counters and recent audit events
 custos runs [--db PATH] [--json]       Recent recovery runs (newest first)
 custos incidents [--db PATH] [--json]  Incident history
@@ -44,6 +44,8 @@ custos graph <CONFIG>              Dependency graph in topological order
 ```
 
 `start` performs crash recovery first (unfinished runs are marked outcome-unknown and never blindly retried), then enters the probe/recover tick loop; the notification engine is wired into the same process (event enqueue + background delivery, offline drain).
+
+**Config last-known-good fallback** (2026-11-22 user rule: 验证不过不可以切换重启): every successful `start` atomically records the validated config text to a sibling `<CONFIG>.last-good` snapshot. When the live file fails validation at startup and a usable snapshot exists, the engine **continues running under the previous config with a loud warning** instead of dying — a broken edit must never take a supervised machine from "watched" to "unwatched, no signal". The snapshot is written only from a clean load, so a broken file can never poison it. `--strict-config` restores fail-fast (no fallback). `custos validate` stays a pure checker and never touches the snapshot.
 
 `--json` on the three read-only history commands (`status` / `runs` / `incidents`) emits the same rows as a single machine-readable JSON document — it is the data source of the LuCI status dashboard.
 
