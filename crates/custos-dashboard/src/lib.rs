@@ -524,7 +524,14 @@ function esc(s) {
 }
 function fmtTime(ms) {
   if (!ms) return '—';
-  return new Date(ms).toLocaleTimeString('zh-CN', { hour12: false });
+  var d = new Date(ms);
+  var now = new Date();
+  // 只显示 HH:MM:SS 时,跨天记录(今早 06:52:42 排在昨晚 20:36:05 上面)看起来像乱序。
+  // 同一天保留时刻;跨天带日期,排序肉眼可验证。
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
+    return d.toLocaleTimeString('zh-CN', { hour12: false });
+  }
+  return d.toLocaleString('zh-CN', { hour12: false });
 }
 function fmtAgo(ms) {
   if (!ms) return '';
@@ -729,6 +736,11 @@ function renderRuns() {
   }
   var rows = runs.filter(function (x) {
     return runFilter === 'all' || x.status === runFilter;
+  });
+  // 列表按 updated_at DESC 排(后端 SQL 已排),时间列也显示 started_at 时跨天会显得乱。
+  // 时间列展示与排序键对齐:主列仍显示开始时刻,展开行已有 updated;排序感由 fmtTime 带日期解决。
+  rows = rows.slice().sort(function (a, b) {
+    return (b.started_at_unix_ms || 0) - (a.started_at_unix_ms || 0);
   });
   $('#runsbody').innerHTML = rows.length ? rows.map(function (x) {
     var dur = x.updated_at_unix_ms > x.started_at_unix_ms
