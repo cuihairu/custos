@@ -250,7 +250,37 @@ fn pump_events(duration: Duration) {
     unsafe { CFRunLoop::run_in_mode(None, duration.as_secs_f64(), false) };
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows equivalent: the tray icon window and the muda menu window live
+/// on this thread and share its message queue — until the thread pumps,
+/// nothing dispatches. A bare `sleep` left clicks completely dead (no
+/// WM_RBUTTONUP delivery, no menu popup, no MenuEvent; caught live on the
+/// iMac). PeekMessage is non-blocking so the beat tick cadence is kept.
+#[cfg(windows)]
+fn pump_events(duration: Duration) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
+    };
+    let deadline = Instant::now() + duration;
+    unsafe {
+        let mut msg = std::mem::zeroed::<MSG>();
+        loop {
+            // hwnd = NULL: drain every window on this thread (tray + menu).
+            while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            if Instant::now() >= deadline {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
+/// Driver only compiles on windows/macos (see `lib.rs`); kept so an
+/// accidental future target fails loudly with an unused-code compile error
+/// rather than silently dropping event delivery.
+#[cfg(not(any(windows, target_os = "macos")))]
 fn pump_events(duration: Duration) {
     std::thread::sleep(duration);
 }
