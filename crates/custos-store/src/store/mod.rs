@@ -51,9 +51,6 @@ pub(super) fn parse_outcome(
     }
 }
 
-const TERMINAL: &str =
-    "('recovered','escalated','suppressed','cancelled','interrupted','outcome_unknown')";
-
 pub struct Store {
     pool: SqlitePool,
     /// Serializes `block_on` calls; a current-thread runtime is not reentrant.

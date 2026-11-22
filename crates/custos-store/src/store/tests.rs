@@ -3,6 +3,7 @@ use crate::config::RetentionConfig;
 use crate::migrations::MIGRATIONS;
 use custos_model::ids::{ActionId, ResourceId};
 use custos_model::{ActionOutcome, RecoveryRunStatus};
+use sqlx::AssertSqlSafe;
 use std::sync::Arc;
 
 fn run(id: &str, status: RecoveryRunStatus) -> RecoveryRun {
@@ -28,17 +29,23 @@ fn attempt(action_id: &str, outcome: Option<ActionOutcome>) -> ActionAttempt {
 }
 
 /// Executes raw SQL; only for seeding tables the engine does not write
-/// yet (incidents, notifications, probe results).
-fn exec(store: &Store, sql: &str) {
+/// yet (incidents, notifications, probe results). Test-local strings from
+/// test constants — asserted explicitly per sqlx 0.9's SqlSafeStr
+/// contract; production code paths stay literal.
+fn exec(store: &Store, sql: impl Into<String>) {
+    let sql = sql.into();
     store
-        .block(|pool| async move { query(sql).execute(&pool).await.map(|_| ()) })
+        .block(|pool| async move {
+            query(AssertSqlSafe(sql)).execute(&pool).await.map(|_| ())
+        })
         .expect("test sql");
 }
 
 fn count(store: &Store, table: &str) -> i64 {
+    let sql = format!("SELECT COUNT(*) AS n FROM {table}");
     store
         .block(|pool| async move {
-            query(&format!("SELECT COUNT(*) AS n FROM {table}"))
+            query(AssertSqlSafe(sql))
                 .fetch_one(&pool)
                 .await
                 .map(|row| row.get::<i64, _>("n"))
@@ -574,4 +581,19 @@ fn live_lease_blocks_reclaim_but_lapsed_lease_reclaims() {
         .expect("legacy claim");
     assert_eq!(legacy.len(), 1, "legacy NULL-lease row must reclaim");
     assert_eq!(legacy[0].id, 99);
+}
+
+#[test]
+fn terminal_list_embedded() {
+    // The literal SQL statements embed the terminal statuses so sqlx
+    // 0.9's SqlSafeStr audit passes without an AssertSqlSafe bypass.
+    // This list is the single readable definition: the retention deletes
+    // and the crash-recovery query must stay in sync with it — a status
+    // added here must not silently miss those statements.
+    const TERMINAL: &str =
+        "('recovered','escalated','suppressed','cancelled','interrupted','outcome_unknown')";
+    use super::retention::{DELETE_ATTEMPTS_SQL, DELETE_RUNS_SQL};
+    for sql in [DELETE_ATTEMPTS_SQL, DELETE_RUNS_SQL] {
+        assert!(sql.contains(TERMINAL), "{sql}\ndrifted from TERMINAL: {TERMINAL}");
+    }
 }

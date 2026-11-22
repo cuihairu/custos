@@ -250,9 +250,12 @@ impl RunStore for Store {
     /// reattached — the crash-recovery input (§7.3 step 6).
     fn unfinished_runs(&self) -> Vec<RecoveryRun> {
         let result = self.block(|pool| async move {
-            let payloads: Vec<(String, String)> = query_as::<_, (String, String)>(&format!(
-                "SELECT id, payload FROM recovery_runs WHERE status NOT IN {TERMINAL}"
-            ))
+            // Literal SQL (same rationale as retention.rs): the NOT IN list
+            // is the compile-time terminal statuses.
+            let payloads: Vec<(String, String)> = query_as::<_, (String, String)>(
+                "SELECT id, payload FROM recovery_runs WHERE status NOT IN \
+                 ('recovered','escalated','suppressed','cancelled','interrupted','outcome_unknown')",
+            )
             .fetch_all(&pool)
             .await?;
             let mut runs = Vec::new();

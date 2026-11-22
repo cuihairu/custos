@@ -2,6 +2,18 @@
 
 use super::*;
 
+/// Terminal-status guard for retention deletes, embedded as a literal so
+/// the statements are `&'static str` (sqlx 0.9 `SqlSafeStr` audit passes
+/// without an `AssertSqlSafe` bypass). `terminal_list_embedded` in
+/// `tests.rs` pins this to `TERMINAL` so the two cannot drift.
+pub(crate) const DELETE_ATTEMPTS_SQL: &str = "DELETE FROM action_attempts WHERE run_id IN (\
+     SELECT id FROM recovery_runs \
+     WHERE updated_at_unix_ms < ? AND status IN \
+     ('recovered','escalated','suppressed','cancelled','interrupted','outcome_unknown'))";
+pub(crate) const DELETE_RUNS_SQL: &str = "DELETE FROM recovery_runs \
+     WHERE updated_at_unix_ms < ? AND status IN \
+     ('recovered','escalated','suppressed','cancelled','interrupted','outcome_unknown')";
+
 impl Store {
     /// Applies the retention policy (§7.4) as of `now_unix_ms`. Active state
     /// is never touched: open incidents, non-terminal runs and undelivered
@@ -29,28 +41,26 @@ impl Store {
 
             if let Some(run_cutoff) = retention.run_cutoff(now_unix_ms) {
                 // Attempts first: they reference the runs being removed.
-                report.attempts = query(&format!(
-                    "DELETE FROM action_attempts WHERE run_id IN (\
-                     SELECT id FROM recovery_runs \
-                     WHERE updated_at_unix_ms < ? AND status IN {TERMINAL})"
-                ))
-                .bind(run_cutoff)
-                .execute(&pool)
-                .await?
-                .rows_affected();
+                // Static SQL + bound parameters: the status list is a
+                // compile-time const (see `TERMINAL`), kept literal so
+                // sqlx 0.9's SqlSafeStr audit passes without a bypass;
+                // `terminal_list_embedded` pins it to TERMINAL.
+                report.attempts = query(DELETE_ATTEMPTS_SQL)
+                    .bind(run_cutoff)
+                    .execute(&pool)
+                    .await?
+                    .rows_affected();
                 report.verifications =
                     query("DELETE FROM verification_results WHERE checked_at_unix_ms < ?")
                         .bind(run_cutoff)
                         .execute(&pool)
                         .await?
                         .rows_affected();
-                report.runs = query(&format!(
-                    "DELETE FROM recovery_runs WHERE updated_at_unix_ms < ? AND status IN {TERMINAL}"
-                ))
-                .bind(run_cutoff)
-                .execute(&pool)
-                .await?
-                .rows_affected();
+                report.runs = query(DELETE_RUNS_SQL)
+                    .bind(run_cutoff)
+                    .execute(&pool)
+                    .await?
+                    .rows_affected();
                 // Closed incidents only; open ones stay until resolved.
                 report.incidents =
                     query("DELETE FROM incidents WHERE closed_at_unix_ms IS NOT NULL AND closed_at_unix_ms < ?")
