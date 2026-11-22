@@ -57,11 +57,14 @@ impl Store {
         })
         .map_err(Into::into)
     }
-    /// Recent recovery runs, newest first (for `custos runs`).
+    /// Recent recovery runs, newest first (for `custos runs`). The
+    /// attempts column is a scalar subquery per run so the dashboard can
+    /// expand a row without a second query.
     pub fn list_runs(&self, limit: u32) -> Result<Vec<RunRow>, StoreError> {
         self.block(|pool| async move {
-            let rows: Vec<(String, String, String, String, i64, i64)> = query_as(
-                "SELECT id, resource_id, status, trigger, started_at_unix_ms, updated_at_unix_ms \
+            let rows: Vec<(String, String, String, String, i64, i64, i64)> = query_as(
+                "SELECT id, resource_id, status, trigger, started_at_unix_ms, updated_at_unix_ms, \
+                 (SELECT COUNT(*) FROM action_attempts WHERE action_attempts.run_id = recovery_runs.id) \
                  FROM recovery_runs ORDER BY updated_at_unix_ms DESC, id DESC LIMIT ?",
             )
             .bind(limit)
@@ -70,13 +73,14 @@ impl Store {
             Ok(rows
                 .into_iter()
                 .map(
-                    |(id, resource_id, status, trigger, started, updated)| RunRow {
+                    |(id, resource_id, status, trigger, started, updated, attempts)| RunRow {
                         id,
                         resource_id,
                         status,
                         trigger,
                         started_at_unix_ms: started as u64,
                         updated_at_unix_ms: updated as u64,
+                        attempts: attempts as u64,
                     },
                 )
                 .collect())

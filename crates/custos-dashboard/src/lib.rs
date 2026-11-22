@@ -244,6 +244,7 @@ fn runs_payload(store: &Store) -> Result<serde_json::Value, String> {
                 "trigger": r.trigger,
                 "started_at_unix_ms": r.started_at_unix_ms,
                 "updated_at_unix_ms": r.updated_at_unix_ms,
+                "attempts": r.attempts,
             })
         })
         .collect();
@@ -352,32 +353,45 @@ where
 }
 
 fn html_shell() -> String {
-    // The shell is a self-contained page (no external assets, no CDN): it
-    // renders the JSON APIs into a friendly zh-CN status view and polls
-    // every 5s. Read-only by design — the config file stays the single
-    // source of truth and nothing on this page can mutate state.
+    // The shell is a self-contained page (no external assets, no CDN):
+    // five tabs split by function (hash-routed so a refresh keeps the
+    // view), polling every 5s only for the active tab's data —
+    // notifications and permissions load on tab entry instead. Read-only
+    // by design — the config file stays the single source of truth and
+    // nothing on this page can mutate state.
     r#"<!doctype html>
-<html lang="zh-CN">
+<html lang='zh-CN'>
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
 <title>Custos 监控面板</title>
 <style>
 :root { --ok:#2f9e44; --bad:#e03131; --run:#1971c2; --idle:#868e96; }
 * { box-sizing:border-box; }
 body { margin:0; background:#f5f6f8; color:#1c1e21;
-  font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif; font-size:14px; }
+  font-family:'Segoe UI','Microsoft YaHei',system-ui,sans-serif; font-size:14px; }
 header { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
-  padding:16px 24px; background:#fff; border-bottom:1px solid #e3e6ea; }
+  padding:14px 24px 0; background:#fff; border-bottom:1px solid #e3e6ea; }
 header h1 { font-size:18px; margin:0; }
 .pill { padding:3px 12px; border-radius:999px; font-weight:600; color:#fff; }
 .pill.good { background:var(--ok); }
 .pill.bad  { background:var(--bad); }
 .pill.idle { background:var(--idle); }
 .stamp { margin-left:auto; color:#868e96; font-size:12px; }
+nav { display:flex; gap:4px; padding:10px 24px 0; width:100%; }
+nav a { padding:8px 16px; border-radius:8px 8px 0 0; color:#495057; text-decoration:none;
+  font-size:14px; border:1px solid transparent; border-bottom:none; }
+nav a.on { background:#f5f6f8; border-color:#e3e6ea; color:#1c1e21; font-weight:600; }
 main { padding:20px 24px; max-width:1100px; margin:0 auto; }
-h2 { font-size:15px; margin:20px 0 10px; }
-#cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:12px; }
+main section { display:none; }
+main section.on { display:block; }
+h2 { font-size:15px; margin:14px 0 10px; }
+#stats { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+.stat { background:#fff; border:1px solid #e3e6ea; border-radius:10px;
+  padding:10px 18px; min-width:120px; }
+.stat b { display:block; font-size:22px; }
+.stat span { color:#868e96; font-size:12px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:12px; }
 .card { background:#fff; border:1px solid #e3e6ea; border-radius:10px; padding:12px 14px; }
 .cardhead { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .cardhead b { font-size:15px; }
@@ -390,15 +404,23 @@ h2 { font-size:15px; margin:20px 0 10px; }
 .badge.bad  { background:var(--bad); }
 .badge.run  { background:var(--run); }
 .badge.idle { background:var(--idle); }
-table { width:100%; border-collapse:collapse; background:#fff;
-  border:1px solid #e3e6ea; border-radius:10px; overflow:hidden; }
+.chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+.chip { padding:4px 12px; border-radius:999px; border:1px solid #dee2e6; background:#fff;
+  color:#495057; cursor:pointer; font-size:12px; }
+.chip.on { background:#1c1e21; color:#fff; border-color:#1c1e21; }
+.scroll { max-height:520px; overflow:auto; background:#fff;
+  border:1px solid #e3e6ea; border-radius:10px; }
+table { width:100%; border-collapse:collapse; background:#fff; }
 th, td { text-align:left; padding:8px 12px; border-bottom:1px solid #eef0f2; font-size:13px; }
-th { background:#f1f3f5; font-weight:600; }
+th { background:#f1f3f5; font-weight:600; position:sticky; top:0; }
+tr.xhead { cursor:pointer; }
+tr.xhead:hover td { background:#f8f9fa; }
+tr.xrow td { background:#f8f9fa; color:#495057; font-size:12px; }
 .muted { color:#adb5bd; }
 #err { margin:12px 0; padding:10px 14px; border-radius:8px; background:#fff5f5;
   border:1px solid #ffc9c9; color:#c92a2a; }
 footer { padding:14px 24px; color:#adb5bd; font-size:12px; }
-details { margin-top:6px; }
+details { margin-top:14px; }
 summary { cursor:pointer; color:#495057; }
 details a { margin-right:12px; }
 </style>
@@ -406,30 +428,90 @@ details a { margin-right:12px; }
 <body>
 <header>
   <h1>Custos 监控面板</h1>
-  <span id="pill" class="pill idle">加载中…</span>
-  <span class="stamp">每 5 秒自动刷新 · 上次更新 <span id="stamp">—</span></span>
+  <span id='pill' class='pill idle'>加载中…</span>
+  <span class='stamp'>每 5 秒自动刷新 · 上次更新 <span id='stamp'>—</span></span>
+  <nav>
+    <a href='#/overview' id='nav-overview'>总览</a>
+    <a href='#/resources' id='nav-resources'>资源</a>
+    <a href='#/runs' id='nav-runs'>恢复记录</a>
+    <a href='#/notifications' id='nav-notifications'>通知</a>
+    <a href='#/permissions' id='nav-permissions'>权限与拓扑</a>
+  </nav>
 </header>
 <main>
-  <div id="err" hidden>无法连接引擎（custos 可能没有在运行），稍后自动重试。</div>
-  <h2>监控的资源</h2>
-  <div id="cards"></div>
-  <h2>恢复动作记录（最近 20 条）</h2>
-  <table>
-    <thead><tr><th>时间</th><th>资源</th><th>触发原因</th><th>结果</th></tr></thead>
-    <tbody id="runsbody"></tbody>
-  </table>
-  <details>
-    <summary>原始数据接口</summary>
-    <p>
-      <a href="/api/resources">resources</a>
-      <a href="/api/health">health</a>
-      <a href="/api/runs">runs</a>
-      <a href="/api/graph">graph</a>
-      <a href="/api/permissions">permissions</a>
-      <a href="/api/notifications">notifications</a>
-      <a href="/api/config">config</a>
-    </p>
-  </details>
+  <div id='err' hidden>无法连接引擎（custos 可能没有在运行），稍后自动重试。</div>
+
+  <section id='sec-overview'>
+    <div id='stats'></div>
+    <h2>异常资源</h2>
+    <div id='badcards' class='grid'></div>
+    <h2>其余资源</h2>
+    <div id='okcards' class='grid'></div>
+  </section>
+
+  <section id='sec-resources'>
+    <h2>监控的资源</h2>
+    <div class='chips' id='resfilter'>
+      <button class='chip on' data-f='all'>全部</button>
+      <button class='chip' data-f='good'>健康</button>
+      <button class='chip' data-f='bad'>异常</button>
+      <button class='chip' data-f='idle'>无数据</button>
+    </div>
+    <div id='cards' class='grid'></div>
+  </section>
+
+  <section id='sec-runs'>
+    <h2>恢复动作记录</h2>
+    <div class='chips' id='runfilter'>
+      <button class='chip on' data-f='all'>全部</button>
+    </div>
+    <div class='scroll'>
+      <table>
+        <thead><tr><th>时间</th><th>资源</th><th>触发原因</th><th>结果</th><th>尝试</th></tr></thead>
+        <tbody id='runsbody'></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id='sec-notifications'>
+    <h2>通知队列</h2>
+    <div class='scroll'>
+      <table>
+        <thead><tr><th>时间</th><th>渠道</th><th>事件类型</th><th>资源</th><th>状态</th><th>尝试</th></tr></thead>
+        <tbody id='notifbody'></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id='sec-permissions'>
+    <h2>恢复权限矩阵</h2>
+    <div id='permdefault' class='sub'></div>
+    <div class='scroll'>
+      <table>
+        <thead><tr><th>资源</th><th>高风险恢复</th><th>计划数</th><th>计划（风险 / 重试上限）</th></tr></thead>
+        <tbody id='permbody'></tbody>
+      </table>
+    </div>
+    <h2>依赖拓扑</h2>
+    <div class='scroll'>
+      <table>
+        <thead><tr><th>资源</th><th>依赖</th></tr></thead>
+        <tbody id='graphbody'></tbody>
+      </table>
+    </div>
+    <details>
+      <summary>原始数据接口</summary>
+      <p>
+        <a href='/api/resources'>resources</a>
+        <a href='/api/health'>health</a>
+        <a href='/api/runs'>runs</a>
+        <a href='/api/graph'>graph</a>
+        <a href='/api/permissions'>permissions</a>
+        <a href='/api/notifications'>notifications</a>
+        <a href='/api/config'>config</a>
+      </p>
+    </details>
+  </section>
 </main>
 <footer>只读视图：本页面不会修改任何配置或触发任何动作；配置以 TOML 文件为准。</footer>
 <script>
@@ -458,19 +540,68 @@ function j(url) {
     return r.json();
   });
 }
-var cache = { res: null, health: null, runs: null };
-function refresh() {
-  Promise.all([j('/api/resources'), j('/api/health'), j('/api/runs')])
+var TABS = ['overview', 'resources', 'runs', 'notifications', 'permissions'];
+var active = 'overview';
+var resFilter = 'all';
+var runFilter = 'all';
+var cache = { res: null, health: null, runs: null, notifs: null, perms: null, graph: null };
+
+function currentTab() {
+  var h = (location.hash || '').replace(/^#\/?/, '');
+  return TABS.indexOf(h) >= 0 ? h : 'overview';
+}
+
+function fetchOverview() {
+  return Promise.all([j('/api/resources'), j('/api/health'), j('/api/runs')])
     .then(function (all) {
-      cache = { res: all[0], health: all[1], runs: all[2] };
-      $('#err').hidden = true;
-      render();
-    })
-    .catch(function () { $('#err').hidden = false; })
-    .finally(function () {
-      $('#stamp').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+      cache.res = all[0]; cache.health = all[1]; cache.runs = all[2];
     });
 }
+function fetchRuns() { return j('/api/runs').then(function (d) { cache.runs = d; }); }
+function fetchNotifications() {
+  return j('/api/notifications').then(function (d) { cache.notifs = d; });
+}
+function fetchPermissions() {
+  return Promise.all([j('/api/permissions'), j('/api/graph')]).then(function (all) {
+    cache.perms = all[0]; cache.graph = all[1];
+  });
+}
+
+function loadTab(tab, force) {
+  var p = null;
+  if (tab === 'overview' || tab === 'resources') p = fetchOverview();
+  else if (tab === 'runs') p = fetchRuns();
+  // 通知/权限只在切入 tab 时拉取，不随 5 秒轮询全量刷新。
+  else if (tab === 'notifications' && (force || !cache.notifs)) p = fetchNotifications();
+  else if (tab === 'permissions' && (force || !cache.perms)) p = fetchPermissions();
+  if (p) {
+    p.then(function () { $('#err').hidden = true; render(); })
+      .catch(function () { $('#err').hidden = false; })
+      .finally(function () {
+        $('#stamp').textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+      });
+  }
+  render();
+}
+
+function show(tab) {
+  active = tab;
+  TABS.forEach(function (t) {
+    var sec = document.getElementById('sec-' + t);
+    var nav = document.getElementById('nav-' + t);
+    if (sec) sec.className = (t === tab) ? 'on' : '';
+    if (nav) nav.className = (t === tab) ? 'on' : '';
+  });
+  loadTab(tab, true);
+}
+
+function refresh() {
+  // 通知/权限按切入拉取；其余 tab 保持 5 秒轮询。
+  if (active === 'overview' || active === 'resources' || active === 'runs') {
+    loadTab(active, false);
+  }
+}
+
 function runBadge(s) {
   s = s || '';
   if (s.indexOf('recover') >= 0) return 'good';
@@ -480,44 +611,208 @@ function runBadge(s) {
 }
 function runLabel(s) {
   var m = { recovered: '已恢复', escalated: '已升级人工', in_progress: '进行中',
-            pending: '等待中', cancelled: '已取消', failed: '失败' };
+            pending: '等待中', cancelled: '已取消', failed: '失败',
+            suppressed: '已抑制', interrupted: '已中断', outcome_unknown: '结果未知' };
   return m[s] || s || '—';
 }
-function render() {
+function stateBadge(s) {
+  s = s || '';
+  if (s === 'delivered') return 'good';
+  if (s === 'failed' || s === 'dead') return 'bad';
+  if (s === 'sending' || s === 'pending') return 'run';
+  return 'idle';
+}
+function stateLabel(s) {
+  var m = { pending: '待投递', sending: '投递中', delivered: '已送达',
+            failed: '失败', dead: '放弃' };
+  return m[s] || s || '—';
+}
+function riskLabel(s) {
+  var m = { low: '低', medium: '中', high: '高' };
+  return m[String(s || '').toLowerCase()] || s || '—';
+}
+
+function healthMap() {
+  var hm = {};
+  ((cache.health && cache.health.resources) || []).forEach(function (h) {
+    hm[h.resource_id] = h;
+  });
+  return hm;
+}
+
+function cardHtml(r, h) {
+  var st = !h ? 'idle' : (h.succeeded ? 'good' : 'bad');
+  var label = !h ? '无数据' : (h.succeeded ? '健康' : '异常');
+  var obs = (h && h.observation) ? h.observation : '等待探测结果';
+  var foot = (h ? (fmtAgo(h.collected_at_unix_ms) + '探测 · ') : '') +
+             r.plans + ' 个恢复计划' + (r.enabled ? '' : ' · 已停用');
+  return '<div class="card">' +
+    '<div class="cardhead"><b>' + esc(r.display_name || r.id) + '</b>' +
+    '<span class="badge ' + st + '">' + label + '</span></div>' +
+    '<div class="sub">' + esc(r.id) + ' · ' + esc(r.type) + '</div>' +
+    '<div class="obs" title="' + esc(obs) + '">' + esc(obs) + '</div>' +
+    '<div class="foot">' + foot + '</div></div>';
+}
+
+function renderPill() {
   if (!cache.res) return;
   var rs = cache.res.resources || [];
-  var hs = cache.health.resources || [];
-  var runs = (cache.runs.runs || []).slice(0, 20);
-  var hm = {};
-  hs.forEach(function (h) { hm[h.resource_id] = h; });
+  var hm = healthMap();
   var known = rs.filter(function (r) { return hm[r.id]; }).length;
   var ok = rs.filter(function (r) { return hm[r.id] && hm[r.id].succeeded; }).length;
   var pill = $('#pill');
   if (!known) { pill.className = 'pill idle'; pill.textContent = '尚无探测结果'; }
   else if (ok === known) { pill.className = 'pill good'; pill.textContent = '全部健康（' + ok + '/' + known + '）'; }
   else { pill.className = 'pill bad'; pill.textContent = '需要关注（' + ok + '/' + known + ' 健康）'; }
-  $('#cards').innerHTML = rs.map(function (r) {
+}
+
+function renderOverview() {
+  if (!cache.res) return;
+  var rs = cache.res.resources || [];
+  var hm = healthMap();
+  var ok = rs.filter(function (r) { return hm[r.id] && hm[r.id].succeeded; }).length;
+  var bad = rs.filter(function (r) { return hm[r.id] && !hm[r.id].succeeded; });
+  var unknown = rs.filter(function (r) { return !hm[r.id]; });
+  var midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+  var runs = (cache.runs && cache.runs.runs) || [];
+  var today = runs.filter(function (x) {
+    return x.started_at_unix_ms >= midnight.getTime();
+  }).length;
+  $('#stats').innerHTML =
+    '<div class="stat"><b>' + rs.length + '</b><span>监控资源</span></div>' +
+    '<div class="stat"><b>' + ok + '</b><span>健康</span></div>' +
+    '<div class="stat"><b>' + bad.length + '</b><span>异常</span></div>' +
+    '<div class="stat"><b>' + today + '</b><span>今日恢复次数</span></div>';
+  $('#badcards').innerHTML = bad.length
+    ? bad.map(function (r) { return cardHtml(r, hm[r.id]); }).join('')
+    : '<div class="muted">没有异常资源 — 一切平静</div>';
+  $('#okcards').innerHTML = unknown.length
+    ? unknown.map(function (r) { return cardHtml(r, hm[r.id]); }).join('')
+    : '<div class="muted">—</div>';
+}
+
+function renderCards() {
+  if (!cache.res) return;
+  var rs = cache.res.resources || [];
+  var hm = healthMap();
+  var cards = rs.filter(function (r) {
     var h = hm[r.id];
-    var st = !h ? 'idle' : (h.succeeded ? 'good' : 'bad');
-    var label = !h ? '无数据' : (h.succeeded ? '健康' : '异常');
-    var obs = (h && h.observation) ? h.observation : '等待探测结果';
-    var foot = (h ? (fmtAgo(h.collected_at_unix_ms) + '探测 · ') : '') +
-               r.plans + ' 个恢复计划' + (r.enabled ? '' : ' · 已停用');
-    return '<div class="card">' +
-      '<div class="cardhead"><b>' + esc(r.display_name || r.id) + '</b>' +
-      '<span class="badge ' + st + '">' + label + '</span></div>' +
-      '<div class="sub">' + esc(r.id) + ' · ' + esc(r.type) + '</div>' +
-      '<div class="obs" title="' + esc(obs) + '">' + esc(obs) + '</div>' +
-      '<div class="foot">' + foot + '</div></div>';
-  }).join('');
-  $('#runsbody').innerHTML = runs.length ? runs.map(function (x) {
-    return '<tr><td>' + fmtTime(x.started_at_unix_ms) + '</td>' +
+    if (resFilter === 'all') return true;
+    if (resFilter === 'good') return !!h && h.succeeded;
+    if (resFilter === 'bad') return !!h && !h.succeeded;
+    return !h;
+  });
+  $('#cards').innerHTML = cards.length
+    ? cards.map(function (r) { return cardHtml(r, hm[r.id]); }).join('')
+    : '<div class="muted">该状态下暂无资源</div>';
+}
+
+function renderRuns() {
+  var runs = (cache.runs && cache.runs.runs) || [];
+  var chips = $('#runfilter');
+  var present = {};
+  runs.forEach(function (x) { present[x.status] = 1; });
+  var keys = Object.keys(present);
+  var sig = keys.join(',');
+  if (keys.length && chips.getAttribute('data-keys') !== sig) {
+    chips.setAttribute('data-keys', sig);
+    while (chips.children.length > 1) chips.removeChild(chips.lastChild);
+    keys.forEach(function (k) {
+      var b = document.createElement('button');
+      b.className = 'chip';
+      b.setAttribute('data-f', k);
+      b.textContent = runLabel(k);
+      chips.appendChild(b);
+    });
+    runFilter = 'all';
+    chips.firstChild.className = 'chip on';
+  }
+  var rows = runs.filter(function (x) {
+    return runFilter === 'all' || x.status === runFilter;
+  });
+  $('#runsbody').innerHTML = rows.length ? rows.map(function (x) {
+    var dur = x.updated_at_unix_ms > x.started_at_unix_ms
+      ? Math.round((x.updated_at_unix_ms - x.started_at_unix_ms) / 1000) + ' 秒' : '—';
+    return '<tr class="xhead" data-id="' + esc(x.id) + '">' +
+      '<td>' + fmtTime(x.started_at_unix_ms) + '</td>' +
       '<td>' + esc(x.resource_id) + '</td>' +
       '<td>' + esc(x.trigger || '—') + '</td>' +
-      '<td><span class="badge ' + runBadge(x.status) + '">' + runLabel(x.status) + '</span></td></tr>';
-  }).join('') : '<tr><td colspan="4" class="muted">还没有触发过恢复动作 — 一切平静</td></tr>';
+      '<td><span class="badge ' + runBadge(x.status) + '">' + runLabel(x.status) + '</span></td>' +
+      '<td>' + (x.attempts || 0) + '</td></tr>' +
+      '<tr class="xrow" data-for="' + esc(x.id) + '" hidden><td colspan="5">运行 ' + esc(x.id) +
+      ' · 恢复尝试 ' + (x.attempts || 0) + ' 次 · 耗时 ' + dur +
+      ' · 更新于 ' + fmtTime(x.updated_at_unix_ms) + '</td></tr>';
+  }).join('') : '<tr><td colspan="5" class="muted">还没有触发过恢复动作 — 一切平静</td></tr>';
 }
-refresh();
+
+function renderNotifications() {
+  var items = (cache.notifs && cache.notifs.notifications) || [];
+  $('#notifbody').innerHTML = items.length ? items.map(function (x) {
+    return '<tr><td>' + fmtTime(x.created_at_unix_ms) + '</td>' +
+      '<td>' + esc(x.channel) + '</td>' +
+      '<td>' + esc(x.event_type) + '</td>' +
+      '<td>' + esc(x.resource_id || '—') + '</td>' +
+      '<td><span class="badge ' + stateBadge(x.state) + '">' + stateLabel(x.state) + '</span></td>' +
+      '<td>' + (x.attempts || 0) + '</td></tr>';
+  }).join('') : '<tr><td colspan="6" class="muted">没有通知记录</td></tr>';
+}
+
+function renderPermissions() {
+  if (!cache.perms) return;
+  var p = cache.perms;
+  $('#permdefault').textContent = '全局默认：' +
+    (p.default_allow_high_risk ? '允许高风险恢复' : '禁止高风险恢复');
+  var rs = p.resources || [];
+  $('#permbody').innerHTML = rs.length ? rs.map(function (r) {
+    var plans = (r.plans || []).map(function (pl) {
+      return esc(pl.plan_id) + '（' + riskLabel(pl.risk) + ' / ' +
+        pl.max_attempts + ' 次）';
+    }).join('；');
+    var hr = r.allow_high_risk
+      ? '<span class="badge bad">允许</span>'
+      : '<span class="badge good">拒绝</span>';
+    return '<tr><td>' + esc(r.resource_id) + '</td><td>' + hr + '</td>' +
+      '<td>' + (r.plans || []).length + '</td><td>' + (plans || '—') + '</td></tr>';
+  }).join('') : '<tr><td colspan="4" class="muted">没有资源</td></tr>';
+  var edges = (cache.graph && cache.graph.edges) || [];
+  $('#graphbody').innerHTML = edges.length ? edges.map(function (e) {
+    return '<tr><td>' + esc(e.from) + '</td><td>' + esc(e.to) + '</td></tr>';
+  }).join('') : '<tr><td colspan="2" class="muted">没有依赖关系</td></tr>';
+}
+
+function render() {
+  renderPill();
+  if (active === 'overview') renderOverview();
+  else if (active === 'resources') renderCards();
+  else if (active === 'runs') renderRuns();
+  else if (active === 'notifications') renderNotifications();
+  else if (active === 'permissions') renderPermissions();
+}
+
+document.getElementById('resfilter').addEventListener('click', function (e) {
+  var b = e.target.closest('button.chip');
+  if (!b) return;
+  resFilter = b.getAttribute('data-f');
+  Array.prototype.forEach.call(this.children, function (c) { c.className = 'chip'; });
+  b.className = 'chip on';
+  renderCards();
+});
+document.getElementById('runfilter').addEventListener('click', function (e) {
+  var b = e.target.closest('button.chip');
+  if (!b) return;
+  runFilter = b.getAttribute('data-f');
+  Array.prototype.forEach.call(this.children, function (c) { c.className = 'chip'; });
+  b.className = 'chip on';
+  renderRuns();
+});
+document.getElementById('runsbody').addEventListener('click', function (e) {
+  var tr = e.target.closest('tr.xhead');
+  if (!tr) return;
+  var row = document.querySelector('tr.xrow[data-for="' + tr.getAttribute('data-id') + '"]');
+  if (row) row.hidden = !row.hidden;
+});
+window.addEventListener('hashchange', function () { show(currentTab()); });
+show(currentTab());
 setInterval(refresh, 5000);
 </script>
 </body>
@@ -560,6 +855,44 @@ mod tests {
         // Self-contained: no external origins (no CDN phone-home).
         assert!(!html.contains("http://") && !html.contains("https://"));
         assert!(html.trim_end().ends_with("</html>"), "truncated shell");
+    }
+
+    #[test]
+    fn tabs_cover_all_function_areas() {
+        let html = html_shell();
+        // Five hash routes, one per function area.
+        for marker in [
+            "#/overview",
+            "#/resources",
+            "#/runs",
+            "#/notifications",
+            "#/permissions",
+        ] {
+            assert!(html.contains(marker), "missing tab route {marker}");
+        }
+        for label in ["总览", "资源", "恢复记录", "通知", "权限与拓扑"] {
+            assert!(html.contains(label), "missing tab label {label}");
+        }
+    }
+
+    #[test]
+    fn page_has_no_state_mutation_path() {
+        let html = html_shell();
+        // Read-only red line: the shell only ever GETs the JSON APIs.
+        for verb in ["POST", "PUT", "PATCH", "DELETE", "method:"] {
+            assert!(!html.contains(verb), "page must not contain {verb}");
+        }
+    }
+
+    #[test]
+    fn runs_rows_surface_attempts_and_expand() {
+        let html = html_shell();
+        // Expandable run rows need the attempts column end to end.
+        assert!(
+            html.contains("attempts"),
+            "runs payload must expose attempts"
+        );
+        assert!(html.contains("xrow"), "run rows must be expandable");
     }
 
     fn dummy_store() -> Store {

@@ -56,6 +56,9 @@ pub struct RunRow {
     pub trigger: String,
     pub started_at_unix_ms: u64,
     pub updated_at_unix_ms: u64,
+    /// Recovery attempts made under this run (for the dashboard's
+    /// expandable run rows; a scalar subquery, no separate join).
+    pub attempts: u64,
 }
 
 #[derive(Debug, Clone)]
