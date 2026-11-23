@@ -1,7 +1,7 @@
 <%+header%>
 <h2><a id="content" name="content"><%:监控资源%></a></h2>
 
-<p><%:编辑监控资源与恢复策略（/etc/custos/custos.toml）。每次写回前自动备份为 custos.toml.bak，写回内容先通过 custos validate 校验，通过后才重启服务；校验失败则回滚并显示错误行号。%></p>
+<p><%:按资源查看探测、依赖、健康状态和恢复计划。资源写入 TOML：校验候选通过后备份、替换并重启；失败时保留当前配置。部分探测类型无结构化表单，走「高级 TOML」编辑。%></p>
 
 <div id="custos-error" class="alert-message warning" style="display:none"></div>
 <pre id="custos-error-output" style="display:none; white-space:pre-wrap"></pre>
@@ -11,7 +11,7 @@
 	<fieldset class="cbi-section">
 		<legend><%:资源列表%></legend>
 		<table class="table" id="custos-list">
-			<tr><th>id</th><th><%:类型%></th><th><%:依赖%></th><th><%:健康%></th><th><%:恢复计划%></th><th><%:操作%></th></tr>
+			<tr><th><%:资源%></th><th><%:当前健康%></th><th><%:依赖%></th><th><%:恢复计划%></th><th><%:设置%></th></tr>
 		</table>
 		<input type="button" class="cbi-button cbi-button-add" id="custos-add" value="<%:新建资源%>" />
 	</fieldset>
@@ -145,12 +145,30 @@
 	}
 
 	function health_span(health) {
-		var map = { healthy: ['健康', '#080'], failing: ['异常', '#c00'], unknown: ['未知', '#888'] };
+		var map = { healthy: ['健康', '#080'], failing: ['检测失败', '#c00'], unknown: ['无观测', '#888'] };
 		var m = map[health] || map.unknown;
 		var span = document.createElement('span');
 		span.textContent = m[0];
 		span.style.color = m[1];
 		span.style.fontWeight = '600';
+		return span;
+	}
+
+	// Four-state health label for the table (C-SET-UX-02). "等待依赖" is a
+	// UI-level hint, not an engine state: shown only when the resource has
+	// no observation AND a direct upstream that is not healthy — the probe
+	// most likely never ran because the engine was still waiting on the
+	// upstream. Everything else keeps the honest probe-derived labels.
+	function health_cell(r) {
+		if (r.health !== 'unknown') return health_span(r.health);
+		var deps = r.depends_on || [];
+		var waiting = deps.length && resources.some(function(up) {
+			return deps.indexOf(up.id) >= 0 && up.health !== 'healthy';
+		});
+		var span = document.createElement('span');
+		span.textContent = waiting ? '等待依赖' : '无观测';
+		span.style.color = waiting ? '#888' : '#888';
+		span.style.fontWeight = waiting ? '400' : '600';
 		return span;
 	}
 
@@ -163,19 +181,22 @@
 			while (table.rows.length > 1) table.deleteRow(-1);
 			resources.forEach(function(r, i) {
 				var row = table.insertRow(-1);
-				row.insertCell(-1).textContent = r.id || '?';
-				var type = row.insertCell(-1);
-				type.textContent = r.type || '?';
-				if (r.display_name) {
-					var small = document.createElement('span');
-					small.textContent = ' (' + r.display_name + ')';
-					small.style.color = '#888';
-					type.appendChild(small);
-				}
+				// Resource cell: display name first, machine id under it.
+				var res = row.insertCell(-1);
+				var bold = document.createElement('b');
+				bold.textContent = r.display_name || r.id || '?';
+				res.appendChild(bold);
+				var mono = document.createElement('div');
+				mono.textContent = r.id || '?';
+				mono.style.color = '#888';
+				mono.style.fontFamily = 'monospace';
+				mono.style.fontSize = '12px';
+				res.appendChild(mono);
+				row.insertCell(-1).appendChild(health_cell(r));
 				row.insertCell(-1).textContent =
 					(r.depends_on && r.depends_on.length) ? r.depends_on.join(' ') : '-';
-				row.insertCell(-1).appendChild(health_span(r.health));
-				row.insertCell(-1).textContent = String(r.plan_count || 0);
+				row.insertCell(-1).textContent =
+					(r.plan_count > 0) ? (r.plan_count + ' 项') : '无';
 				var ops = row.insertCell(-1);
 				ops.appendChild(make_button(r.supported ? '编辑' : 'TOML', function() {
 					if (r.supported) openForm(i);
@@ -188,12 +209,6 @@
 					if (!window.confirm('删除资源 ' + (r.id || i) + ' ？写回前会自动备份并通过 custos validate 校验。')) return;
 					api_write({ op: 'delete', index: i }).then(handle_write_response);
 				}));
-				if (!r.supported) {
-					var note = document.createElement('span');
-					note.textContent = ' 类型无结构化表单，走 TOML 直编';
-					note.style.color = '#888';
-					ops.appendChild(note);
-				}
 			});
 		}).catch(function(e) { error_banner('无法加载资源列表: ' + e); });
 	}
@@ -202,7 +217,10 @@
 		if (j.ok) {
 			error_banner(null);
 			ok_banner(j.message || '已保存');
-			close_editors();
+			// A successful save of the edited resource discards the draft
+			// by intent; any other write (e.g. deleting a different
+			// resource) keeps a dirty editor open unless confirmed.
+			close_editors(true);
 			load();
 		} else {
 			ok_banner(null);
@@ -336,7 +354,38 @@
 	}
 
 	// ---- form state ------------------------------------------------------
+	// Unsaved-draft guard (C-SET-UX-02): switching editing targets or
+	// closing the editor with modified inputs asks before discarding. The
+	// snapshot covers every input of both editors (structured form, plan
+	// boxes, raw textarea).
+	var form_snapshot = null;
+
+	function form_inputs() {
+		return document.querySelectorAll('#custos-form input, #custos-form textarea, #custos-form select, #custos-raw textarea');
+	}
+
+	function snapshot_form() {
+		var parts = [];
+		Array.prototype.forEach.call(form_inputs(), function(inp) {
+			parts.push(inp.id + '=' + (inp.type === 'checkbox' ? inp.checked : inp.value));
+		});
+		return parts.join('|');
+	}
+
+	function form_dirty() {
+		var open = el('custos-form').style.display !== 'none' ||
+			el('custos-raw').style.display !== 'none';
+		return open && snapshot_form() !== form_snapshot;
+	}
+
+	// Ask before discarding; returns true when the switch may proceed.
+	function confirm_discard() {
+		return !form_dirty() ||
+			window.confirm('编辑器有未保存的更改，切换将丢弃这些更改，确定？');
+	}
+
 	function openForm(i) {
+		if (!confirm_discard()) return;
 		var r = resources[i];
 		editing = i;
 		ok_banner(null); error_banner(null);
@@ -364,19 +413,24 @@
 		set_probe_rows(el('f-type').value);
 		show('custos-raw', false);
 		show('custos-form', true);
+		form_snapshot = snapshot_form();
 	}
 
 	function openRaw(i) {
+		if (!confirm_discard()) return;
 		var r = resources[i];
 		editing = i;
 		ok_banner(null); error_banner(null);
 		el('custos-raw-text').value = r ? (r.raw || '') : '';
 		show('custos-form', false);
 		show('custos-raw', true);
+		form_snapshot = snapshot_form();
 	}
 
-	function close_editors() {
+	function close_editors(force) {
+		if (!force && !confirm_discard()) return;
 		editing = null;
+		form_snapshot = null;
 		show('custos-form', false);
 		show('custos-raw', false);
 	}
@@ -456,8 +510,8 @@
 		if (editing === null) { error_banner('请先保存新资源，再使用 TOML 直编调整'); return; }
 		openRaw(editing);
 	});
-	el('custos-cancel').addEventListener('click', close_editors);
-	el('custos-raw-cancel').addEventListener('click', close_editors);
+	el('custos-cancel').addEventListener('click', function() { close_editors(); });
+	el('custos-raw-cancel').addEventListener('click', function() { close_editors(); });
 
 	load();
 })();

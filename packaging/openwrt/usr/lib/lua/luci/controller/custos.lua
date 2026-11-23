@@ -11,8 +11,8 @@ function index()
 	end
 
 	entry({"admin", "services", "custos"},
-		cbi("custos"),
-		_("Custos 自愈引擎"), 60).dependent = true
+		cbi("custos-service"),
+		_("Custos 服务设置"), 60).dependent = true
 
 	entry({"admin", "services", "custos", "status"},
 		template("custos/status"),
@@ -21,6 +21,10 @@ function index()
 	entry({"admin", "services", "custos", "resources"},
 		template("custos/resources"),
 		_("监控资源"), 20).leaf = true
+
+	entry({"admin", "services", "custos", "notify"},
+		cbi("custos-notify"),
+		_("通知设置"), 30).leaf = true
 
 	entry({"admin", "services", "custos", "api", "overview"},
 		call("api_overview")).leaf = true
