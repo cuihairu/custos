@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Custos · 设置原型</title>
+<style>
+:root{--bg:#f2f3f5;--paper:#fff;--ink:#20252c;--sub:#55606b;--line:#dfe4e8;--low:#f7f8f9;--accent:#8d2441;--tint:#f9eaf0;--good:#216450;--goodbg:#e8f4ed;--warn:#81591e;--warnbg:#fbf2e2;--bad:#9b343e;--badbg:#fae9ea;--focus:#326aaf}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;color:var(--ink);background:var(--bg);font:14px/1.53 "Segoe UI","Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+h1,h2,h3,p{margin:0}h1{font-size:32px;line-height:1.22;letter-spacing:-.035em}h2{font-size:17px;letter-spacing:-.01em}h3{font-size:14px} small,.muted{font-size:12px;color:var(--sub)}
+code,.mono{font:12px/1.5 Consolas,"SFMono-Regular",monospace;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:7px;padding:7px 11px;background:var(--paper);white-space:nowrap}button:hover{background:#eef0f2}button:disabled{opacity:.55;cursor:default}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+a{color:var(--accent)}
+.primary{background:var(--accent);color:white;border-color:var(--accent);font-weight:650}.primary:not(:disabled):hover{background:#742038}
+.link{color:var(--accent);background:transparent;border-color:transparent;padding-inline:5px}.link:hover{background:var(--tint)}
+.outer{max-width:1370px;padding:0 35px;margin:auto}.top{background:#20262e;color:#eef0f3}.top>.outer{height:53px;display:flex;align-items:center;justify-content:space-between}.top small{color:#d4d9e0}.logo{display:flex;align-items:center;gap:10px;font-weight:680;font-size:16px}.logo img{width:20px;height:20px}
+.trail{padding:16px 0;color:var(--sub);font-size:12px}.trail b{color:var(--ink)}
+.shell{display:grid;grid-template-columns:203px minmax(0,1fr);min-height:633px;background:var(--paper);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+aside{background:var(--low);border-right:1px solid var(--line);padding:15px 12px;display:flex;flex-direction:column}
+.nav-title{padding:8px 10px;font-size:12px;font-weight:680;color:var(--sub)}
+nav{display:grid;gap:3px}.nav{width:100%;text-align:left;display:flex;align-items:center;gap:9px;background:transparent;border-color:transparent;white-space:normal}.nav[aria-current=true]{background:var(--tint);color:var(--accent);font-weight:700}.nav:hover{background:#eaedf0}
+.icon{width:17px;height:17px;stroke:currentColor;stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.meta{margin-top:auto;padding:13px 10px 4px;color:var(--sub);font-size:11px}
+main{padding:24px 27px;min-width:0}.head{display:flex;justify-content:space-between;align-items:start;gap:14px;margin-bottom:20px}.head p{margin-top:6px;color:var(--sub)}.between{display:flex;justify-content:space-between;align-items:center;gap:10px}.section{margin-top:20px}.section h2{margin-bottom:8px}
+.status{padding:2px 8px;border-radius:5px;font-size:11px;font-weight:650;white-space:nowrap;background:#eef0f3;color:#4b5662}.status.ok{background:var(--goodbg);color:var(--good)}.status.warn{background:var(--warnbg);color:var(--warn)}.status.err{background:var(--badbg);color:var(--bad)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;vertical-align:1px;margin-right:5px}
+.fields{border:1px solid var(--line);border-radius:8px}.field{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:10px 12px}.field+.field{border-top:1px solid var(--line)}.field small{display:block;margin-top:2px}
+input:not([type=checkbox]),select,textarea{padding:6px 9px;border:1px solid #cdd4dc;border-radius:6px;background:white;max-width:100%}input[type=checkbox]{accent-color:var(--accent);width:17px;height:17px} input[type=checkbox]:disabled{opacity:.65}
+.path{width:min(290px,100%);font-family:Consolas,monospace!important;font-size:12px!important}.unit{display:flex;align-items:center;gap:7px}.unit input{width:78px}
+.split{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(210px,1fr);gap:17px}
+.note{border-radius:7px;padding:10px 12px;background:var(--low);color:var(--sub);font-size:12px}.note b{color:var(--ink)}.note.warn{background:var(--warnbg);color:var(--warn)}.note.error{background:var(--badbg);color:var(--bad)}.note.good{background:var(--goodbg);color:var(--good)}
+.note ul{margin:8px 0 0;padding-left:16px}.note li+li{margin-top:5px}
+.footer{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-top:17px;padding-top:13px;border-top:1px solid var(--line)}
+.tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:8px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left}th{background:var(--low);color:var(--sub);font-size:12px}tr:last-child td{border-bottom:0}td small{display:block}td .link{white-space:nowrap;padding-block:3px}
+.item{display:grid;gap:2px}.selected{background:#fbf7f9}
+.cluster{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.step{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;background:var(--low);border-radius:5px;color:var(--sub);font-size:12px}.flow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.rule{display:grid;gap:7px}.rowline{padding-bottom:7px;border-bottom:1px solid var(--line)}.rowline:last-child{border-bottom:0}
+.gridform{display:grid;grid-template-columns:1fr 1fr;gap:9px 13px}.gridform label{display:grid;gap:4px;font-size:12px;color:var(--sub)}
+details summary{cursor:pointer;color:var(--accent);font-weight:650}
+pre{margin:8px 0 0;padding:10px;white-space:pre-wrap;overflow-wrap:anywhere;background:#f0f1f3;border-radius:6px}
+mark{background:none;color:var(--accent);font-weight:700}
+.stack{display:grid;gap:7px}.textvalue{font-weight:650}.label-box{padding:12px;border:1px solid var(--line);border-radius:8px}
+@media(max-width:870px){.outer{padding:0 15px}.shell{grid-template-columns:156px minmax(0,1fr)}main{padding:17px}.split{grid-template-columns:1fr}}
+@media(max-width:640px){.shell{display:block}.trail{padding:10px 0}aside{border-right:0;border-bottom:1px solid var(--line);padding:7px}.nav-title,.meta{display:none}nav{grid-template-columns:repeat(2,minmax(0,1fr))}.head{flex-wrap:wrap}.field{flex-wrap:wrap}.gridform{grid-template-columns:1fr}.top>.outer{height:46px}h1{font-size:26px}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+<symbol id="service-icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="6" rx="1"/><rect x="4" y="14" width="16" height="6" rx="1"/><path d="M7 7h.1M7 17h.1m4-10h6m-6 10h6"/></symbol>
+<symbol id="resource-icon" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
+<symbol id="bell-icon" viewBox="0 0 24 24"><path d="M5 16h14l-2-4V9a5 5 0 0 0-10 0v3zM10 20h4"/></symbol>
+<symbol id="monitor-icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M12 17v4m-3 0h6M6 11h3l2-3 2 5 2-2h3"/></symbol>
+</svg>
+<header class="top"><div class="outer"><div class="logo"><img src="data:image/svg+xml;base64,PHN2ZyB0PSIxNzkzMzYxMDQ0MDA1IiBjbGFzcz0iaWNvbiIgdmlld0JveD0iMCAwIDExOTQgMTAyNCIgdmVyc2lvbj0iMS4xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHAtaWQ9IjM1ODgiIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCI+PHBhdGggZD0iTTg3Ny4wMTc2MzYgMS43NzI5OTRBMzUxLjA3NjY0NSAzNTEuMDc2NjQ1IDAgMCAwIDU5Ny4yOTU1NTggOTkuMzY5MTcgMzUwLjk4OTY4IDM1MC45ODk2OCAwIDAgMCAzMTcuNjE2OTYyIDEuNzcyOTk0QzE0NS43MDk0MTggMTguNTU3MTg4IDAuMTk1NjcxIDE4MC40MjAzMDYtMC4wMjE3NDEgMzU1LjI2MjkxYTM2My42NjQ3OTEgMzYzLjY2NDc5MSAwIDAgMCA3LjU2NTkzMiA3MS41NzE5NzloMjM0LjgwNDc5MWw0Mi40NjA1MzMtMTUwLjAxNDE3MmE0My42NTYyOTggNDMuNjU2Mjk4IDAgMCAxIDgwLjA1MTA0MS05LjY5NjU2OGwxNTcuNDI3OTE2IDI3OC4wOTE0ODkgNzIuMDUwMjg1LTIxOC4yMTYyNjhhNDMuNjM0NTU3IDQzLjYzNDU1NyAwIDAgMSA3OS4wMDc0NjQtOC42OTY0NzNsNjQuNTI3ODM1IDEwOC41MzE5OTJoMTUwLjAxNDE3MmE0My44OTU0NTEgNDMuODk1NDUxIDAgMCAxIDAgODcuNzY5MTYxSDcxMy4xMTA4NDdhNDMuNjk5NzgxIDQzLjY5OTc4MSAwIDAgMS0zNy41NDcwMjUtMjEuMzkzMzI1bC0yOC4yNjM1NC00Ny41OTE0NTMtNzIuOTE5OTMyIDIyMC44Njg2OTJhNDMuNjU2Mjk4IDQzLjY1NjI5OCAwIDAgMS03OS41MDc1MTIgNy45MTM3OTFMMzQwLjQwMTcyNCA0MDEuNTcxNjMzIDMxNy40MjEyOTIgNDgyLjc1MzIxNWE0My43NDMyNjMgNDMuNzQzMjYzIDAgMCAxLTQyLjA0NzQ1MSAzMS44OTQzMThIMzcuNTAzNTQzYzEuNzYxMDM2IDMuNTY1NTU0IDMuMDY1NTA3IDcuMjYxNTU2IDQuOTU2OTkgMTAuNzYxODg2YTEyMzguNDg2NTY3IDEyMzguNDg2NTY3IDAgMCAwIDQyMS43Nzg5NzcgNDU5LjU2NTE1NSAyNDUuOTU4MDE5IDI0NS45NTgwMTkgMCAwIDAgMjY1Ljk4MTY0OSAwIDEyMzkuMjQ3NTA5IDEyMzkuMjQ3NTA5IDAgMCAwIDQyMS43Nzg5NzctNDU5LjMyNjAwMiAzNTQuMTIwNDExIDM1NC4xMjA0MTEgMCAwIDAgNDIuNjEyNzIxLTE3MC4zNDIxNzlDMTE5NC4zMzAyMjIgMTgwLjUyOTAxMSAxMDQ4Ljk0NjkyMiAxOC42MjI0MTEgODc2Ljk3NDE1NCAxLjgxNjQ3NnoiIGZpbGw9IiNGQzA3NDAiIHAtaWQ9IjM1ODkiPjwvcGF0aD48L3N2Zz4K" alt=""> Custos</div><small>OpenWrt · LuCI 设置原型</small></div></header>
+<div class="outer">
+<div class="trail">服务 / Custos / <b id="trail">服务设置</b></div>
+<div class="shell">
+<aside>
+<div class="nav-title">设置</div>
+<nav aria-label="设置导航">
+<button class="nav" data-go="service"><svg class="icon"><use href="#service-icon"/></svg>服务设置</button>
+<button class="nav" data-go="resources"><svg class="icon"><use href="#resource-icon"/></svg>监控资源</button>
+<button class="nav" data-go="notifications"><svg class="icon"><use href="#bell-icon"/></svg>通知设置</button>
+<button class="nav" data-go="status"><svg class="icon"><use href="#monitor-icon"/></svg>运行与配置来源</button>
+</nav>
+<div class="meta">演示环境 · 不会连接路由器</div>
+</aside>
+<main>
+<article id="service" data-page>
+<header class="head"><div><h1>服务设置</h1><p>控制 OpenWrt 上的 Custos 服务，以及它读取哪份监控配置。</p></div><span class="status ok"><i class="dot"></i>服务运行中</span></header>
+<div class="split">
+<section><h2 style="margin-bottom:8px">服务运行参数</h2><div class="fields">
+<div class="field"><div><label for="enabled"><b>启用服务</b></label><small>关闭后停止探测、恢复与通知处理。</small></div><input id="enabled" type="checkbox" checked></div>
+<div class="field"><div><label for="interval"><b>引擎检查周期</b></label><small>全局引擎循环；各资源的探测间隔在资源设置中查看。</small></div><div class="unit"><input id="interval" type="number" min="0.001" step="0.001" value="5"><span>秒</span></div></div>
+<div class="field"><div><label for="config"><b>监控配置文件</b></label><small>资源、依赖和恢复策略来自此 TOML 文件。</small></div><input class="path" id="config" value="/etc/custos/custos.toml"></div>
+<div class="field"><div><label for="database"><b>状态数据库</b></label><small>保存恢复记录、通知队列及审计。</small></div><input class="path" id="database" value="/etc/custos/custos.db"></div>
+</div></section>
+<div>
+<h2 style="margin-bottom:8px">保存后会发生什么</h2>
+<div class="note warn"><b>应用将重启 Custos</b><ul><li>服务重新读取运行参数与监控文件。</li><li>管理资源与策略请进入「监控资源」。</li><li>可在「运行与配置来源」核对生效结果。</li></ul></div>
+<section class="section"><h2>配置来源</h2><div class="rule"><div class="rowline between"><span>运行参数</span><span class="status">OpenWrt UCI</span></div><div class="rowline between"><span>资源与恢复策略</span><span class="status">Custos TOML</span></div></div></section>
+</div>
+</div>
+<div class="footer"><small>保存会写入 LuCI 服务配置。</small><button class="primary" data-review="service">查看改动并应用</button></div>
+</article>
+<article id="resources" data-page hidden>
+<header class="head"><div><h1>监控资源</h1><p>按资源查看探测、依赖、健康状态和恢复计划。</p></div><button class="primary" id="resource-new">添加资源</button></header>
+<div class="tablebox"><table><thead><tr><th>资源</th><th>当前健康</th><th>依赖</th><th>恢复计划</th><th>设置</th></tr></thead><tbody>
+<tr class="selected"><td><b>WAN 网口</b><small class="mono">wan-link</small></td><td><span class="status ok"><i class="dot"></i>健康</span></td><td>无</td><td>无</td><td><button class="link" data-resource="wan">编辑</button></td></tr>
+<tr><td><b>默认网关</b><small class="mono">uplink-gateway</small></td><td><span class="status warn"><i class="dot"></i>检测失败</span></td><td>WAN 网口</td><td>1 项</td><td><button class="link" data-resource="gateway">编辑</button></td></tr>
+<tr><td><b>代理服务</b><small class="mono">proxy-service</small></td><td><span class="status">等待依赖</span></td><td>默认网关</td><td>1 项</td><td><button class="link" data-resource="proxy">编辑</button></td></tr>
+</tbody></table></div>
+<section class="section split">
+<div><div class="between"><h2 id="editor-title">编辑 WAN 网口</h2><span class="status">结构化表单</span></div><div class="label-box gridform">
+<label>资源 ID<input id="res-id" value="wan-link"></label>
+<label>探测类型<select id="probe"><option value="wan">网络接口</option><option value="gateway">默认网关</option><option value="proxy">服务单元</option></select></label>
+<label>显示名称<input id="res-name" value="WAN 网口"></label>
+<label>依赖资源<select id="depends"><option>无</option><option>WAN 网口</option><option>默认网关</option></select></label>
+<label>资源探测间隔（秒）<input id="resource-interval" type="number" min="0.001" step="0.001" value="10"></label>
+<label>探测超时（秒）<input id="timeout" type="number" min="0.001" step="0.001" value="2"></label>
+</div><details class="section"><summary>高级 TOML 编辑</summary><div class="note">复制资源块供本地对照。原型仅模拟结构化表单的保存。</div><pre class="mono" id="raw"></pre></details></div>
+<div><h2>依赖与恢复</h2><div class="note" id="resource-note"><b>无上游依赖</b><p>WAN 网口是网关与代理服务的前置资源。</p></div><div class="note section"><b>恢复计划</b><p id="plans">此资源只探测，不执行自动恢复。</p><p class="muted" style="margin-top:6px">启用高风险动作前，需要单独确认影响范围。</p></div></div>
+</section>
+<div class="footer"><small>资源写入 TOML，校验通过后备份、替换并重启。</small><button class="primary" data-review="resources">校验并查看改动</button></div>
+</article>
+<article id="notifications" data-page hidden>
+<header class="head"><div><h1>通知设置</h1><p>先确认当前规则来自哪里，再配置发往哪些渠道。</p></div><span class="status" id="notify-source">跟随 TOML</span></header>
+<div class="fields">
+<div class="field"><div><label for="override"><b>用 LuCI 覆盖通知配置</b></label><small>打开并至少启用一个有效渠道后，LuCI 规则整体替换 TOML 通知段。关闭后恢复按 TOML 执行。</small></div><input type="checkbox" id="override"></div>
+</div>
+<section class="section split"><div><h2>LuCI 通知渠道</h2><div class="fields" id="notify-fields">
+<div class="field"><label for="severity"><b>最低通知级别</b></label><select data-override id="severity" disabled><option>警告及以上</option><option>信息及以上</option><option>仅严重</option></select></div>
+<div class="field"><div><label for="local-log"><b>本地日志</b></label><small>把通知记录到本地审计日志。</small></div><input type="checkbox" data-override id="local-log" checked disabled></div>
+<div class="field"><div><b>Telegram</b><small>同时填写机器人令牌和接收会话 ID。</small></div><button data-override id="telegram-button" disabled>配置</button></div>
+<div id="telegram-fields" class="field" hidden><div class="gridform"><label>机器人令牌<input type="password" id="telegram-token" autocomplete="off"></label><label>接收会话 ID<input id="telegram-chat"></label></div></div>
+<div class="field"><div><b>Herald</b><small>配置服务地址、应用 ID 和可选令牌。</small></div><button data-override id="herald-button" disabled>配置</button></div>
+<div id="herald-fields" class="field" hidden><div class="gridform"><label>服务地址<input id="herald-url"></label><label>应用 ID<input id="herald-app" value="custos"></label><label>令牌<input type="password" autocomplete="off"></label></div></div>
+</div></div><div><h2>当前谁在生效</h2><div class="note" id="notify-note">当前使用监控文件中的 <code>[notification]</code>。可以关闭 LuCI 覆盖并继续使用已有规则。</div></div></section>
+<div class="footer"><small>应用时重启服务以重新读取通知规则。预览不会显示令牌。</small><button class="primary" data-review="notifications">查看改动并应用</button></div>
+</article>
+<article id="review" data-page hidden>
+<header class="head"><div><h1>应用前核对</h1><p id="review-desc">预览监控资源的更改，以及对正在运行的服务的影响。</p></div><button id="back-review">返回编辑</button></header>
+<div class="note good" id="preflight" role="status"><b>示例校验通过</b> · 资源 ID、依赖和恢复配置可读取。</div>
+<section class="section"><h2>即将保存</h2><div class="tablebox"><table><thead><tr><th>设置</th><th>当前值</th><th>新值</th></tr></thead><tbody id="diff"></tbody></table></div></section>
+<section class="section"><h2>生效顺序</h2><div class="flow" id="apply-flow"><span class="step">验证候选 TOML</span><span aria-hidden="true">→</span><span class="step">备份当前文件</span><span aria-hidden="true">→</span><span class="step">替换并重启</span><span aria-hidden="true">→</span><span class="step">确认服务状态</span></div></section>
+<section class="section"><h2>失败时如何处理</h2><div class="note warn">校验失败时保留当前配置。重启失败时保留备份入口和错误详情，直到服务重新可用前显示失败状态。</div></section>
+<div class="footer"><span class="muted" id="apply-result" role="status">原型仅模拟保存与重启。</span><button id="simulate-error">演示校验失败</button><button class="primary" id="apply">确认应用</button></div>
+</article>
+<article id="status" data-page hidden>
+<header class="head"><div><h1>运行与配置来源</h1><p>核对正在运行的服务与它实际采用的配置。</p></div><span class="status">只读</span></header>
+<div class="fields">
+<div class="field"><b>当前服务状态</b><span id="service-status" class="status ok"><i class="dot"></i>运行中</span></div>
+<div class="field"><b>监控配置</b><code>/etc/custos/custos.toml</code></div>
+<div class="field"><b>最后一次校验</b><span>通过 · 15:20:04</span></div>
+<div class="field"><b>最后一次启动</b><span>今天 15:20:06</span></div>
+</div>
+<section class="section"><h2>独立 Web Dashboard</h2><p class="note">默认关闭。启用后可读取资源、权限和恢复记录。写入设置请使用 LuCI 或 TOML 配置文件。</p></section>
+</article>
+</main>
+</div></div>
+<script>
+const $=(id)=>document.getElementById(id);
+const all=(selector)=>[...document.querySelectorAll(selector)];
+const labels={service:'服务设置',resources:'监控资源',notifications:'通知设置',status:'运行与配置来源',review:'应用前核对'};
+function go(view){
+  view=Object.hasOwn(labels,view)?view:'service';
+  all('[data-page]').forEach(page=>page.hidden=page.id!==view);
+  all('.nav').forEach(button=>button.setAttribute('aria-current',String(button.dataset.go===view)));
+  $('trail').textContent=labels[view];
+  window.scrollTo(0,0);
+}
+all('[data-go]').forEach(button=>button.addEventListener('click',()=>go(button.dataset.go)));
+
+const resources={wan:['wan-link','WAN 网口',0,10,'无上游依赖','此资源只探测，不执行自动恢复。'],gateway:['uplink-gateway','默认网关',1,15,'依赖 WAN 网口','有 1 个已配置的恢复计划。'],proxy:['proxy-service','代理服务',2,20,'依赖默认网关','有 1 个已配置的恢复计划。']};
+let baseline=resources.wan;
+function edit(key){
+  const [id,name,dependency,interval,note,plan]=resources[key];
+  baseline=resources[key];
+  $('timeout').value='2';
+  all('[data-resource]').forEach(button=>button.closest('tr').classList.toggle('selected',button.dataset.resource===key));
+  $('editor-title').textContent='编辑 '+name;
+  $('res-id').value=id;
+  $('res-name').value=name;
+  $('probe').value=key;
+  $('depends').selectedIndex=dependency;
+  $('resource-interval').value=interval;
+  $('resource-note').textContent=note;
+  $('plans').textContent=plan;
+  $('raw').textContent=['[[resources]]','id = "'+id+'"','display_name = "'+name+'"'].join(String.fromCharCode(10));
+}
+all('[data-resource]').forEach(button=>button.addEventListener('click',()=>edit(button.dataset.resource)));
+$('resource-new').addEventListener('click',()=>{
+  edit('wan');
+  $('editor-title').textContent='添加监控资源';
+  $('res-name').value='';
+  $('res-id').value='';
+  $('res-id').focus();
+});
+$('override').addEventListener('change',()=>{
+  const enabled=$('override').checked;
+  $('notify-source').textContent=enabled?'LuCI 覆盖':'跟随 TOML';
+  $('notify-note').textContent=enabled?'本次应用后，由 LuCI 配置中的通知渠道和最低级别生效。':'当前使用监控文件中的 [notification] 配置。';
+  all('[data-override]').forEach(control=>control.disabled=!enabled);
+  if(!enabled){$('telegram-fields').hidden=true;$('herald-fields').hidden=true;}
+});
+for(const name of ['telegram','herald']){
+  $(name+'-button').addEventListener('click',()=>$(name+'-fields').hidden=!$(name+'-fields').hidden);
+}
+let origin='resources';
+function updateReview(from){
+  origin=from;
+  $('review-desc').textContent='预览「'+labels[from]+'」的改动及重启影响。';
+  const changes=from==='resources'
+    ? [['资源 ID',baseline[0],$('res-id').value],['显示名称',baseline[1],$('res-name').value],['探测超时','2 秒',$('timeout').value+' 秒'],['资源探测间隔',baseline[3]+' 秒',$('resource-interval').value+' 秒'],['依赖资源',['无','WAN 网口','默认网关'][baseline[2]],$('depends').value]]
+    : from==='service'
+      ? [['启用服务','开启',$('enabled').checked?'开启':'关闭'],['引擎检查周期','5 秒',$('interval').value+' 秒'],['监控配置文件','/etc/custos/custos.toml',$('config').value],['状态数据库','/etc/custos/custos.db',$('database').value]]
+      : [['通知配置来源','跟随 TOML',$('override').checked?'LuCI 覆盖':'跟随 TOML'],['最低通知级别','以 TOML 为准',$('override').checked?$('severity').value:'以 TOML 为准'],['Telegram 令牌','未更改',$('override').checked&&$('telegram-token').value?'已更改（隐藏）':'未更改']];
+  const rows=changes.filter(([,before,after])=>before!==after);
+  $('diff').replaceChildren();
+  for(const values of rows.length?rows:[['当前没有改动','—','—']]){
+    const row=document.createElement('tr');
+    values.forEach((value)=>{const cell=row.insertCell();cell.textContent=value;});
+    $('diff').append(row);
+  }
+  $('apply-flow').replaceChildren();
+  const flow=from==='resources'?['验证候选 TOML','备份当前文件','替换并重启','确认服务状态']:['核对设置','写入 UCI','重启服务','确认服务状态'];
+  flow.forEach((step,index)=>{
+    if(index){const arrow=document.createElement('span');arrow.textContent='→';$('apply-flow').append(arrow);}
+    const label=document.createElement('span');label.className='step';label.textContent=step;$('apply-flow').append(label);
+  });
+  $('apply-result').textContent='原型仅模拟保存与重启。';
+  const invalidResource=from==='resources'&&(!$('res-id').value.trim()||!$('resource-interval').checkValidity()||+$('resource-interval').value<=0||!$('timeout').checkValidity()||+$('timeout').value<=0||$('depends').value===$('res-name').value);
+  const invalidService=from==='service'&&(!$('interval').checkValidity()||+$('interval').value<=0||!$('config').value.trim()||!$('database').value.trim());
+  const invalidNotice=from==='notifications'&&$('override').checked&&(Boolean($('telegram-token').value)!==Boolean($('telegram-chat').value)||(!$('local-log').checked&&!$('telegram-token').value&&!$('herald-url').value));
+  const problem=invalidResource?'检查资源 ID、探测间隔、超时与自身依赖。':invalidService?'检查周期和两个文件路径。':invalidNotice?'检查通知渠道与 Telegram 配对字段。':'';
+  $('preflight').className=problem?'note error':'note good';
+  $('preflight').textContent=problem?'示例校验失败 · '+problem:'示例校验通过 · 可以查看待应用的改动。';
+  $('apply').disabled=Boolean(problem)||!rows.length;
+  go('review');
+}
+all('[data-review]').forEach(button=>button.addEventListener('click',()=>updateReview(button.dataset.review)));
+$('back-review').addEventListener('click',()=>go(origin));
+$('simulate-error').addEventListener('click',()=>{
+  $('preflight').className='note error';
+  $('preflight').textContent='示例校验失败 · resources[0].dependencies：检测到依赖环。';
+  $('apply-result').textContent='当前配置仍有效。返回编辑以修正。';
+  $('apply').disabled=true;
+});
+$('apply').addEventListener('click',()=>{
+  $('apply-result').textContent='示例已应用 · 服务状态已确认。';
+  $('apply').disabled=true;
+});
+const view=new URLSearchParams(location.search).get('view');
+edit(view==='resources'?'gateway':'wan');
+if(view==='review'){$('resource-interval').value='15';updateReview('resources');} else {go(view);}
+</script>
+</body></html>
