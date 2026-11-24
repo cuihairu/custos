@@ -82,6 +82,10 @@ function api_overview()
 	local uci = require("luci.model.uci").cursor()
 	local db = uci:get("custos", "main", "db") or "/etc/custos/custos.db"
 	out.db = db
+	-- Config source path (C-SET-UX-06): the TOML file is the authoritative
+	-- resource configuration; the status page must show the UCI-managed
+	-- real path, not a hardcoded default.
+	out.conf = uci:get("custos", "main", "conf") or "/etc/custos/custos.toml"
 	if not nixio.fs.access(db) then
 		out.error = "数据库不存在: " .. sanitize(db, 200)
 		luci.http.write_json(out)

@@ -39,17 +39,20 @@
   - **怎么验证** 对比正常保存、无改动、依赖环、损坏 TOML、备份失败、并发与写入失败下的配置和备份哈希。失败时保留上一份可用配置。 [现有写入](packaging/openwrt/usr/lib/lua/luci/controller/custos.lua)
   - 前置注记 `7c94d42`（2026-11-24）：写入契约已定 `docs/design/settings-redesign/apply-contract.md`——现状缺陷（先备份后校验，校验失败已破坏上一份可用备份）如实记录；新顺序=①字段级预览（令牌显「已更改（隐藏）」）→②同目录候选临时文件→③`custos validate`（RC≠0 零副作用）→④核实备份（rc=0+可读+哈希一致）→⑤原子 `mv`→⑥重启按 05 四态回报；失败不变量=live 保持上一可用版本、`.bak` 仅在成功替换前一刻更新；并发=客户端基线 md5 比对，不一致拒绝；认证沿用 `test_post_security`。实施在后续批次，本批不勾。
   - 实现注记 `98c742d`（2026-11-24）：六步链落地为可注入副作用的纯模块 `luci.custos.apply`（控制器 `real_fns` 接 shell/UCI 实现），顺序 ①基线 md5 比对（不一致拒绝「配置已被其他会话修改」）→②字节相同即 noop（跳过校验/备份/重启）→③候选临时文件→④`custos validate`（RC≠0 仅删临时文件，live 与 `.bak` 零接触）→⑤核实备份（复制后 md5 与 live 比对，不符中止）→⑥原子 `mv`；资源页保存先出「应用前核对」字段级预览（仅列改动字段，恢复计划按规范化签名比较），确认后才携带基线 md5 提交；无改动提交不写入。host 单测 60 断言（apply-test.lua，Lua 5.4）覆盖校验失败零副作用/md5 拒绝/备份哈希拒绝/替换失败等全部拒绝路径，`luac -p` 全过。预览视觉与失败场景真机对照待 C-SET-UX-07 装机亲验，不闭项。
-- [ ] **C-SET-UX-05 [P1] 保存后确认进程实际状态。**
+- [x] **C-SET-UX-05 [P1] 保存后确认进程实际状态。**
   - **问题** 当前重启命令的返回值没有用于区分保存成功与服务恢复。
   - **怎么做** 分开显示已写入、待服务确认、服务已启停和重启失败。失败场景保留错误与可用的备份入口，恢复配置沿用预览和校验。
   - **怎么验证** 用隔离实例模拟正常、非零退出、启动后退出和用户主动停用。记录进程状态及服务采用的配置，与 UI 一致。
   - 前置注记 `7c94d42`（2026-11-24）：状态反馈四态模型已随 04 契约定义（`docs/design/settings-redesign/apply-contract.md` §3）——`written`（已落盘待确认）/`confirmed`（重启后 ≤5s 轮询到 running）/`restart_failed`（非零或超时，保留错误+`.bak` 入口+「用备份恢复」动作，恢复同样走校验链）/`stopped_by_user`（enabled=0 不算失败）；轮询期 UI 显「待服务确认」不阻塞。实施在后续批次，本批不勾。
   - 实现注记 `98c742d`（2026-11-24）：`apply.settle` 实现四态回报——重启 rc≠0 直接 restart_failed（不进轮询），否则 500ms 间隔轮询 `/etc/init.d/custos status` 至多 5s（10 次），running 即 confirmed；超时后按 UCI `custos.main.enabled` 区分 stopped_by_user（不算失败）与 restart_failed；同步 API 把 written 瞬态解析为三终态之一。restart_failed 响应保留错误与 `.bak` 路径，页面显「用备份恢复」入口（op=restore：读 `.bak`→写候选→校验→原子替换→settle，不重做备份以防好副本被坏 live 覆盖；坏备份拒绝恢复并回显行号）。restore/写路径共用四态与基线 md5。四态全路径、轮询窗口、恢复拒绝均有单测（apply-test.lua 60 断言）。真机 procd 状态与 UI 一致性待 C-SET-UX-07 装机亲验，不闭项。
-- [ ] **C-SET-UX-06 [P1] 明确 Dashboard 只读入口。**
+  - 收口注记（2026-11-25，验收随分支并 main）：判定规则收紧为「连续两次 exit 0」——原「出现 exit 0 即 confirmed」会对启动后立即退出的进程误报已确认；新增 `run_seq` 用例「start-then-exit is restart_failed」「flap that settles running still confirms」（apply-test.lua 62 断言），契约 §3 判定单元格同步改写。验收记录落 `docs/design/settings-redesign/apply-acceptance-05.md`：四态路径验收表（正常/非零/启动后退出/用户停用/慢启动/抖动/超时 7 行）在 Lua 5.4 宿主与 Docker Lua 5.1.5（设备 LuCI 同大版本）隔离容器全绿；真机 procd 时序仍待 C-SET-UX-07 装机亲验。
+- [x] **C-SET-UX-06 [P1] 明确 Dashboard 只读入口。**
   - **问题** LuCI 与 Dashboard 都会显示资源，运行态与可写配置容易混淆。
   - **怎么做** LuCI 标明运行与配置来源，Dashboard 继续显示只读状态、权限与历史，保留默认关闭和仅回环绑定。未知运行态显式提示。
   - **怎么验证** 检查默认无监听、启用后只读、无运行数据的提示，以及只经现有 LuCI/TOML 路径修改配置。 [Dashboard 实现](crates/custos-dashboard/src/lib.rs)
+  - 收口注记（2026-11-25，随分支并 main）：LuCI 状态页补「运行与配置来源」——`api_overview` 新增 `out.conf`（UCI `custos.main.conf` 下发，不再页面写死），状态模板 TOML 行改由 `j.conf` 填充、procd 状态升级为 `● 运行中/■ 已停止` 徽标；dashboard 红线为既有实现（`dashboard.rs:19` 默认 enabled=false、`custos-cli/src/main.rs:277` is_enabled 门、`dashboard/src/lib.rs:44-49` 拒非回环），本机活体验证：默认关=监听集合零差分、开=仅回环 18123 出「Custos 监控面板」且 `/api/config` `read_only:true`、端口被占=bind 失败即退出。验收记录落 `docs/design/settings-redesign/setux-06-status-source.md`。注意：开发机 8080 被无关 meshlet console 占用，任务单的 curl-8080 判据在真机上需先证 8080 空闲再做（归 07）；状态页徽标与来源路径的浏览器视觉待 C-SET-UX-07 装机亲验。
 - [ ] **C-SET-UX-07 [P1] OpenWrt 真机或隔离实例验收。**
+  - 待装机注记（2026-11-25）：01~06 已按隔离面验收（单测、Lua 5.1.5 容器、本机活体），以下真机项集中在此做——UCI 毫秒差分实测、窄窗口视觉、四态健康标签/草稿守卫视觉、Telegram 投递对照与令牌不回显、procd 重启轮询时序与 UI 四态一致性、8080 空闲性先证后测。不闭项，待装机。
   - **问题** 浏览器原型只验证样例流程，实际生效还涉及 LuCI、UCI、procd 和配置落盘。
   - **怎么做** 记录实现版本、应用前后截图、配置差异、失败回滚和进程状态，更新中英文指引。
   - **怎么验证** 新用户独立调整探测周期、找到资源依赖、说清通知来源并修正一次校验失败。检查 760 px 窗宽、键盘、长路径和应用后刷新。
