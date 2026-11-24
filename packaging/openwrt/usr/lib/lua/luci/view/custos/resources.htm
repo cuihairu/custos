@@ -6,6 +6,10 @@
 <div id="custos-error" class="alert-message warning" style="display:none"></div>
 <pre id="custos-error-output" style="display:none; white-space:pre-wrap"></pre>
 <div id="custos-ok" class="alert-message success" style="display:none"></div>
+<div id="custos-restore" style="display:none">
+	<input type="button" class="cbi-button cbi-button-remove" id="custos-restore-btn" value="<%:用备份恢复 (.bak)%>" />
+	<span style="color:#888"><%:恢复同样经过 custos validate 校验，通过后才替换并重启%></span>
+</div>
 
 <div class="cbi-map">
 	<fieldset class="cbi-section">
@@ -70,6 +74,18 @@
 			<input type="button" class="cbi-button cbi-button-remove" id="custos-raw-cancel" value="<%:返回%>" />
 		</div>
 	</fieldset>
+
+	<fieldset class="cbi-section" id="custos-review" style="display:none">
+		<legend><%:应用前核对%></legend>
+		<p style="color:#888"><%:写入按固定顺序执行：候选文件 → custos validate（失败则零改动）→ 备份并核实哈希 → 原子替换 → 重启并确认。任何一步失败，当前配置保持不变。%></p>
+		<table class="table" id="custos-review-table">
+			<tr><th><%:字段%></th><th><%:当前值%></th><th><%:新值%></th></tr>
+		</table>
+		<div>
+			<input type="button" class="cbi-button cbi-button-save" id="custos-review-apply" value="<%:确认应用%>" />
+			<input type="button" class="cbi-button cbi-button-remove" id="custos-review-back" value="<%:返回编辑%>" />
+		</div>
+	</fieldset>
 </div>
 
 <script type="text/javascript">
@@ -88,6 +104,9 @@
 	};
 	var resources = [];
 	var editing = null;
+	var file_md5 = null;       // live-file baseline for the md5 concurrency guard
+	var pending_payload = null;
+	var pending_from = null;   // 'form' | 'raw': which editor the review came from
 
 	function el(id) { return document.getElementById(id); }
 	function val(id) { return el(id).value; }
@@ -177,6 +196,7 @@
 			if (j.error) { error_banner(j.error); return; }
 			error_banner(null);
 			resources = j.resources || [];
+			file_md5 = j.md5 || null;
 			var table = el('custos-list');
 			while (table.rows.length > 1) table.deleteRow(-1);
 			resources.forEach(function(r, i) {
@@ -207,27 +227,51 @@
 				ops.appendChild(document.createTextNode(' '));
 				ops.appendChild(make_button('删除', function() {
 					if (!window.confirm('删除资源 ' + (r.id || i) + ' ？写回前会自动备份并通过 custos validate 校验。')) return;
-					api_write({ op: 'delete', index: i }).then(handle_write_response);
+					api_write({ op: 'delete', index: i, base_md5: file_md5 })
+						.then(handle_write_response);
 				}));
 			});
 		}).catch(function(e) { error_banner('无法加载资源列表: ' + e); });
 	}
 
+	function hide_restore() { show('custos-restore', false); }
+
+	// Four-state feedback (apply-contract.md §3): confirmed and
+	// stopped_by_user are plain success; restart_failed keeps the error on
+	// screen and exposes the .bak restore entry (restore re-enters the same
+	// validation chain); every rejection (stale / invalid / backup_failed /
+	// replace_failed / io_error / no_backup) leaves the live file untouched.
 	function handle_write_response(j) {
-		if (j.ok) {
-			error_banner(null);
-			ok_banner(j.message || '已保存');
-			// A successful save of the edited resource discards the draft
-			// by intent; any other write (e.g. deleting a different
-			// resource) keeps a dirty editor open unless confirmed.
-			close_editors(true);
-			load();
-		} else {
+		var b = el('custos-review-apply');
+		b.disabled = false;
+		b.value = '确认应用';
+		pending_payload = null;
+		show('custos-review', false);
+		if (!j.ok) {
 			ok_banner(null);
 			error_banner(j.error || '写入失败', j.output);
 			// Validation output carries absolute line numbers of the temp
 			// file; the failing lines map 1:1 onto the rendered document.
+			// A stale rejection means another session moved the file: the
+			// baseline md5 must be refreshed before the next attempt.
+			if (j.state === 'stale') load();
+			return;
 		}
+		if (j.state === 'restart_failed') {
+			ok_banner(null);
+			error_banner(j.message, j.output);
+			show('custos-restore', true);
+		} else {
+			error_banner(null);
+			hide_restore();
+			ok_banner(j.message || '已保存');
+		}
+		// A successful save of the edited resource discards the draft by
+		// intent; any other write (e.g. deleting a different resource)
+		// keeps a dirty editor open unless confirmed.
+		close_editors(true);
+		// Reload also refreshes the md5 baseline: the file just changed.
+		load();
 	}
 
 	function set_probe_rows(type) {
@@ -431,8 +475,10 @@
 		if (!force && !confirm_discard()) return;
 		editing = null;
 		form_snapshot = null;
+		pending_payload = null;
 		show('custos-form', false);
 		show('custos-raw', false);
+		show('custos-review', false);
 	}
 
 	function build_data() {
@@ -470,6 +516,112 @@
 		return data;
 	}
 
+	// ---- apply preview (apply-contract.md §2 step ①) --------------------
+	// The save buttons never write directly: they build the field-level
+	// diff first, and only the explicit 确认应用 sends the payload (with
+	// the md5 baseline for the concurrency guard).
+
+	function ms_disp(v) {
+		if (v === undefined || v === null || v === '') return '-';
+		var n = Number(v);
+		if (isNaN(n)) return String(v);
+		return (n / 1000).toFixed(3).replace(/\.?0+$/, '') + ' 秒';
+	}
+
+	function str(v) {
+		if (v === undefined || v === null || v === '') return '-';
+		return String(v);
+	}
+
+	// Canonical signature of a recovery plan (key presence vs null: the
+	// TOML side omits empty fields, the form always emits them).
+	function plan_sig(p) {
+		var a = p.action || {};
+		return [
+			p.plan_id || '',
+			(p.applicable_faults || []).slice().sort().join('+'),
+			p.risk || 'low',
+			p.idempotent === true ? 'idem' : '-',
+			p.timeout_ms || '-',
+			p.max_attempts || '-',
+			p.cooldown_ms || '-',
+			a.program || '',
+			(a.args || []).join(' '),
+			(p.verification && p.verification.status_is) || '-'
+		].join('|');
+	}
+
+	function plans_sig(list) {
+		return (list || []).map(plan_sig).join(';;');
+	}
+
+	function plans_disp(list) {
+		var n = (list || []).length;
+		if (!n) return '无';
+		return n + ' 项: ' + list.map(function(p) {
+			return (p.plan_id || '?') + '[' + (p.risk || 'low') + ']';
+		}).join(', ');
+	}
+
+	function review_rows(data, old_r) {
+		var probe = data.probe || {};
+		var oprobe = (old_r && old_r.probe) || {};
+		var hp = data.health_policy || {};
+		var ohp = (old_r && old_r.health_policy) || {};
+		var type_field = {
+			'network-interface': ['接口名', 'interface'],
+			'custom-command': ['检查命令', 'command'],
+			'icmp': ['目标主机', 'host'],
+			'service': ['服务单元', 'unit']
+		};
+		var rows = [];
+		function add(label, a, b) {
+			if (String(a) !== String(b)) rows.push([label, str(a), str(b)]);
+		}
+		add('资源 id', data.id, old_r && old_r.id);
+		add('类型', data.type, old_r && old_r.type);
+		add('显示名称', data.display_name, old_r && old_r.display_name);
+		add('启用', data.enabled ? '开' : '关',
+			(old_r && old_r.enabled === false) ? '关' : '开');
+		add('依赖资源', data.depends_on.join(' '),
+			((old_r && old_r.depends_on) || []).join(' '));
+		add('探测间隔', ms_disp(probe.interval_ms), ms_disp(oprobe.interval_ms));
+		add('探测超时', ms_disp(probe.timeout_ms), ms_disp(oprobe.timeout_ms));
+		var tf = type_field[data.type];
+		if (tf) {
+			var nv = (tf[1] === 'command')
+				? (probe.command || []).join(' ') : str(probe[tf[1]]);
+			var ov = (tf[1] === 'command')
+				? (oprobe.command || []).join(' ') : str(oprobe[tf[1]]);
+			add(tf[0], nv, ov);
+		}
+		add('失败阈值', str(hp.failure_threshold), str(ohp.failure_threshold));
+		add('成功阈值', str(hp.success_threshold), str(ohp.success_threshold));
+		var npl = (data.recovery_policy && data.recovery_policy.plans) || [];
+		var opl = (old_r && old_r.recovery_policy &&
+			old_r.recovery_policy.plans) || [];
+		if (plans_sig(npl) !== plans_sig(opl)) {
+			rows.push(['恢复计划', plans_disp(opl), plans_disp(npl)]);
+		}
+		return rows;
+	}
+
+	function show_review(rows, payload, from) {
+		pending_payload = payload;
+		pending_from = from;
+		var table = el('custos-review-table');
+		while (table.rows.length > 1) table.deleteRow(-1);
+		rows.forEach(function(r) {
+			var row = table.insertRow(-1);
+			row.insertCell(-1).textContent = r[0];
+			row.insertCell(-1).textContent = r[1];
+			row.insertCell(-1).textContent = r[2];
+		});
+		show('custos-form', false);
+		show('custos-raw', false);
+		show('custos-review', true);
+	}
+
 	function save_form() {
 		var data = build_data();
 		var confirm_needed = false;
@@ -485,15 +637,46 @@
 			op: (editing === null) ? 'create' : 'save',
 			index: editing,
 			data: data,
-			confirm_high_risk: confirm_needed && el('f-confirm').checked
+			confirm_high_risk: confirm_needed && el('f-confirm').checked,
+			base_md5: file_md5
 		};
-		api_write(payload).then(handle_write_response);
+		var rows = review_rows(data, (editing === null) ? null : resources[editing]);
+		if (!rows.length) {
+			if (editing !== null) { ok_banner('当前没有改动，未写入'); return; }
+			rows = [['新建资源', '-', data.id + ' (' + data.type + ')']];
+		}
+		show_review(rows, payload, 'form');
 	}
 
 	function save_raw() {
 		if (editing === null) { error_banner('未选择资源'); return; }
-		api_write({ op: 'raw', index: editing, raw: val('custos-raw-text') })
-			.then(handle_write_response);
+		var text = val('custos-raw-text');
+		var r = resources[editing];
+		if (r && text === r.raw) {
+			ok_banner('当前没有改动，未写入');
+			return;
+		}
+		var old_disp = r ? (String(r.raw || '').split('\n').length + ' 行') : '-';
+		var new_disp = String(text).split('\n').length + ' 行';
+		show_review([['TOML 块', old_disp, new_disp]],
+			{ op: 'raw', index: editing, raw: text, base_md5: file_md5 }, 'raw');
+	}
+
+	function review_apply() {
+		if (!pending_payload) return;
+		var b = el('custos-review-apply');
+		b.disabled = true;
+		// The request includes the server-side settle (restart + poll), so
+		// this may take a few seconds — the button itself is the
+		// non-blocking 待服务确认 indicator.
+		b.value = '写入中（含服务确认）…';
+		api_write(pending_payload).then(handle_write_response);
+	}
+
+	function review_back() {
+		pending_payload = null;
+		show('custos-review', false);
+		show(pending_from === 'raw' ? 'custos-raw' : 'custos-form', true);
 	}
 
 	el('custos-add').addEventListener('click', function() { openForm(null); });
@@ -512,6 +695,17 @@
 	});
 	el('custos-cancel').addEventListener('click', function() { close_editors(); });
 	el('custos-raw-cancel').addEventListener('click', function() { close_editors(); });
+	el('custos-review-apply').addEventListener('click', review_apply);
+	el('custos-review-back').addEventListener('click', review_back);
+	el('custos-restore-btn').addEventListener('click', function() {
+		if (!window.confirm('用备份恢复配置？恢复同样经过 custos validate 校验，通过后替换并重启。')) return;
+		var b = el('custos-restore-btn');
+		b.disabled = true;
+		api_write({ op: 'restore', base_md5: file_md5 }).then(function(j) {
+			b.disabled = false;
+			handle_write_response(j);
+		});
+	});
 
 	load();
 })();

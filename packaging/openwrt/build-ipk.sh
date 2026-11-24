@@ -127,6 +127,7 @@ cp "$SRC/usr/lib/lua/luci/model/cbi/custos-notify.lua" "$R/data/usr/lib/lua/luci
 cp "$SRC/usr/lib/lua/luci/view/custos/status.htm" "$R/data/usr/lib/lua/luci/view/custos/"
 cp "$SRC/usr/lib/lua/luci/view/custos/resources.htm" "$R/data/usr/lib/lua/luci/view/custos/"
 cp "$SRC/usr/lib/lua/luci/custos/tomledit.lua" "$R/data/usr/lib/lua/luci/custos/"
+cp "$SRC/usr/lib/lua/luci/custos/apply.lua" "$R/data/usr/lib/lua/luci/custos/"
 cp "$SRC/usr/lib/lua/luci/custos/settings.lua" "$R/data/usr/lib/lua/luci/custos/"
 
 cat > "$R/CONTROL/postinst" <<'EOF'
