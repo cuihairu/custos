@@ -40,15 +40,23 @@ end
 -- Post-restart confirmation (§3): poll for a running service, then decide
 -- between confirmed / stopped_by_user / restart_failed. "written" is the
 -- transient the caller shows while this runs; the synchronous API resolves
--- to one of the three final states.
+-- to one of the three final states. Confirmation requires running on two
+-- consecutive polls: a daemon that exits right after starting must end in
+-- restart_failed, not confirmed.
 function M.settle(fns, poll)
 	local rc = normalize_rc(fns.restart())
 	local times = (poll and poll.times) or 10
 	local interval = (poll and poll.interval) or 0.5
+	local seen_running = false
 	if rc == 0 then
 		for _ = 1, times do
 			if fns.running() then
-				return "confirmed"
+				if seen_running then
+					return "confirmed"
+				end
+				seen_running = true
+			else
+				seen_running = false
 			end
 			fns.sleep(interval)
 		end

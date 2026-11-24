@@ -39,7 +39,7 @@
 | 状态 | 含义 | 判定 |
 |---|---|---|
 | `written` | 配置已落盘，等待服务确认 | ⑤ 成功、⑥ 已发出 |
-| `confirmed` | 服务已用新配置运行 | 重启后轮询 `/etc/init.d/custos status`（间隔 ~500ms，上限 ~5s）出现 exit 0 |
+| `confirmed` | 服务已用新配置运行 | 重启后轮询 `/etc/init.d/custos status`（间隔 ~500ms，上限 ~5s）**连续两次** exit 0（单次 running 不算——启动后立即退出的进程不得误报已确认） |
 | `restart_failed` | 重启命令非零退出或超时窗口内未 running | 保留错误输出 + `.bak` 路径入口；提供「用备份恢复」动作（恢复本身也走 ②–⑥，恢复后同样确认状态） |
 | `stopped_by_user` | 用户主动停用（UCI enabled=0） | 不当作失败；显示已停用与当前生效配置来源 |
 

@@ -88,6 +88,12 @@ local function mk(t)
 		running = function()
 			polled = polled + 1
 			table.insert(calls, "poll")
+			if t.run_seq then
+				local v = t.run_seq[polled]
+				if v ~= nil then
+					return v
+				end
+			end
 			if t.run_after_polls and polled >= t.run_after_polls then
 				return true
 			end
@@ -141,6 +147,21 @@ do
 	local state = apply.write({ path = P, candidate = "new", fns = fns })
 	eq(state, "confirmed", "late start within the window still confirms")
 	eq(files[P], "new", "late start keeps the new config")
+end
+
+do
+	-- Acceptance §4 "启动后退出": the service comes up, is seen running
+	-- once, then dies. A single running observation must not confirm.
+	local fns = mk({ live = "old", run_seq = { true, false } })
+	local state = apply.write({ path = P, candidate = "new", fns = fns })
+	eq(state, "restart_failed", "start-then-exit is restart_failed")
+end
+
+do
+	-- Flap then settle: up, gone, up and stable -> confirmed.
+	local fns = mk({ live = "old", run_seq = { true, false, true, true } })
+	local state = apply.write({ path = P, candidate = "new", fns = fns })
+	eq(state, "confirmed", "flap that settles running still confirms")
 end
 
 -- ---- four states: restart_failed / stopped_by_user ----------------------
@@ -299,7 +320,7 @@ do
 end
 
 do
-	local fns, files = mk({ live = "broken", bak = "good", enabled = false })
+	local fns = mk({ live = "broken", bak = "good", enabled = false })
 	local state = apply.restore({ path = P, fns = fns })
 	eq(state, "stopped_by_user", "restore settles stopped_by_user when disabled")
 end
