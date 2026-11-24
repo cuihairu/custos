@@ -122,10 +122,13 @@ R="$STAGE/luci"
 mkdir -p "$R/data/usr/lib/lua/luci/controller" "$R/data/usr/lib/lua/luci/model/cbi" \
 	"$R/data/usr/lib/lua/luci/view/custos" "$R/data/usr/lib/lua/luci/custos" "$R/CONTROL"
 cp "$SRC/usr/lib/lua/luci/controller/custos.lua" "$R/data/usr/lib/lua/luci/controller/"
-cp "$SRC/usr/lib/lua/luci/model/cbi/custos.lua" "$R/data/usr/lib/lua/luci/model/cbi/"
+cp "$SRC/usr/lib/lua/luci/model/cbi/custos-service.lua" "$R/data/usr/lib/lua/luci/model/cbi/"
+cp "$SRC/usr/lib/lua/luci/model/cbi/custos-notify.lua" "$R/data/usr/lib/lua/luci/model/cbi/"
 cp "$SRC/usr/lib/lua/luci/view/custos/status.htm" "$R/data/usr/lib/lua/luci/view/custos/"
 cp "$SRC/usr/lib/lua/luci/view/custos/resources.htm" "$R/data/usr/lib/lua/luci/view/custos/"
 cp "$SRC/usr/lib/lua/luci/custos/tomledit.lua" "$R/data/usr/lib/lua/luci/custos/"
+cp "$SRC/usr/lib/lua/luci/custos/apply.lua" "$R/data/usr/lib/lua/luci/custos/"
+cp "$SRC/usr/lib/lua/luci/custos/settings.lua" "$R/data/usr/lib/lua/luci/custos/"
 
 cat > "$R/CONTROL/postinst" <<'EOF'
 #!/bin/sh

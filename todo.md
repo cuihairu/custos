@@ -4,6 +4,58 @@
 > 规则：一项 = 一个可独立验收的交付物；完成后打勾并在行尾记 commit hash；阶段验收门全绿才勾 roadmap.md「落地跟踪」对应行。
 > 骨架基线（commit `de3aa0d`）：workspace 11 crate、领域模型主体、状态机转换表、依赖图环检测、配置校验 v1、CLI `validate`。
 
+## LuCI 设置与配置应用改版（C-SET-UX，7 项待办）
+
+设置以 OpenWrt「服务 → Custos」为入口。OpenWrt UCI 管启动参数和通知覆盖，Custos TOML 管探测资源、依赖、恢复策略与文件侧通知。独立 Web Dashboard 继续承担只读查看，默认关闭且仅回环监听。原型使用示例数据。
+
+[交互原型](docs/design/settings-redesign/prototype.html) · [服务设置](docs/design/settings-redesign/01-service.png) · [监控资源](docs/design/settings-redesign/02-resources.png) · [通知设置](docs/design/settings-redesign/03-notifications.png) · [应用前核对](docs/design/settings-redesign/04-apply-review.png)
+
+| 数据特征 | 设置页展示 | 其他位置的呈现 |
+|---|---|---|
+| 开关、路径、时长 | 开关、可读文件路径、明确单位。全局循环与单资源探测周期分开 | 状态页显示实际运行态与配置来源，待生效值进入变更预览 |
+| 资源健康、依赖关系 | 列表中用状态文字、上游依赖与计划计数。选中后展开数据和策略 | 总览优先异常和等待项，拓扑呈现依赖方向 |
+| 恢复动作、权限和验证条件 | 按恢复计划组合风险、前置条件、重试与验证结果 | 应用页仅展开变化与影响；历史记录保留事件当时结果 |
+| 通知阈值、渠道、令牌 | 标明生效来源，按渠道展开必填字段 | 诊断与变更预览只显示配置状态，令牌不回显 |
+| 配置差异、校验与进程状态 | 当前值和新值对照，按阶段显示验证、备份、写盘、重启 | 状态页区分运行中、重启失败和无观测 |
+
+- [ ] **C-SET-UX-01 [P1] 拆开服务、资源与通知设置。**
+  - **问题** 当前 CBI 将运行参数和通知覆盖放在同页，用户需要自己判断改的是 UCI 还是 TOML。
+  - **怎么做** 保留已存在的 LuCI 路由与权限，分组说明配置来源、启用作用域与重启时机。引擎周期用秒显示并保留毫秒精度。
+  - **怎么验证** 用默认值和 1500 ms 非整秒配置验证往返；只改数据库路径时只改变对应 UCI 键。核对已有入口、窄窗口和长路径。 [CBI 设置](packaging/openwrt/usr/lib/lua/luci/model/cbi/custos.lua)
+  - 实现注记 `7c94d42`（2026-11-24）：拆为 `custos-service.lua`（main 段）与 `custos-notify.lua`（notify 段）两页，控制器路由保留既有 entry 与权限（路径不变，main 页 cbi 模型换 `custos-service`，新增 notify 子路由）；UCI 仍存毫秒（init.d `--interval` 契约不动），UI 秒显示毫秒精度，换算/校验在纯函数模块 `luci.custos.settings`（`to_ms`/`to_seconds`），1500 ms↔1.5 s 往返等 45 断言 host Lua 5.4 通过，`luac -p` 4/4；「只改数据库路径只改对应 UCI 键」由拆页结构保证（服务页仅写 main 段）+ 页面「配置来源」说明（运行参数=UCI / 资源=TOML / 通知=覆盖或 TOML）。真机 UCI 差分实测、窄窗口与长路径视觉项待 C-SET-UX-07 装机亲验，不闭项。
+- [ ] **C-SET-UX-02 [P1] 资源先选对象，再编辑探测与恢复。**
+  - **问题** 资源、依赖、探测和恢复计划连续堆叠，部分探测类型只能用 TOML 编辑。
+  - **怎么做** 资源表显示健康、上游依赖与计划数；按探测类型展开字段，保留高级 TOML、现有策略项和高风险确认。编辑切换时处理未保存草稿。
+  - **怎么验证** 覆盖健康、异常、等待依赖、无观测；操作结构化与 TOML 回退；确认未编辑的资源、注释、扩展字段保持原样。 [资源视图](packaging/openwrt/usr/lib/lua/luci/view/custos/resources.htm)
+  - 实现注记 `7c94d42`（2026-11-24）：资源表重构为 显示名+id 单字体 / 四态健康标签（健康、检测失败、等待依赖〔UI 层按依赖推导的提示，非引擎状态，页面注记〕、无观测）/ 依赖 / 计划数（N 项/无）；结构化表单、高级 TOML 直编、恢复计划与高危双闸全部保留；未保存草稿守卫覆盖编辑器切换、新建、取消与「删除其他资源后的编辑器关闭」（快照比对 + confirm；保存自身路径免确认）；「等待依赖/无观测」四态与草稿守卫的视觉确认待 C-SET-UX-07 装机亲验，不闭项。未编辑资源的字节级保真由 tomledit 既有 44 例与设备 round-trip 记录覆盖。
+- [ ] **C-SET-UX-03 [P1] 通知页揭示真正生效的配置。**
+  - **问题** 「启用通知」会被误解为关闭后停止所有通知，实际是 LuCI 规则有有效渠道时覆盖整个 TOML 通知段。
+  - **怎么做** 明确当前与待应用来源，逐渠道展示本地日志、Telegram 和 Herald。Telegram 成对校验，隐藏令牌值。
+  - **怎么验证** 覆盖关闭、无有效渠道、有效本地日志、Telegram 缺一项及成对、Herald 地址有效与错误。对照 UCI、实际投递和 TOML，截图与诊断不显示令牌。 [配置覆盖](crates/custos-config/src/notification/mod.rs)
+  - 实现注记 `7c94d42`（2026-11-24）：开关更名「用 LuCI 覆盖通知配置」，描述写明整体替换语义；「当前谁在生效」DummyValue 按 `luci.custos.settings.effective_source` 计算（与引擎 `env_overlay` 选择器规则逐条对齐：覆盖开 + 本地日志/Telegram 成对/Herald 地址任一 → LuCI，否则 TOML；半配对按未配置处理，与 init.d 丢弃行为一致——8 断言单测）；Telegram 成对校验上移编辑器层（`telegram_pair_error` + CBI 跨字段 formvalue，缺一项即拒）；令牌字段 `password` 型，页面/预览/诊断路径均不构造令牌明文（JSON API 本就无令牌字段）。真机投递对照、截图与诊断不显示令牌的装机核对待 C-SET-UX-07，不闭项。
+- [ ] **C-SET-UX-04 [P0] 做可验证的预览、备份与提交。**
+  - **问题** 当前资源写入先尝试覆盖备份，再校验候选文件。校验失败时仍可能改变此前可用的备份。
+  - **怎么做** 预览仅列改动字段。校验候选文件通过后，可靠备份当前版本，再原子替换；检查编辑基线与现有认证、请求校验。错误定位到字段或行号。
+  - **怎么验证** 对比正常保存、无改动、依赖环、损坏 TOML、备份失败、并发与写入失败下的配置和备份哈希。失败时保留上一份可用配置。 [现有写入](packaging/openwrt/usr/lib/lua/luci/controller/custos.lua)
+  - 前置注记 `7c94d42`（2026-11-24）：写入契约已定 `docs/design/settings-redesign/apply-contract.md`——现状缺陷（先备份后校验，校验失败已破坏上一份可用备份）如实记录；新顺序=①字段级预览（令牌显「已更改（隐藏）」）→②同目录候选临时文件→③`custos validate`（RC≠0 零副作用）→④核实备份（rc=0+可读+哈希一致）→⑤原子 `mv`→⑥重启按 05 四态回报；失败不变量=live 保持上一可用版本、`.bak` 仅在成功替换前一刻更新；并发=客户端基线 md5 比对，不一致拒绝；认证沿用 `test_post_security`。实施在后续批次，本批不勾。
+  - 实现注记 `98c742d`（2026-11-24）：六步链落地为可注入副作用的纯模块 `luci.custos.apply`（控制器 `real_fns` 接 shell/UCI 实现），顺序 ①基线 md5 比对（不一致拒绝「配置已被其他会话修改」）→②字节相同即 noop（跳过校验/备份/重启）→③候选临时文件→④`custos validate`（RC≠0 仅删临时文件，live 与 `.bak` 零接触）→⑤核实备份（复制后 md5 与 live 比对，不符中止）→⑥原子 `mv`；资源页保存先出「应用前核对」字段级预览（仅列改动字段，恢复计划按规范化签名比较），确认后才携带基线 md5 提交；无改动提交不写入。host 单测 60 断言（apply-test.lua，Lua 5.4）覆盖校验失败零副作用/md5 拒绝/备份哈希拒绝/替换失败等全部拒绝路径，`luac -p` 全过。预览视觉与失败场景真机对照待 C-SET-UX-07 装机亲验，不闭项。
+- [ ] **C-SET-UX-05 [P1] 保存后确认进程实际状态。**
+  - **问题** 当前重启命令的返回值没有用于区分保存成功与服务恢复。
+  - **怎么做** 分开显示已写入、待服务确认、服务已启停和重启失败。失败场景保留错误与可用的备份入口，恢复配置沿用预览和校验。
+  - **怎么验证** 用隔离实例模拟正常、非零退出、启动后退出和用户主动停用。记录进程状态及服务采用的配置，与 UI 一致。
+  - 前置注记 `7c94d42`（2026-11-24）：状态反馈四态模型已随 04 契约定义（`docs/design/settings-redesign/apply-contract.md` §3）——`written`（已落盘待确认）/`confirmed`（重启后 ≤5s 轮询到 running）/`restart_failed`（非零或超时，保留错误+`.bak` 入口+「用备份恢复」动作，恢复同样走校验链）/`stopped_by_user`（enabled=0 不算失败）；轮询期 UI 显「待服务确认」不阻塞。实施在后续批次，本批不勾。
+  - 实现注记 `98c742d`（2026-11-24）：`apply.settle` 实现四态回报——重启 rc≠0 直接 restart_failed（不进轮询），否则 500ms 间隔轮询 `/etc/init.d/custos status` 至多 5s（10 次），running 即 confirmed；超时后按 UCI `custos.main.enabled` 区分 stopped_by_user（不算失败）与 restart_failed；同步 API 把 written 瞬态解析为三终态之一。restart_failed 响应保留错误与 `.bak` 路径，页面显「用备份恢复」入口（op=restore：读 `.bak`→写候选→校验→原子替换→settle，不重做备份以防好副本被坏 live 覆盖；坏备份拒绝恢复并回显行号）。restore/写路径共用四态与基线 md5。四态全路径、轮询窗口、恢复拒绝均有单测（apply-test.lua 60 断言）。真机 procd 状态与 UI 一致性待 C-SET-UX-07 装机亲验，不闭项。
+- [ ] **C-SET-UX-06 [P1] 明确 Dashboard 只读入口。**
+  - **问题** LuCI 与 Dashboard 都会显示资源，运行态与可写配置容易混淆。
+  - **怎么做** LuCI 标明运行与配置来源，Dashboard 继续显示只读状态、权限与历史，保留默认关闭和仅回环绑定。未知运行态显式提示。
+  - **怎么验证** 检查默认无监听、启用后只读、无运行数据的提示，以及只经现有 LuCI/TOML 路径修改配置。 [Dashboard 实现](crates/custos-dashboard/src/lib.rs)
+- [ ] **C-SET-UX-07 [P1] OpenWrt 真机或隔离实例验收。**
+  - **问题** 浏览器原型只验证样例流程，实际生效还涉及 LuCI、UCI、procd 和配置落盘。
+  - **怎么做** 记录实现版本、应用前后截图、配置差异、失败回滚和进程状态，更新中英文指引。
+  - **怎么验证** 新用户独立调整探测周期、找到资源依赖、说清通知来源并修正一次校验失败。检查 760 px 窗宽、键盘、长路径和应用后刷新。
+
+**实施顺序** 先定 04 的写入契约和 05 的状态反馈，01–03 可并行准备，最后验证 06、07。
+
 ## 0. 基线（已落地）
 
 - [x] Cargo workspace 11 crate 骨架（custos-{model,core,engine,probe,plugin-api,plugin-host,platform,config,store,notify,cli}）`de3aa0d`

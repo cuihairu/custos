@@ -4,6 +4,7 @@
 module("luci.controller.custos", package.seeall)
 
 local tomledit = require "luci.custos.tomledit"
+local apply = require "luci.custos.apply"
 
 function index()
 	if not nixio.fs.access("/etc/config/custos") then
@@ -11,8 +12,8 @@ function index()
 	end
 
 	entry({"admin", "services", "custos"},
-		cbi("custos"),
-		_("Custos 自愈引擎"), 60).dependent = true
+		cbi("custos-service"),
+		_("Custos 服务设置"), 60).dependent = true
 
 	entry({"admin", "services", "custos", "status"},
 		template("custos/status"),
@@ -21,6 +22,10 @@ function index()
 	entry({"admin", "services", "custos", "resources"},
 		template("custos/resources"),
 		_("监控资源"), 20).leaf = true
+
+	entry({"admin", "services", "custos", "notify"},
+		cbi("custos-notify"),
+		_("通知设置"), 30).leaf = true
 
 	entry({"admin", "services", "custos", "api", "overview"},
 		call("api_overview")).leaf = true
@@ -252,7 +257,7 @@ function api_resources()
 			raw = table.concat(b.raw_lines),
 		}
 	end
-	luci.http.write_json({ file = path, resources = resources })
+	luci.http.write_json({ file = path, md5 = file_md5(path), resources = resources })
 end
 
 -- Structural validation of one resource object coming from the form. The
@@ -324,34 +329,97 @@ local function validate_resource(data, doc, self_index)
 	return nil
 end
 
--- Backup → write temp file → custos validate → swap in → restart. The live
--- file is only ever replaced by a validated document; a failed validation
--- leaves it untouched (rollback) and surfaces the validator output, which
--- carries the offending line numbers.
-local function apply_write(path, text)
-	local bak = path .. ".bak"
-	local tmp = path .. ".new"
-	os.execute("cp -p " .. shell_quote(path) .. " " .. shell_quote(bak)
-		.. " 2>/dev/null")
-	local f = io.open(tmp, "w")
-	if not f then
-		return nil, "无法写入临时文件 " .. sanitize(tmp, 200)
+-- os.execute returns a boolean on Lua 5.2+ and a status number on 5.1;
+-- normalize both to an exit code so the chain logic stays version-neutral.
+local function exec_rc(cmd)
+	local rc = os.execute(cmd)
+	if rc == true then
+		return 0
 	end
-	f:write(text)
-	f:close()
+	if rc == false or rc == nil then
+		return 1
+	end
+	return rc
+end
+
+local function file_md5(path)
 	local out = require("luci.util").exec(
-		"/usr/bin/custos validate " .. shell_quote(tmp) .. " 2>&1; echo RC=$?")
-	local rc = out:match("RC=(%d+)%s*$")
-	if rc ~= "0" then
-		os.execute("rm -f " .. shell_quote(tmp))
-		return nil, out
+		"md5sum " .. shell_quote(path) .. " 2>/dev/null")
+	return out and out:match("^(%x+)") or nil
+end
+
+-- Real side effects for luci.custos.apply (the unit-tested write chain in
+-- apply-contract.md §2: candidate temp file -> custos validate -> verified
+-- backup -> atomic mv -> restart with four-state settling). The order and
+-- the failure invariants live in the module; this only wires the shell and
+-- UCI to it.
+local function real_fns()
+	local util = require("luci.util")
+	return {
+		read = read_file,
+		md5 = file_md5,
+		write = function(p, text)
+			local f = io.open(p, "w")
+			if not f then
+				return false
+			end
+			f:write(text)
+			f:close()
+			return true
+		end,
+		copy = function(src, dst)
+			return exec_rc("cp -p " .. shell_quote(src) .. " " .. shell_quote(dst)
+				.. " 2>/dev/null") == 0
+		end,
+		move = function(src, dst)
+			return exec_rc("mv -f " .. shell_quote(src) .. " " .. shell_quote(dst)
+				.. " 2>/dev/null") == 0
+		end,
+		rm = function(p)
+			os.execute("rm -f " .. shell_quote(p) .. " 2>/dev/null")
+		end,
+		validate = function(p)
+			local out = util.exec(
+				"/usr/bin/custos validate " .. shell_quote(p) .. " 2>&1; echo RC=$?")
+			return tonumber(out and out:match("RC=(%d+)%s*$")) or 1, out
+		end,
+		restart = function()
+			return exec_rc("/etc/init.d/custos restart >/dev/null 2>&1")
+		end,
+		running = function()
+			return exec_rc("/etc/init.d/custos status >/dev/null 2>&1") == 0
+		end,
+		sleep = function(s)
+			os.execute("sleep " .. tostring(s))
+		end,
+		enabled = function()
+			local uci = require("luci.model.uci").cursor()
+			return uci:get("custos", "main", "enabled") == "1"
+		end,
+	}
+end
+
+-- Map a chain state to the JSON the resource page renders (four-state
+-- feedback, apply-contract.md §3): confirmed / stopped_by_user are plain
+-- success, restart_failed keeps the error plus the .bak restore entry, and
+-- every rejection state leaves the live file untouched.
+local function write_response(state, info)
+	if state == "confirmed" then
+		return { ok = true, state = state,
+			message = "已保存并通过 custos validate，服务已确认运行" }
+	elseif state == "noop" then
+		return { ok = true, state = state, message = "无改动，未写入" }
+	elseif state == "stopped_by_user" then
+		return { ok = true, state = state,
+			message = "已保存并通过 custos validate；服务处于停用状态，未运行" }
+	elseif state == "restart_failed" then
+		return { ok = true, state = state, needs_attention = true,
+			message = "配置已写入并通过校验，但服务未确认运行，请检查服务状态",
+			backup = info.backup }
 	end
-	if not os.execute("mv -f " .. shell_quote(tmp) .. " " .. shell_quote(path)) then
-		os.execute("rm -f " .. shell_quote(tmp))
-		return nil, "替换配置文件失败"
-	end
-	os.execute("/etc/init.d/custos restart >/dev/null 2>&1")
-	return true
+	return { ok = false, state = state,
+		error = info and info.message or "写入失败",
+		output = info and info.output or nil }
 end
 
 function api_resource_write()
@@ -366,6 +434,18 @@ function api_resource_write()
 	end
 
 	local path = toml_path()
+
+	-- Restore the verified backup; goes through the same chain (temp file,
+	-- validate, atomic mv, settle) but skips re-backing up: the .bak copy is
+	-- the source here and must not be clobbered with the broken live file.
+	if req.op == "restore" then
+		local state, info = apply.restore({
+			path = path, base_md5 = req.base_md5, fns = real_fns(),
+		})
+		luci.http.write_json(write_response(state, info))
+		return
+	end
+
 	local text = read_file(path)
 	if not text then
 		luci.http.write_json({ ok = false,
@@ -431,11 +511,15 @@ function api_resource_write()
 		return
 	end
 
-	result, err = apply_write(path, tomledit.render(doc))
-	if not result then
-		luci.http.write_json({ ok = false, error = "写入校验未通过，配置已回滚",
-			output = err })
-	else
-		luci.http.write_json({ ok = true, message = "已保存，custos validate 通过，服务已重启" })
-	end
+	-- The write chain (apply-contract.md §2): candidate temp file -> custos
+	-- validate (RC /= 0 means zero side effects) -> verified backup -> atomic
+	-- mv -> restart settled into one of the four feedback states. The client
+	-- baseline md5 guards against concurrent edits (§3).
+	local state, info = apply.write({
+		path = path,
+		candidate = tomledit.render(doc),
+		base_md5 = req.base_md5,
+		fns = real_fns(),
+	})
+	luci.http.write_json(write_response(state, info))
 end
