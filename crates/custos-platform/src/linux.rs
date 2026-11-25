@@ -98,7 +98,7 @@ pub fn service_controller() -> Box<dyn ServiceController> {
     }
 }
 
-/// Refuses every operation with the concrete reason (绝不误执行).
+/// Refuses every operation with the concrete reason (never guess-execute).
 struct NoInitController;
 
 impl ServiceController for NoInitController {
@@ -343,7 +343,7 @@ impl NetworkConnectivityProbe for SysnetInterfaceController {
     }
 }
 
-/// DNS resolution check (todo.md 202 DNS 检查): resolves `host:port` via
+/// DNS resolution check (todo.md 202): resolves `host:port` via
 /// the platform resolver; the answer is normalized, never raw tool output.
 pub fn dns_resolves(host: &str, port: u16) -> PlatformResult<bool> {
     use std::net::ToSocketAddrs;
@@ -391,7 +391,8 @@ impl RebootController for LinuxRebootController {
     }
 }
 
-/// The Linux adapter's declared support (todo.md 193: 不伪造平台支持).
+/// The Linux adapter's declared support (todo.md 193: never fake platform
+/// support).
 pub fn capabilities() -> PlatformCapabilitySet {
     let mut set = PlatformCapabilitySet::new()
         .native("process.detect")

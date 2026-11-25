@@ -1,5 +1,6 @@
-//! The unified platform failure model (todo.md P2: 平台特有错误 → 统一故障
-//! 结果转换). Every adapter maps its platform-specific failure onto these
+//! The unified platform failure model (todo.md P2: platform-specific
+//! failures converted into one result type). Every adapter maps its
+//! platform-specific failure onto these
 //! variants so the engine and toolbox never see raw OS or command output.
 
 use custos_probe::exec::ExecResult;

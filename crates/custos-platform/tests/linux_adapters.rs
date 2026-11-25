@@ -1,4 +1,4 @@
-//! Linux adapter integration (todo.md 210: Linux 一套) — live /proc,
+//! Linux adapter integration (todo.md 210, the Linux set) — live /proc,
 //! /sys and the service matrix on THIS host.
 
 // Live-host tests: /proc and init-system detection exist only on a Linux

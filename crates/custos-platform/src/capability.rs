@@ -1,5 +1,5 @@
-//! Capability description for platform adapters (§11.1: 平台专属能力通过
-//! Capability 描述，不得伪造平台支持).
+//! Capability description for platform adapters (§11.1: platform-specific
+//! capabilities are described via Capability, never faked as supported).
 //!
 //! An adapter answers "which operations do you serve, and how" — the answer
 //! is data, so the runtime (toolbox registry, docs) can report support
@@ -50,7 +50,7 @@ impl PlatformCapabilitySet {
 
     /// Guards an operation call: native → Ok, absent/unsupported → the
     /// concrete Unsupported error. The adapter MUST call this before doing
-    /// anything (绝不误执行).
+    /// anything (never guess-execute).
     pub fn require(&self, operation: &str) -> PlatformResult<()> {
         match self.operations.get(operation) {
             Some(Support::Native) => Ok(()),

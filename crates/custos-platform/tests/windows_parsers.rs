@@ -1,4 +1,4 @@
-//! Windows adapter suite (todo.md 210: Windows 一套): the command builders
+//! Windows adapter suite (todo.md 210, the Windows set): the command builders
 //! and output parsers are exercised on every platform with real-format
 //! fixtures; execution stays `cfg(windows)` and is cross-compile-checked
 //! (x86_64-pc-windows-gnu) — never guessed on a non-Windows host.
@@ -148,7 +148,7 @@ fn wlan_and_reset_argv_are_explicit() {
         vec!["netsh", "wlan", "connect", "name=HomeNet"]
     );
     // Reset is admin=disabled then admin=enabled: explicit down+up, never a
-    // blanket reset (todo.md P3 风险控制). A single `netsh interface set
+    // blanket reset (todo.md P3 risk control). A single `netsh interface set
     // interface` call accepts exactly one admin= (R13): the two states are
     // two argv sets, run as sequential calls by the controller.
     assert_eq!(
@@ -216,7 +216,8 @@ fn wifi_adapter_probe_requires_an_interface_list_not_just_exit_status() {
         "zh-CN localized no-adapter notice"
     );
     // Non-en/zh-CN no-adapter notices and Name labels must still parse
-    // (openclaw audit 2026-11-05: matching only Name/名称 and the two
+    // (openclaw audit 2026-11-05: matching only Name plus the zh-CN label
+    // and the two
     // notices left wifi.reconnect silently unavailable on those systems).
     assert!(
         !netsh_wlan_reports_adapter("ワイヤレス インターフェイスがシステム上にありません。"),
@@ -314,7 +315,7 @@ Persistent Routes:
 
 #[test]
 fn capabilities_do_not_claim_unwired_wifi_reconnect() {
-    // §11.1: 不得伪造平台支持. On a host with no Wi-Fi adapter the probe
+    // §11.1: never fake platform support. On a host with no Wi-Fi adapter the probe
     // answers false and the gate must refuse with the concrete reason,
     // never a guess. (On a real Windows host with a radio the probe
     // answers true and the declaration is native.)

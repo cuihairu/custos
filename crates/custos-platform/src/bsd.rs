@@ -41,7 +41,7 @@ pub fn service_controller() -> Box<dyn ServiceController> {
 
 /// FreeBSD network status via `ifconfig -a` (read-only listing) and the
 /// `ifconfig <name> down|up` reset path. Wi-Fi association is not served
-/// (no password path; §11.1 绝不误执行).
+/// (no password path; §11.1: never guess-execute).
 pub struct BsdNetworkController;
 
 impl NetworkInterfaceController for BsdNetworkController {
@@ -78,7 +78,8 @@ impl RebootController for BsdRebootController {
     }
 }
 
-/// The FreeBSD adapter's declared support (todo.md 193: 不伪造平台支持).
+/// The FreeBSD adapter's declared support (todo.md 193: never fake
+/// platform support).
 /// rc.d is always present on FreeBSD; network/reboot use the tools above.
 /// Wi-Fi association is not served (no password path), so it stays out of
 /// the set rather than declared native without a working path.

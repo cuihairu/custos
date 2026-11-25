@@ -5,7 +5,7 @@
 //! Platform support is never faked: an adapter that cannot serve an
 //! operation returns [`PlatformError::Unsupported`] with the concrete
 //! reason, and the caller must surface it — never guess-execute
-//! (§11.1, todo.md 服务控制矩阵: 绝不误执行).
+//! (§11.1, todo.md service-control matrix: never guess-execute).
 //!
 //! Dangerous primitives (interface reset, reboot) declare their risk via
 //! the toolbox [`Capability`] metadata; the permission gate lives in the
@@ -45,7 +45,7 @@ pub use controller::{
 };
 pub use error::{PlatformError, PlatformResult};
 
-/// The default reboot controller for THIS host (todo.md 208 重启矩阵).
+/// The default reboot controller for THIS host (todo.md 208 reboot matrix).
 /// The returned adapter refuses `reboot` with a concrete reason on hosts
 /// without a wired implementation; authorization still lives in toolbox
 /// dispatch (ADR-0012), never in the adapter.
@@ -69,8 +69,9 @@ pub fn default_reboot_controller() -> std::sync::Arc<dyn RebootController> {
 }
 
 /// The default network interface controller for THIS host (todo.md 209
-/// 网络控制矩阵). On Windows the `netsh` adapter; on Unix the sysfs/proc
-/// controller; on macOS the `ifconfig` adapter. The toolbox registers its
+/// network control matrix). On Windows the `netsh` adapter; on Unix the
+/// sysfs/proc controller; on macOS the `ifconfig` adapter. The toolbox
+/// registers its
 /// built-in platform tools with this controller so the permission-gated
 /// dispatch path runs the real adapter rather than nothing.
 pub fn default_network_controller() -> std::sync::Arc<dyn NetworkInterfaceController> {

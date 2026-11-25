@@ -1,7 +1,7 @@
 //! The service-control matrix (todo.md P2 194): one `ServiceController`
 //! trait, per-init-system adapters selected by detection. A host whose init
 //! system is unknown refuses every service operation with a concrete
-//! Unsupported reason — 绝不误执行.
+//! Unsupported reason — never guess-execute.
 
 use crate::controller::{ServiceController, ServiceState};
 use crate::error::{PlatformError, PlatformResult};

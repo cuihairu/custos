@@ -42,7 +42,7 @@ pub fn service_controller() -> Box<dyn ServiceController> {
 
 /// macOS network status via `ifconfig -a` (read-only listing) and the
 /// `ifconfig <name> down|up` reset path. Wi-Fi association is not served
-/// (no password/keychain path; §11.1 绝不误执行).
+/// (no password/keychain path; §11.1: never guess-execute).
 pub struct MacosNetworkController;
 
 impl NetworkInterfaceController for MacosNetworkController {
@@ -79,7 +79,8 @@ impl RebootController for MacosRebootController {
     }
 }
 
-/// The macOS adapter's declared support (todo.md 193: 不伪造平台支持).
+/// The macOS adapter's declared support (todo.md 193: never fake platform
+/// support).
 /// launchd is always present on macOS; network/reboot use the tools above.
 /// Wi-Fi association is not served (no password path), so it stays out of
 /// the set rather than declared native without a working path.

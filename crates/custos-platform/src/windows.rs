@@ -390,9 +390,9 @@ fn is_no_wlan_marker(line: &str) -> bool {
 
 /// True when `label` is a localized `Name` field label in a
 /// `netsh wlan show interfaces` block. Non-English Windows localize the
-/// column (ja 名前 / fr Nom / ko 이름 / ru Имя / es Nombre / it Nome /
-/// pl Nazwa / nl Naam / tr Ad); matching only `Name`/`名称` would report
-/// no adapter on those systems (openclaw audit 2026-11-05). Pure.
+/// column per locale (ja/fr/ko/ru/es/it/pl/nl/tr — this function matches
+/// the full label list); matching only `Name` plus the zh-CN label would
+/// report no adapter on those systems (openclaw audit 2026-11-05). Pure.
 fn is_wlan_name_label(label: &str) -> bool {
     matches!(
         label,
@@ -757,8 +757,9 @@ impl RebootController for WindowsRebootController {
 }
 
 /// The Windows adapter's declared support (todo.md 193). Declares only
-/// operations with a real execution path behind them (§11.1: 不得伪造平台
-/// 支持). `wifi.reconnect` is declared native only when the runtime
+/// operations with a real execution path behind them (§11.1: never fake
+/// platform support). `wifi.reconnect` is declared native only when the
+/// runtime
 /// [`has_wifi_adapter`] probe sees a real Wi-Fi adapter AND the
 /// [`NetshNetworkController::connect_wifi`] execution path exists; on a
 /// non-Windows host the probe answers false and the declaration stays
