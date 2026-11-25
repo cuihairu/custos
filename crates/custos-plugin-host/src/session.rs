@@ -161,10 +161,11 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// OS baseline applied on top of the clean environment: Windows system
 /// tools (`tasklist`, `netstat`, PowerShell) fail to load their dependent
 /// DLLs when `SystemRoot`/`PATH` are missing — the real-machine live test
-/// caught exactly that (`tasklist exit 1: 找不到指定的模块`). Only fixed,
-/// non-secret OS keys pass; values come from the host environment when
-/// present, standard defaults otherwise. `[plugins.env]` entries override
-/// these, so a deployment can still pin its own tools on PATH.
+/// caught exactly that (`tasklist` exited 1 with a "module not found"
+/// error). Only fixed, non-secret OS keys pass; values come from the host
+/// environment when present, standard defaults otherwise. `[plugins.env]`
+/// entries override these, so a deployment can still pin its own tools on
+/// PATH.
 fn baseline_env() -> Vec<(String, String)> {
     let host = |key: &str, default: String| std::env::var(key).unwrap_or(default);
     #[cfg(windows)]

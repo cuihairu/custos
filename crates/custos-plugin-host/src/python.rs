@@ -1,4 +1,4 @@
-//! Python script plugin loader (todo.md P1: Python 入向) — runs a user
+//! Python script plugin loader (todo.md P1: Python inbound) — runs a user
 //! script under the SAME plugin contract as native plugins: the shim
 //! (`plugins/python/custos_python_plugin.py`) speaks `custos/v1` stdio
 //! JSON-RPC; timeout, restart policy, permission gates and budgets are

@@ -1,5 +1,5 @@
 //! Python script loader integration: a real `python3` child speaking the
-//! plugin protocol via the shim (todo.md P1: Python 入向, same contract as
+//! plugin protocol via the shim (todo.md P1: Python inbound, same contract as
 //! native plugins). Skips when no interpreter is available.
 
 use custos_plugin_host::{script_plugin_config, PluginSession, PluginSupervisor, RestartPolicy};
