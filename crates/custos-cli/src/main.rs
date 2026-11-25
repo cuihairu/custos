@@ -124,13 +124,13 @@ fn persist_last_good(path: &str, text: &str) {
 }
 
 /// Start-path config load with the last-known-good safety net (2026-11-22
-/// user rule: 验证不过不可以切换重启). A broken edit must never take a
-/// supervised machine from "watched" to "unwatched, no signal": when the
-/// live file fails validation and a usable `<CONFIG>.last-good` snapshot
-/// exists, the engine keeps running under the previous config with a loud
-/// warning instead of dying. `--strict-config` restores fail-fast. The
-/// snapshot is recorded ONLY from a clean load of the live file, so a
-/// broken file can never poison it.
+/// user rule: a failed validation must not switch the config and restart).
+/// A broken edit must never take a supervised machine from "watched" to
+/// "unwatched, no signal": when the live file fails validation and a usable
+/// `<CONFIG>.last-good` snapshot exists, the engine keeps running under the
+/// previous config with a loud warning instead of dying. `--strict-config`
+/// restores fail-fast. The snapshot is recorded ONLY from a clean load of
+/// the live file, so a broken file can never poison it.
 fn load_config_for_start(path: &str, strict: bool) -> Result<ValidatedConfig, String> {
     match read_and_validate(path) {
         Ok(config) => {
@@ -1006,9 +1006,9 @@ mod tests {
 
     #[test]
     fn broken_config_falls_back_to_last_known_good() {
-        // 验证不过不可以切换重启: a broken edit + restart must keep the
-        // machine supervised under the previous config, not leave it
-        // unwatched.
+        // A failed validation must not switch the config and restart: a
+        // broken edit + restart must keep the machine supervised under the
+        // previous config, not leave it unwatched.
         let path = temp_config("fallback-live", BROKEN_CONFIG);
         let snapshot = format!("{}.last-good", path.display());
         std::fs::write(&snapshot, "version = 1\n").expect("write snapshot");
