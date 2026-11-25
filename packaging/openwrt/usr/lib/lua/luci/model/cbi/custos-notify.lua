@@ -16,6 +16,13 @@ local settings = require "luci.custos.settings"
 m = Map("custos", translate("Custos 通知设置"),
 	translate("先确认当前规则来自哪里，再配置发往哪些渠道。通知阈值与规则在监控配置文件 [notification] 段也有独立定义。"))
 
+-- Commit inline (apply_on_parse=false) so the committed UCI values are on
+-- disk BEFORE on_commit restarts the engine. With the default delegated
+-- apply, on_commit fires during parse while the real commit only happens
+-- after the HTTP response, so the restart read the PREVIOUS config
+-- (C-SET-UX-07 isolated instance).
+m.apply_on_parse = false
+
 -- Channel changes reach the engine as CUSTOS_NOTIFY_* environment vars,
 -- which only re-read on start; restart after a successful apply.
 function m.on_commit()

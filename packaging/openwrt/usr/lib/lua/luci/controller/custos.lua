@@ -207,6 +207,12 @@ local function read_file(path)
 	return text
 end
 
+local function file_md5(path)
+	local out = require("luci.util").exec(
+		"md5sum " .. shell_quote(path) .. " 2>/dev/null")
+	return out and out:match("^(%x+)") or nil
+end
+
 -- Live health per resource id from the CLI (best effort; a missing binary
 -- or store simply means every row shows "unknown").
 local function health_map()
@@ -346,12 +352,6 @@ local function exec_rc(cmd)
 	return rc
 end
 
-local function file_md5(path)
-	local out = require("luci.util").exec(
-		"md5sum " .. shell_quote(path) .. " 2>/dev/null")
-	return out and out:match("^(%x+)") or nil
-end
-
 -- Real side effects for luci.custos.apply (the unit-tested write chain in
 -- apply-contract.md §2: candidate temp file -> custos validate -> verified
 -- backup -> atomic mv -> restart with four-state settling). The order and
@@ -394,7 +394,19 @@ local function real_fns()
 			return exec_rc("/etc/init.d/custos status >/dev/null 2>&1") == 0
 		end,
 		sleep = function(s)
-			os.execute("sleep " .. tostring(s))
+			-- BusyBox sleep rejects fractional seconds (no FANCY_SLEEP):
+			-- "sleep 0.5" fails instantly, collapsing the settle poll
+			-- window (~5 s over 10 rounds) into a few hundred ms. nixio
+			-- (a luci-lib-nixio dependency of the Lua runtime) takes
+			-- integer seconds + nanoseconds; fall back to whole-second
+			-- sleep, rounding up so the window is never shorter than
+			-- the contract asks.
+			local ok, nixio = pcall(require, "nixio")
+			if ok and nixio and nixio.nanosleep then
+				nixio.nanosleep(math.floor(s), math.floor((s % 1) * 1e9))
+				return
+			end
+			os.execute("sleep " .. tostring(math.ceil(s)))
 		end,
 		enabled = function()
 			local uci = require("luci.model.uci").cursor()
@@ -419,7 +431,7 @@ local function write_response(state, info)
 	elseif state == "restart_failed" then
 		return { ok = true, state = state, needs_attention = true,
 			message = "配置已写入并通过校验，但服务未确认运行，请检查服务状态",
-			backup = info.backup }
+			backup = info.backup, md5 = info.md5 }
 	end
 	return { ok = false, state = state,
 		error = info and info.message or "写入失败",

@@ -74,7 +74,7 @@ sh packaging/openwrt/build-ipk.sh <musl 编译的 custos 二进制> dist/ --arch
 - `luci-app-custos` — LuCI 应用：设置页（服务开关、数据库与 TOML 配置路径、探测间隔；Telegram/Herald/本地日志通知通道经 init.d 以 `CUSTOS_NOTIFY_*` 环境变量透传给引擎）、实时状态面板（服务状态、资源健康、最近审计事件、事故、恢复运行；每 10 秒自动刷新）与监控资源/恢复策略编辑器——常用探测类型走结构化表单，其余类型走 TOML 直编逃生口；每次写回前自动备份、`custos validate` 校验通过才重启服务（TOML 单源权威，未识别的键原样保留）。界面文案为中文硬编码，未做 .po。
 - `app-meta-custos` — iStore 应用元数据（图标 + 清单），上架面板后与其他商店应用一样展示。
 
-安装顺序：`custos` → `luci-app-custos` → `app-meta-custos`（Depends 链即按此顺序拉取），或直接 `opkg install app-meta-custos_*.ipk`。启用：`uci set custos.main.enabled=1 && uci commit custos && /etc/init.d/custos start`，然后进 LuCI → 服务 → Custos。
+安装顺序：`custos` → `luci-app-custos` → `app-meta-custos`（Depends 链即按此顺序拉取），或直接 `opkg install app-meta-custos_*.ipk`。启用：`uci set custos.main.enabled=1 && uci commit custos && /etc/init.d/custos start`，然后进 LuCI → 服务 → Custos。ucode 版 LuCI（OpenWrt 24.x）上 `luci-app-custos` 会额外拉取 `luci-lua-runtime`、`luci-compat`、`luci-lib-nixio`——应用的页面注册依赖这套 Lua 桥（24.10.8 实测；缺了它们应用路由全部 404）。
 
 iStore 上架：清单格式已对照真机 iStoreOS 上已装的 app-meta 包核实（见 [docs/analysis/istore-publishing-2026-11-14.md](docs/analysis/istore-publishing-2026-11-14.md)）；正式进商店仍需联系 iStore（Linkease）方。包本体遵循通用 opkg 规范，纯 `opkg` 即可安装。
 

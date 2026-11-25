@@ -13,6 +13,14 @@ local settings = require "luci.custos.settings"
 m = Map("custos", translate("Custos 服务设置"),
 	translate("控制 OpenWrt 上的 Custos 服务运行参数（UCI）。资源、依赖和恢复策略来自监控配置文件，请在「监控资源」页编辑。"))
 
+-- Commit inline (apply_on_parse=false) so the committed values are on
+-- disk BEFORE on_commit restarts the engine. With the default delegated
+-- apply, on_commit fires during parse while the real uci commit only
+-- happens after the HTTP response (dispatcher apply modal), so the
+-- restart read the PREVIOUS config and "Save & Apply" needed a second
+-- manual restart to take effect (C-SET-UX-07 isolated instance).
+m.apply_on_parse = false
+
 -- Restart the procd service after a successful apply so enabled/db/conf/
 -- interval changes take effect immediately (the init script re-reads UCI
 -- on start).

@@ -71,6 +71,23 @@ stop_service() {
 	service_stop "$PROG"
 }
 
+# Overrides _procd_status (rc.common calls status_service when defined).
+# The procd default reports "active with no instances" with rc 0 for a
+# service that was never started — indistinguishable from running for any
+# caller that branches on the exit code (LuCI api_overview, apply settle).
+# Verdict is the live procd instance: running only when an instance pid
+# exists (OpenWrt 24.10.8 isolated-instance acceptance, C-SET-UX-07).
+status_service() {
+	local pid
+	pid=$(ubus call service list 2>/dev/null | jsonfilter -q -e '@.custos.instances[*].pid' | head -n1)
+	if [ -n "$pid" ]; then
+		echo "running"
+		return 0
+	fi
+	echo "inactive"
+	return 3
+}
+
 reload_service() {
 	stop
 	start

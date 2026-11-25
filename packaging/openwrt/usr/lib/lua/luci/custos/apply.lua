@@ -160,9 +160,12 @@ function M.write(opts)
 		return "replace_failed", { message = "替换配置文件失败，live 未改动" }
 	end
 
-	-- ⑦ restart + poll.
+	-- ⑦ restart + poll. The new live md5 rides along so a restart_failed
+	-- client can adopt it as its baseline: the immediate restore-from-.bak
+	-- must not be stale-rejected against the PRE-write md5 it still holds
+	-- (C-SET-UX-07 isolated instance).
 	local state = M.settle(fns, opts.poll)
-	return state, { backup = bak }
+	return state, { backup = bak, md5 = fns.md5(path) }
 end
 
 return M

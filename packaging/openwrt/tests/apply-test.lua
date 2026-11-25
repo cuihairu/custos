@@ -187,6 +187,36 @@ do
 	eq(state, "restart_failed", "timeout with UCI enabled is restart_failed")
 end
 
+do
+	-- The failed write reports the NEW live md5 so the immediate restore is
+	-- not stale-rejected: the client still holds the pre-write baseline,
+	-- but the file on disk is the (validated) broken config (C-SET-UX-07).
+	local fns, files = mk({ live = "old", restart_rc = 1, running = true })
+	local state, info = apply.write({ path = P, candidate = "new", fns = fns })
+	eq(state, "restart_failed", "write ends restart_failed")
+	eq(files[P], "new", "live holds the broken config after restart_failed")
+	eq(files[B], "old", "backup still holds the good config")
+	local old_md5 = fns.md5(P) -- md5 of the broken live file
+	ok(info.md5 == old_md5, "restart_failed carries the new live md5")
+
+	-- Restore must succeed when the caller adopts info.md5 (the view does).
+	-- Restart succeeds once the good config is back: the failure was in the
+	-- broken candidate, not in the environment.
+	fns.restart = function() return 0 end
+	local rst, rinfo = apply.restore({
+		path = P, base_md5 = info.md5, fns = fns, poll = { times = 2 },
+	})
+	eq(rst, "confirmed", "restore with the reported md5 confirms")
+	eq(files[P], "old", "restore puts the backup back over the broken live")
+
+	-- And it stays refused when the caller keeps the stale pre-write md5.
+	local fns2 = mk({ live = "new", restart_rc = 1 })
+	local st2 = apply.restore({
+		path = P, base_md5 = "h3:old", fns = fns2, poll = { times = 2 },
+	})
+	eq(st2, "stale", "restore with the pre-write md5 is stale-rejected")
+end
+
 -- ---- no-op and concurrency guard ----------------------------------------
 
 do

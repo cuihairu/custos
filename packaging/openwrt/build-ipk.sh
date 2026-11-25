@@ -145,7 +145,7 @@ SIZE=$(du -sk "$R/data" | cut -f1)
 cat > "$R/CONTROL/control" <<EOF
 Package: luci-app-custos
 Version: $REL
-Depends: custos
+Depends: custos, luci-lua-runtime, luci-compat, luci-lib-nixio
 Source: https://github.com/cuihairu/custos
 SourceName: luci-app-custos
 License: MIT

@@ -261,6 +261,10 @@
 		if (j.state === 'restart_failed') {
 			ok_banner(null);
 			error_banner(j.message, j.output);
+			// The failed write DID replace the live file: adopt the md5 the
+			// server reports so the immediate .bak restore is not stale-
+			// rejected against the pre-write baseline (C-SET-UX-07).
+			if (j.md5) file_md5 = j.md5;
 			show('custos-restore', true);
 		} else {
 			error_banner(null);
