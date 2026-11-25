@@ -1,13 +1,14 @@
 //! Process Probe: checks that a PID from a pid file is still alive, with an
 //! optional RSS-memory threshold (docs/guide/probe-diagnosis.md §5.4,
-//! probe-survey.md §26: 进程级资源占用阈值).
+//! probe-survey.md §26: process-level resource-usage thresholds).
 
 use custos_model::{HealthStatus, Resource};
 
 pub struct ProcessProbe {
     pub pid_file: std::path::PathBuf,
     /// When set, the probe is Unhealthy once the process's resident set
-    /// exceeds this many KiB (probe-survey.md §26: 进程级资源占用阈值;
+    /// exceeds this many KiB (probe-survey.md §26: process-level resource-usage
+    /// thresholds;
     /// Linux reads `/proc/<pid>/statm`).
     pub rss_threshold_kb: Option<u64>,
 }
@@ -90,13 +91,14 @@ enum RssReading {
     Exited,
     /// This platform has no RSS source (`/proc/<pid>/statm` is Linux-only;
     /// Windows would need psapi). A threshold there is declared
-    /// unsupported, never reported as "exited" (§11.1 不伪造支持).
+    /// unsupported, never reported as "exited" (§11.1 never fakes support).
     Unsupported,
 }
 
 /// Resident set size via `/proc/<pid>/statm`. `/proc` is Linux-only;
-/// macOS/BSD/Windows declare the threshold unsupported (§11.1 不伪造支持)
-/// rather than reading a non-existent procfs and misreporting "exited".
+/// macOS/BSD/Windows declare the threshold unsupported (§11.1 never fakes
+/// support) rather than reading a non-existent procfs and misreporting
+/// "exited".
 #[cfg(target_os = "linux")]
 fn resident_kb(pid: u32) -> RssReading {
     let Ok(statm) = std::fs::read_to_string(format!("/proc/{pid}/statm")) else {
@@ -293,9 +295,10 @@ mod tests {
     #[cfg(not(target_os = "linux"))]
     #[test]
     fn rss_threshold_is_declared_unsupported_off_linux() {
-        // §11.1 不伪造支持: there is no /proc/statm off Linux, so a threshold
-        // must surface Unreachable ("not supported") — never a faked "exited"
-        // or a healthy reading. (The macos CI leg runs this honest refusal.)
+        // §11.1 never fakes support: there is no /proc/statm off Linux, so a
+        // threshold must surface Unreachable ("not supported") — never a faked
+        // "exited" or a healthy reading. (The macos CI leg runs this honest
+        // refusal.)
         let dir =
             std::env::temp_dir().join(format!("custos-probe-rss-offlinux-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

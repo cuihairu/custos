@@ -306,8 +306,9 @@ pub fn decode_console_output(bytes: &[u8]) -> String {
         return text.to_owned();
     }
     // Encoding selection is a heuristic with one inherent ambiguity: a
-    // byte sequence that happens to be valid UTF-8 (e.g. GBK 默 = C4 AC,
-    // which is also U+012C) is decoded as UTF-8 rather than the OEM
+    // byte sequence that happens to be valid UTF-8 (e.g. the GBK byte pair
+    // C4 AC for one CJK character, which is also U+012C) is decoded as
+    // UTF-8 rather than the OEM
     // code page when the WHOLE payload is valid UTF-8. This is accepted:
     // it only affects display fidelity of non-ASCII text, never the ASCII
     // route/NIC parsing, and the old from_utf8_lossy path had the same
@@ -607,14 +608,15 @@ mod tests {
             decode_console_output("网关 192.168.1.1".as_bytes()),
             "网关 192.168.1.1"
         );
-        // zh-CN OEM code page (CP936): "默认网关" as GBK bytes. The old
+        // zh-CN OEM code page (CP936): "default gateway" as GBK bytes (the
+        // literal asserted below). The old
         // from_utf8_lossy path turned each of these bytes into U+FFFD
         // replacement mush.
         let gbk = [0xC4u8, 0xAC, 0xC8, 0xCF, 0xCD, 0xF8, 0xB9, 0xD8];
         assert_eq!(decode_console_output(&gbk), "默认网关");
         // Mixed GBK payload + ASCII, e.g. a netsh state line.
         let mut netsh = b"State: ".to_vec();
-        netsh.extend([0xD2, 0xD1, 0xC1, 0xAC, 0xBD, 0xD3]); // 已连接
+        netsh.extend([0xD2, 0xD1, 0xC1, 0xAC, 0xBD, 0xD3]); // "connected" (zh-CN)
         assert_eq!(decode_console_output(&netsh), "State: 已连接");
         // Bytes invalid in both UTF-8 and GBK still degrade to U+FFFD
         // rather than panicking.
@@ -624,8 +626,9 @@ mod tests {
     #[test]
     fn oem_cp437_and_cp850_are_not_misdecoded_as_gbk() {
         // CP437: 0x82=é, 0xE1=ß, 0x9C=£, 0xE5=σ. The old `_ => GBK`
-        // fallback decoded these pairs as CJK (e.g. 0x82,0xE1 -> 傖),
-        // turning English/Western European console output into garbage.
+        // fallback decoded these pairs as CJK (e.g. 0x82,0xE1 -> one CJK
+        // glyph), turning English/Western European console output into
+        // garbage.
         assert_eq!(decode_with_oem_code_page(437, &[0x82, 0xE1]), "éß");
         assert_eq!(decode_with_oem_code_page(437, &[0x9C]), "£");
         assert_eq!(decode_with_oem_code_page(437, &[0xE5]), "σ");

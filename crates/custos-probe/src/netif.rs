@@ -1,6 +1,6 @@
 //! Network interface and default-gateway probes (todo.md P3 214,
-//! probe-survey.md §26: 接口状态 up/down via /sys/class/net operstate;
-//! 默认网关 via /proc/net/route).
+//! probe-survey.md §26: link status up/down via /sys/class/net operstate;
+//! the default gateway via /proc/net/route).
 //!
 //! Observation-only: an interface that is missing or administratively down
 //! is Unhealthy (a fact), an interface we cannot query at all is
@@ -459,20 +459,20 @@ pub fn parse_route_print_default_gateway(output: &str) -> Option<String> {
 
 /// True when `line` is the header of the Persistent Routes section in a
 /// localized `route print -4` output. `route` localizes this header on
-/// non-English Windows (e.g. zh-CN prints 「永久路由:」), and only
-/// recognizing the English title let the scan run through the persistent
-/// block and report a stale default gateway as Healthy (openclaw audit
+/// non-English Windows (e.g. zh-CN prints the persistent-routes header),
+/// and only recognizing the English title let the scan run through the
+/// persistent block and report a stale default gateway as Healthy (openclaw
 /// 2026-11-05). Matches the trailing colon because `route` always appends
-/// one, so a data row containing e.g. "永久路由" as a column value cannot
-/// be mistaken for the header. Pure, fixture-testable.
+/// one, so a data row carrying the persistent-routes title as a column
+/// value cannot be mistaken for the header. Pure, fixture-testable.
 pub fn is_persistent_routes_header(line: &str) -> bool {
     let trimmed = line.trim();
     let without_colon = trimmed.strip_suffix(':').unwrap_or(trimmed);
     matches!(
         without_colon.trim(),
         // English (en-US) and the major localized titles. zh-CN prints
-        // 「永久路由」 (the real `route` string); 「持久路由」 is kept as a
-        // fallback for locales/translations that use that wording.
+        // the first CJK title below (the real `route` string); the other
+        // one is kept as a fallback for locales that use that wording.
         "Persistent Routes"
             | "永久路由"
             | "持久路由"
@@ -591,9 +591,9 @@ Persistent Routes:
     #[test]
     fn route_print_parser_stops_at_localized_persistent_headers() {
         // openclaw audit 2026-11-05: non-English Windows localizes the
-        // section title (zh-CN prints 「永久路由:」), and only matching the
-        // English "Persistent Routes" let the scan run through the
-        // persistent block and report a stale gateway as Healthy.
+        // section title (zh-CN prints the persistent-routes header), and
+        // only matching the English "Persistent Routes" let the scan run
+        // through the persistent block and report a stale gateway as Healthy.
         for header in [
             "Persistent Routes:",
             "永久路由:",

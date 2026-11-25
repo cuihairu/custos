@@ -1,5 +1,6 @@
 //! Proxy connectivity and authentication probe (todo.md P3 216; survey §26
-//! 代理诊断: 区分认证失败/连接失败/目标异常 — 407 ≠ 宕机).
+//! proxy diagnostics: classifies auth failure / connection failure / target
+//! fault — 407 is not downtime).
 //!
 //! Sends an absolute-form HTTP GET through the proxy and classifies the
 //! proxy's answer:
