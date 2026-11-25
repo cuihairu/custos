@@ -1,7 +1,8 @@
-//! Python bindings for Custos (todo.md P1: Python 出向, ADR-0015): expose
-//! queries (resources' latest health, recovery runs, incidents, audit,
-//! notification queue) and one-shot probe/recovery triggering over the same
-//! runtime assembly the CLI uses (`custos_core::assemble`).
+//! Python bindings for Custos (todo.md P1: Python outbound bindings,
+//! ADR-0015): expose queries (resources' latest health, recovery runs,
+//! incidents, audit, notification queue) and one-shot probe/recovery
+//! triggering over the same runtime assembly the CLI uses
+//! (`custos_core::assemble`).
 //!
 //! The bindings are read/trigger-only by design (ADR-0015): Python sees
 //! tool calls over the assembled engine, never arbitrary execution. The
