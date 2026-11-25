@@ -1,4 +1,4 @@
-# Nightly rolling build (user ruling 2026-10-11: 每日构建属正常交付面).
+# Nightly rolling build (user ruling 2026-10-11: nightly builds are normal delivery).
 #
 #   Linux   : deb + rpm + tar.gz binary  (x86_64, aarch64)
 #   Windows : msi + zip binary           (x86_64)
