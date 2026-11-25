@@ -69,9 +69,9 @@ local plain = {}
 for line in (fixture .. " "):gmatch("(.-)\n") do
 	plain[#plain + 1] = line .. "\n"
 end
-ok(out2:find("interval_ms = 10000\n\n# 默认网关") ~= nil,
+ok(out2:find("interval_ms = 10000\n\n# Default gateway") ~= nil,
 	"wan to gateway transition intact")
-ok(out2:find("interval_ms = 7000\n\n# dnsmasq") ~= nil,
+ok(out2:find("interval_ms = 7000\n\n# the dnsmasq process") ~= nil,
 	"edited gateway flows into dnsmasq block intact")
 ok(out2:find('id = "gateway"\ntype = "default%-gateway"\n\n%[resources%.probe%]\ninterval_ms = 7000\n') ~= nil,
 	"edited gateway block matches canonical layout")
@@ -83,8 +83,8 @@ local out3 = te.render(doc3)
 ok(out3:find("version = 1") == 1, "version line stays at top after delete")
 ok(out3:find("id = \"wan\"") == nil, "deleted resource gone")
 ok(out3:find("id = \"gateway\"") ~= nil, "remaining resource kept")
-ok(out3:find("# OpenWrt 自身") == nil, "deleted block's comment went with it")
-ok(out3:find("# 默认网关") ~= nil, "kept block keeps its own comment")
+ok(out3:find("# OpenWrt itself") == nil, "deleted block's comment went with it")
+ok(out3:find("# Default gateway") ~= nil, "kept block keeps its own comment")
 
 -- 5. Append a resource: structured render, then re-parse gives same fields.
 local doc4 = te.parse(fixture)

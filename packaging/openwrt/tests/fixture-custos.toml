@@ -1,6 +1,6 @@
 version = 1
 
-# OpenWrt 自身
+# OpenWrt itself
 [[resources]]
 id = "wan"
 type = "network-interface"
@@ -9,7 +9,7 @@ type = "network-interface"
 interface = "eth0"
 interval_ms = 10000
 
-# 默认网关
+# Default gateway
 [[resources]]
 id = "gateway"
 type = "default-gateway"
@@ -17,7 +17,7 @@ type = "default-gateway"
 [resources.probe]
 interval_ms = 10000
 
-# dnsmasq 进程
+# the dnsmasq process
 [[resources]]
 id = "dnsmasq"
 type = "custom-command"
@@ -26,7 +26,7 @@ type = "custom-command"
 command = ["sh", "-c", "pidof dnsmasq | grep -q . && echo OK || exit 1"]
 interval_ms = 10000
 
-# 网关连通性
+# Gateway reachability
 [[resources]]
 id = "lan-host"
 type = "icmp"

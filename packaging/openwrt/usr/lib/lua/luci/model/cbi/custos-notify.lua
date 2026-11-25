@@ -1,7 +1,8 @@
 -- Copyright 2026 cuihairu <chuihairu@gmail.com>
 -- SPDX-License-Identifier: MIT
 
--- Notification settings page (C-SET-UX-03). The former "启用通知" flag is
+-- Notification settings page (C-SET-UX-03). The former "enable notifications"
+-- flag is
 -- not an on/off switch for notifications: per the engine's env overlay
 -- (crates/custos-config notification::env_overlay) the LuCI channel rules
 -- REPLACE the TOML [notification] section wholesale when the flag is on and
@@ -25,7 +26,8 @@ n = m:section(NamedSection, "notify", "notify", translate("LuCI 通知渠道"))
 n.addremove = false
 
 -- The override flag, named for what it does (C-SET-UX-03: the old
--- "启用通知" wording was read as "stop all notifications when off").
+-- "enable notifications" wording was read as "stop all notifications
+-- when off").
 o = n:option(Flag, "enabled", translate("用 LuCI 覆盖通知配置"))
 o.rmempty = false
 o.description = translate(

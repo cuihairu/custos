@@ -173,11 +173,12 @@
 		return span;
 	}
 
-	// Four-state health label for the table (C-SET-UX-02). "等待依赖" is a
-	// UI-level hint, not an engine state: shown only when the resource has
-	// no observation AND a direct upstream that is not healthy — the probe
-	// most likely never ran because the engine was still waiting on the
-	// upstream. Everything else keeps the honest probe-derived labels.
+	// Four-state health label for the table (C-SET-UX-02). The "waiting on a
+	// dependency" label is a UI-level hint, not an engine state: shown only
+	// when the resource has no observation AND a direct upstream that is not
+	// healthy — the probe most likely never ran because the engine was still
+	// waiting on the upstream. Everything else keeps the honest probe-derived
+	// labels.
 	function health_cell(r) {
 		if (r.health !== 'unknown') return health_span(r.health);
 		var deps = r.depends_on || [];
@@ -518,8 +519,8 @@
 
 	// ---- apply preview (apply-contract.md §2 step ①) --------------------
 	// The save buttons never write directly: they build the field-level
-	// diff first, and only the explicit 确认应用 sends the payload (with
-	// the md5 baseline for the concurrency guard).
+	// diff first, and only the explicit "confirm and apply" action sends
+	// the payload (with the md5 baseline for the concurrency guard).
 
 	function ms_disp(v) {
 		if (v === undefined || v === null || v === '') return '-';
@@ -668,7 +669,7 @@
 		b.disabled = true;
 		// The request includes the server-side settle (restart + poll), so
 		// this may take a few seconds — the button itself is the
-		// non-blocking 待服务确认 indicator.
+		// non-blocking "awaiting service confirmation" indicator.
 		b.value = '写入中（含服务确认）…';
 		api_write(pending_payload).then(handle_write_response);
 	}

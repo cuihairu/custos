@@ -3,8 +3,9 @@
 
 -- Service settings page (C-SET-UX-01): only the UCI-owned runtime section.
 -- Monitoring resources and recovery policies live in the TOML file and are
--- edited under 监控资源; notification channels live under 通知设置. Keeping
--- the sections on separate pages is what makes the config source visible:
+-- edited under the monitoring resources page; notification channels live
+-- under the notification settings page. Keeping the sections on separate
+-- pages is what makes the config source visible:
 -- saving here only ever writes custos.main.* UCI keys.
 
 local settings = require "luci.custos.settings"

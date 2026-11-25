@@ -150,8 +150,8 @@ do
 end
 
 do
-	-- Acceptance §4 "启动后退出": the service comes up, is seen running
-	-- once, then dies. A single running observation must not confirm.
+	-- Acceptance §4 "starts then exits": the service comes up, is seen
+	-- running once, then dies. A single running observation must not confirm.
 	local fns = mk({ live = "old", run_seq = { true, false } })
 	local state = apply.write({ path = P, candidate = "new", fns = fns })
 	eq(state, "restart_failed", "start-then-exit is restart_failed")
