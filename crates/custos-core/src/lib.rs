@@ -7,8 +7,8 @@
 //! (builtin adapters stay basic, the ecosystem fills in the rest, see
 //! docs/guide/plugins.md).
 //!
-//! P0 TODO: assemble scheduler, engine, store and notify into the running
-//! system; own the resource registry.
+//! The runtime assembly wires scheduler, engine, store and notify into the
+//! running system and owns the resource registry (see `assemble`).
 
 pub mod assemble;
 pub mod logging;
