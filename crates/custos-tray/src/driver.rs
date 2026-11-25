@@ -22,9 +22,10 @@ pub struct TrayOptions {
     /// Health source: called on the driver's poll cadence; must be cheap
     /// enough to run on the tray thread (the binary passes a store read).
     pub health_source: Box<dyn FnMut() -> HealthSummary + Send>,
-    /// Where the pulse switch persists (§9.3 设置持久化).
+    /// Where the pulse switch persists (§9.3 settings persistence).
     pub config_path: std::path::PathBuf,
-    /// What 「打开控制台」 runs (the binary spawns a platform terminal).
+    /// What the "open console" menu item runs (the binary spawns a platform
+    /// terminal).
     pub console_command: Vec<String>,
     /// Tracing label for the poller.
     pub db_label: String,
@@ -46,7 +47,8 @@ impl TrayOptions {
     }
 }
 
-/// Menu item ids (§9.3 右键菜单: 状态概要 / 动效开关 / 打开控制台 / 退出).
+/// Menu item ids (§9.3 right-click menu: status overview / animation toggle
+/// / open console / quit).
 mod menu_id {
     pub const SUMMARY: &str = "custos.tray.summary";
     pub const PULSE: &str = "custos.tray.pulse";
@@ -54,7 +56,7 @@ mod menu_id {
     pub const QUIT: &str = "custos.tray.quit";
 }
 
-/// Runs the tray until the user picks 退出. Blocks the calling thread
+/// Runs the tray until the user picks "quit". Blocks the calling thread
 /// (call it from `main`).
 pub fn run(mut options: TrayOptions) -> Result<(), String> {
     // macOS: NSApplication must exist on the main thread before any
@@ -156,7 +158,7 @@ pub fn run(mut options: TrayOptions) -> Result<(), String> {
     let mut next_beat = Instant::now() + beat_frame_step;
     let mut frame_index = 0usize;
     loop {
-        // Menu events (§9.3 右键菜单).
+        // Menu events (§9.3 right-click menu).
         while let Ok(event) = menu_rx.try_recv() {
             match event.id().as_ref() {
                 menu_id::PULSE => {
@@ -303,9 +305,9 @@ fn summary_line(status: TrayStatus, summary: &HealthSummary) -> String {
     }
 }
 
-/// 「打开控制台」: spawns the platform terminal running the console
-/// command. Errors are logged, never fatal (§9.3 打开控制台).
-/// 「打开控制台」: spawns the configured command as-is. The console command
+/// "open console": spawns the platform terminal running the console
+/// command. Errors are logged, never fatal (§9.3 open console).
+/// "open console": spawns the configured command as-is. The console command
 /// (from `--console` or [`crate::default_console_command`]) is already the
 /// full platform-appropriate invocation — this layer must not re-wrap it
 /// (the old Windows path double-wrapped `cmd /C start` and the old macOS

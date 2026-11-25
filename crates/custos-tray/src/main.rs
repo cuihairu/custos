@@ -171,7 +171,7 @@ fn run(db_path: String, config_path: String, console: Vec<String>) {
     }
 }
 
-/// 「打开控制台」 default: a terminal running `custos status` against the
+/// "open console" default: a terminal running `custos status` against the
 /// same database (platform-dependent terminal launch).
 #[cfg(any(windows, target_os = "macos"))]
 fn default_console_command(db_path: &str) -> Vec<String> {
@@ -271,7 +271,7 @@ fn select_log_writer(
 ) {
     use tracing_appender::non_blocking;
 
-    // The tray's state lives beside its config (§9.3 设置持久化), so the
+    // The tray's state lives beside its config (§9.3 settings persistence), so the
     // log does too: one directory holds config + log.
     let config_dir = std::path::Path::new(config_path)
         .parent()
