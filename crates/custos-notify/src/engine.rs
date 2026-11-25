@@ -119,10 +119,11 @@ impl OutcomeWrite {
 const OUTCOME_WRITE_RETRIES: u32 = 3;
 const OUTCOME_WRITE_RETRY_BASE_MS: u64 = 25;
 
-/// Same-fault dedup state (docs/guide/notification.md §8.5 聚合并抑制重复通知):
-/// a fault key is suppressed until its window expires; repeats during the
-/// window are counted (and that count is logged), and a recovery clears the
-/// resource's keys so the next fault notifies promptly.
+/// Same-fault dedup state (docs/guide/notification.md §8.5: aggregate and
+/// suppress duplicate notifications): a fault key is suppressed until its
+/// window expires; repeats during the window are counted (and that count is
+/// logged), and a recovery clears the resource's keys so the next fault
+/// notifies promptly.
 #[derive(Default)]
 struct DedupState {
     /// Fault key → suppression expires at (unix ms).

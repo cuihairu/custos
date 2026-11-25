@@ -1,5 +1,6 @@
-//! P1 acceptance gate (docs/guide/roadmap.md P1, todo.md 验收门):
-//! 断网通知留队；恢复后续发；发送失败不影响恢复.
+//! P1 acceptance gate (docs/guide/roadmap.md P1, todo.md acceptance gate):
+//! offline notifications stay queued; they are sent on recovery; a send
+//! failure does not block recovery.
 //!
 //! The channel is a webhook pointing at a port that is initially refused
 //! (simulated outage) and later rebinds (network back). Every entry
