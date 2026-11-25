@@ -54,7 +54,7 @@ Resource
 Field semantics (`crates/custos-model/src/resource.rs:45-58`):
 
 - `id`: a stable, unique identifier within configuration scope.
-- `resource_type`: the resource type (written as `type` in the TOML, `crates/custos-config/src/schema.rs:191-193`).
+- `resource_type`: the resource type (written as `type` in the TOML, `crates/custos-config/src/schema.rs:192-198`).
 - `plugin_ref`: the plugin implementing the resource capabilities.
 - `config`: configuration specific to the resource type.
 - `health_policy`: health criteria, consecutive failure thresholds and recovery confirmation requirements.
