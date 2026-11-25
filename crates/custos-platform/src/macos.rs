@@ -12,6 +12,7 @@ use crate::controller::{
 };
 use crate::error::PlatformResult;
 use crate::ifconfig::parse_ifconfig;
+use crate::power_parsers::{parse_date_r, pmset_disablesleep_argv, pmset_schedule_wake_argv};
 use custos_probe::exec::{run_controlled, ExecResult};
 use std::time::Duration;
 
@@ -94,6 +95,13 @@ pub fn capabilities() -> PlatformCapabilitySet {
         .native("network.interface.reset")
         .native("network.connectivity.tcp")
         .native("system.reboot")
+        .native("power.sleep.prevent")
+        .native("power.sleep.allow")
+        .native("power.wake.arm")
+        .unsupported(
+            "power.wake.disarm",
+            "pmset schedule cancel needs the exact original schedule string",
+        )
 }
 
 #[cfg(test)]
@@ -116,5 +124,53 @@ mod tests {
             set.require("wifi.reconnect"),
             Err(PlatformError::Unsupported(_))
         ));
+    }
+}
+
+/// The macOS power policy adapter (todo.md power probe family): sleep via
+/// `pmset -a disablesleep`, scheduled wake via `pmset schedule` after the
+/// epoch is rendered to pmset's local datetime through `date -r`. HIGH
+/// RISK: changes host power behavior; permission gate plus a second
+/// confirm token live in toolbox dispatch (ADR-0012). Disarming has no
+/// symmetrical one-call surface (cancel needs the exact original schedule
+/// string), so it is declared unsupported instead of guessed (§11.1).
+pub struct MacosPowerPolicyController;
+
+impl crate::controller::PowerPolicyController for MacosPowerPolicyController {
+    fn prevent_sleep(&self) -> PlatformResult<()> {
+        let argv = pmset_disablesleep_argv(true);
+        expect_success(run(&argv.iter().map(String::as_str).collect::<Vec<_>>()))
+    }
+
+    fn allow_sleep(&self, _minutes: u64) -> PlatformResult<()> {
+        let argv = pmset_disablesleep_argv(false);
+        expect_success(run(&argv.iter().map(String::as_str).collect::<Vec<_>>()))
+    }
+
+    fn arm_wake(&self, epoch_secs: u64) -> PlatformResult<()> {
+        // Two controlled commands: render the epoch in pmset's expected
+        // local format, then schedule. No shell, no string interpolation
+        // into a shell.
+        let when = match run(&[
+            "date",
+            "-r",
+            epoch_secs.to_string().as_str(),
+            "+%m/%d/%y %H:%M:%S",
+        ]) {
+            ExecResult::Succeeded { stdout, .. } => parse_date_r(&stdout).ok_or_else(|| {
+                PlatformError::Failed(format!("unrecognized `date -r` output: {}", stdout.trim()))
+            })?,
+            other => return Err(other.into()),
+        };
+        let argv = pmset_schedule_wake_argv("wake", &when);
+        expect_success(run(&argv.iter().map(String::as_str).collect::<Vec<_>>()))
+    }
+
+    fn disarm_wake(&self) -> PlatformResult<()> {
+        Err(PlatformError::Unsupported(
+            "pmset schedule cancel needs the exact original schedule string, which this \
+             adapter does not track; not guessing (§11.1)"
+                .into(),
+        ))
     }
 }

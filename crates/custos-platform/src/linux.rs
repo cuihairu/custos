@@ -6,8 +6,8 @@
 use crate::capability::PlatformCapabilitySet;
 use crate::controller::{
     Connectivity, ConnectivityTarget, CredentialProvider, InterfaceStatus,
-    NetworkConnectivityProbe, NetworkInterfaceController, ProcessController, ProcessInfo,
-    RebootController, ServiceController, ServiceState,
+    NetworkConnectivityProbe, NetworkInterfaceController, PowerPolicyController, ProcessController,
+    ProcessInfo, RebootController, ServiceController, ServiceState,
 };
 use crate::error::{PlatformError, PlatformResult};
 use custos_probe::exec::{run_controlled, ExecResult};
@@ -391,6 +391,77 @@ impl RebootController for LinuxRebootController {
     }
 }
 
+/// The Linux power policy adapter (todo.md power probe family): masks and
+/// unmasks the systemd sleep targets, and arms or clears the RTC wake
+/// alarm through the sysfs file (no shell, no rtcwake subprocess — the
+/// alarm write is a single integer). HIGH RISK: both halves change host
+/// power behavior; the permission gate plus a second confirm token live in
+/// the toolbox dispatch layer (ADR-0012).
+pub struct LinuxPowerPolicyController {
+    init: InitSystem,
+}
+
+impl LinuxPowerPolicyController {
+    pub fn detect() -> Self {
+        Self {
+            init: detect_init_system(),
+        }
+    }
+}
+
+/// The sysfs wakealarm file: a plain integer (unix seconds), `0` clears.
+const RTC_WAKEALARM: &str = "/sys/class/rtc/rtc0/wakealarm";
+
+impl PowerPolicyController for LinuxPowerPolicyController {
+    fn prevent_sleep(&self) -> PlatformResult<()> {
+        match &self.init {
+            InitSystem::Systemd { systemctl } => {
+                let program = systemctl.to_string_lossy().to_string();
+                for target in ["sleep.target", "suspend.target"] {
+                    expect_success(run(&[program.as_str(), "mask", target]))?;
+                }
+                Ok(())
+            }
+            _ => Err(PlatformError::Unsupported(
+                "sleep prevention needs systemd (systemctl mask); this init system is not supported"
+                    .into(),
+            )),
+        }
+    }
+
+    fn allow_sleep(&self, _minutes: u64) -> PlatformResult<()> {
+        match &self.init {
+            InitSystem::Systemd { systemctl } => {
+                let program = systemctl.to_string_lossy().to_string();
+                for target in ["sleep.target", "suspend.target"] {
+                    expect_success(run(&[program.as_str(), "unmask", target]))?;
+                }
+                Ok(())
+            }
+            _ => Err(PlatformError::Unsupported(
+                "sleep restore needs systemd (systemctl unmask); this init system is not supported"
+                    .into(),
+            )),
+        }
+    }
+
+    fn arm_wake(&self, epoch_secs: u64) -> PlatformResult<()> {
+        std::fs::write(RTC_WAKEALARM, epoch_secs.to_string()).map_err(|err| {
+            PlatformError::Failed(format!(
+                "cannot arm {RTC_WAKEALARM}: {err} (arming the RTC alarm needs root)"
+            ))
+        })
+    }
+
+    fn disarm_wake(&self) -> PlatformResult<()> {
+        std::fs::write(RTC_WAKEALARM, "0").map_err(|err| {
+            PlatformError::Failed(format!(
+                "cannot clear {RTC_WAKEALARM}: {err} (clearing the RTC alarm needs root)"
+            ))
+        })
+    }
+}
+
 /// The Linux adapter's declared support (todo.md 193: never fake platform
 /// support).
 pub fn capabilities() -> PlatformCapabilitySet {
@@ -424,6 +495,31 @@ pub fn capabilities() -> PlatformCapabilitySet {
                 .unsupported("service.restart", "no systemd or OpenRC on this host")
                 .unsupported("system.reboot", "no supported init system detected")
         }
+    }
+    // Power policy: sleep prevention follows the init system (systemd
+    // only), while the RTC wake alarm is independent of it but needs the
+    // sysfs file to exist (§11.1: declare the real host surface).
+    if matches!(detect_init_system(), InitSystem::Systemd { .. }) {
+        set = set
+            .native("power.sleep.prevent")
+            .native("power.sleep.allow");
+    } else {
+        set = set
+            .unsupported("power.sleep.prevent", "sleep masking needs systemd")
+            .unsupported("power.sleep.allow", "sleep unmasking needs systemd");
+    }
+    if std::path::Path::new(RTC_WAKEALARM).exists() {
+        set = set.native("power.wake.arm").native("power.wake.disarm");
+    } else {
+        set = set
+            .unsupported(
+                "power.wake.arm",
+                "no /sys/class/rtc/rtc0/wakealarm on this host",
+            )
+            .unsupported(
+                "power.wake.disarm",
+                "no /sys/class/rtc/rtc0/wakealarm on this host",
+            );
     }
     // Interface reset stays native-declared but high-risk: the toolbox
     // capability metadata carries interrupts_remote_admin (ADR-0012).

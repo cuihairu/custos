@@ -124,6 +124,21 @@ impl ToolRegistry {
                 custos_platform::default_network_controller(),
             )))
             .expect("builtin operation ids are unique");
+        // High-risk power policy tools (todo.md power probes): host-wide
+        // scope, permission-gated and double-confirmed, adapters refuse
+        // where the host has no wired surface.
+        let power = custos_platform::default_power_policy();
+        for tool in [
+            Box::new(crate::platform_tools::PreventSleepTool::new(power.clone()))
+                as Box<dyn BuiltinTool>,
+            Box::new(crate::platform_tools::AllowSleepTool::new(power.clone())),
+            Box::new(crate::platform_tools::ArmWakeTool::new(power.clone())),
+            Box::new(crate::platform_tools::DisarmWakeTool::new(power)),
+        ] {
+            registry
+                .register_builtin(tool)
+                .expect("builtin operation ids are unique");
+        }
         registry
     }
 

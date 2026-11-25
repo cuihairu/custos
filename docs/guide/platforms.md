@@ -15,6 +15,7 @@ NetworkInterfaceController
 NetworkConnectivityProbe
 CredentialProvider
 RebootController
+PowerPolicyController
 ```
 
 Each interface only defines cross-platform common semantics. Platform-specific capabilities are described through Capabilities; platform support must never be faked for the sake of a unified interface.

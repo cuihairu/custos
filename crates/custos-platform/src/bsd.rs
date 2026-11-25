@@ -117,3 +117,34 @@ mod tests {
         ));
     }
 }
+
+/// The FreeBSD power policy adapter: nothing wired — rc.d has no sleep
+/// masking and the FreeBSD RTC surface is not implemented here, so every
+/// operation refuses with the concrete reason (§11.1: never guess).
+pub struct BsdPowerPolicyController;
+
+impl crate::controller::PowerPolicyController for BsdPowerPolicyController {
+    fn prevent_sleep(&self) -> PlatformResult<()> {
+        Err(crate::error::PlatformError::Unsupported(
+            "power.sleep.prevent has no FreeBSD implementation yet".into(),
+        ))
+    }
+
+    fn allow_sleep(&self, _minutes: u64) -> PlatformResult<()> {
+        Err(crate::error::PlatformError::Unsupported(
+            "power.sleep.allow has no FreeBSD implementation yet".into(),
+        ))
+    }
+
+    fn arm_wake(&self, _epoch_secs: u64) -> PlatformResult<()> {
+        Err(crate::error::PlatformError::Unsupported(
+            "power.wake.arm has no FreeBSD implementation yet".into(),
+        ))
+    }
+
+    fn disarm_wake(&self) -> PlatformResult<()> {
+        Err(crate::error::PlatformError::Unsupported(
+            "power.wake.disarm has no FreeBSD implementation yet".into(),
+        ))
+    }
+}

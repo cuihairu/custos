@@ -162,3 +162,28 @@ pub trait CredentialProvider: Send + Sync {
 pub trait RebootController: Send + Sync {
     fn reboot(&self) -> PlatformResult<()>;
 }
+
+/// Power policy control (todo.md power probe family, 2026-11-22 order):
+/// prevents or restores the host's ability to suspend, and arms or clears
+/// the scheduled wake. HIGH RISK: changing the sleep policy alters host
+/// power behavior fleet-wide; the permission gate and a second explicit
+/// confirm token live in the toolbox dispatch layer (ADR-0012) — adapters
+/// never self-authorize.
+pub trait PowerPolicyController: Send + Sync {
+    /// Blocks automatic suspend (mask sleep targets / zero the standby
+    /// idle timer / set disablesleep).
+    fn prevent_sleep(&self) -> PlatformResult<()>;
+
+    /// Restores the ability to suspend. `minutes` is the explicit standby
+    /// idle timer where the platform has one; platforms without a numeric
+    /// timer ignore it. Passing the old value explicitly beats hidden
+    /// state the process cannot guarantee across restarts.
+    fn allow_sleep(&self, minutes: u64) -> PlatformResult<()>;
+
+    /// Arms the hardware wake alarm at `epoch_secs` (unix time). A past
+    /// time is refused by the RTC layer; surface that as an error.
+    fn arm_wake(&self, epoch_secs: u64) -> PlatformResult<()>;
+
+    /// Clears the armed wake alarm, if the platform supports clearing.
+    fn disarm_wake(&self) -> PlatformResult<()>;
+}

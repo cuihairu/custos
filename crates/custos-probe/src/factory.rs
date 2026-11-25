@@ -13,7 +13,7 @@ use crate::process::ProcessProbe;
 use crate::tcp::TcpProbe;
 use crate::tls_cert::TlsCertProbe;
 use crate::{
-    cpu, database, disk, dns, docker, http, icmp, log, mem, netif, proxy, tls_cert, Probe,
+    cpu, database, disk, dns, docker, http, icmp, log, mem, netif, power, proxy, tls_cert, Probe,
 };
 use custos_model::Resource;
 use std::time::Duration;
@@ -104,6 +104,18 @@ pub fn build_probe(resource: &Resource) -> Result<Box<dyn Probe>, ProbeBuildErro
             .map_err(|reason| err(reason.as_str())),
         "proxy" => proxy::from_config(config)
             .map(|probe: crate::proxy::ProxyProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
+        // Power policy family (todo.md power probes, 2026-11-22 order):
+        // observation-only probes; the high-risk action counterparts live
+        // in the permission-gated toolbox, never in a probe.
+        "power-sleep" => power::sleep_from_config(config)
+            .map(|probe: crate::power::SleepProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
+        "power-wake" => power::wake_from_config(config)
+            .map(|probe: crate::power::WakeProbe| Box::new(probe) as Box<dyn Probe>)
+            .map_err(|reason| err(reason.as_str())),
+        "power-downtime" => power::downtime_from_config(config)
+            .map(|probe: crate::power::DowntimeProbe| Box::new(probe) as Box<dyn Probe>)
             .map_err(|reason| err(reason.as_str())),
         "database" => database::from_config(config)
             .map(|probe: DatabaseProbe| Box::new(probe) as Box<dyn Probe>)

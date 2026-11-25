@@ -15,6 +15,7 @@ NetworkInterfaceController
 NetworkConnectivityProbe
 CredentialProvider
 RebootController
+PowerPolicyController
 ```
 
 每个接口只定义跨平台共同语义。平台专属能力通过 Capability 描述，不得为了统一接口而伪造平台支持。

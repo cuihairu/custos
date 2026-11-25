@@ -22,6 +22,7 @@ pub mod icmp;
 pub mod log;
 pub mod mem;
 pub mod netif;
+pub mod power;
 pub mod process;
 pub mod proxy;
 pub mod scheduler;

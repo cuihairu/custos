@@ -88,7 +88,7 @@ health_policy:
 
 ## 5.4 探测范围
 
-P0 落地了 Process Probe 与 Exec Probe；后续阶段新增了原生 HTTP、TCP、DNS、TLS 证书、磁盘、内存、CPU、日志、systemd、Windows 服务、Docker、ICMP、网络接口、默认网关、代理与数据库探测（见工厂分发 `crates/custos-probe/src/factory.rs:38-148`）。
+P0 落地了 Process Probe 与 Exec Probe；后续阶段新增了原生 HTTP、TCP、DNS、TLS 证书、磁盘、内存、CPU、日志、systemd、Windows 服务、Docker、ICMP、网络接口、默认网关、代理、电源策略（`power-sleep`/`power-wake`/`power-downtime`）与数据库探测（见工厂分发 `crates/custos-probe/src/factory.rs:38-160`）。
 
 Process Probe 用于检查进程是否存在以及必要的进程属性。
 

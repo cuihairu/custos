@@ -27,8 +27,8 @@ title: 常见探测类型业界调研与 custos 差距分析
 
 **custos 现状摘要**（证据来自仓库）：
 
-- 工厂已接线 18 种原生探针：`process`（pid 文件存活，`crates/custos-probe/src/process.rs:7`，工厂分支 `crates/custos-probe/src/factory.rs:39`）、`exec`（受控命令执行：超时、输出上限、超时杀进程树，`crates/custos-probe/src/exec.rs:74`，工厂分支 `crates/custos-probe/src/factory.rs:142`）、`http-endpoint`（HttpProbe，`http/mod.rs:32`）、`network-connectivity`（TcpProbe，`tcp.rs:18`）、`dns`（DnsProbe，`dns.rs:51`）、`tls-certificate`（TlsCertProbe，`tls_cert.rs:26`）、`disk`（DiskProbe，`disk.rs:15`）、`memory`（MemProbe，`mem.rs:16`）、`cpu`（CpuProbe，`cpu.rs:46`）、`log`（LogProbe，`log.rs:33`）、`systemd`（SystemdProbe，`systemd.rs:23`）、`windows-service`（WindowsServiceProbe，`windows_service.rs:20`）、`docker-container`（DockerProbe，`docker.rs:21`）、`icmp`（PingProbe，`icmp.rs:26`）、`network-interface`（NetifProbe，`netif.rs:21`）、`default-gateway`（GatewayProbe，`netif.rs:270`）、`proxy`（ProxyProbe，`proxy.rs:27`）、`database`（DatabaseProbe，`database.rs:51`）——见工厂分发 `crates/custos-probe/src/factory.rs:38-148`。
-- `custom-command` 与 `tunnel` 仍委托给 ExecProbe（`crates/custos-probe/src/factory.rs:142-144`）；`service` 在配置 `unit` 时走原生 systemd / windows-service 探测，未配置时回退 exec（`crates/custos-probe/src/factory.rs:114-141`）。
+- 工厂已接线 21 种原生探针：`process`（pid 文件存活，`crates/custos-probe/src/process.rs:7`，工厂分支 `crates/custos-probe/src/factory.rs:39`）、`exec`（受控命令执行：超时、输出上限、超时杀进程树，`crates/custos-probe/src/exec.rs:74`，工厂分支 `crates/custos-probe/src/factory.rs:142`）、`http-endpoint`（HttpProbe，`http/mod.rs:32`）、`network-connectivity`（TcpProbe，`tcp.rs:18`）、`dns`（DnsProbe，`dns.rs:51`）、`tls-certificate`（TlsCertProbe，`tls_cert.rs:26`）、`disk`（DiskProbe，`disk.rs:15`）、`memory`（MemProbe，`mem.rs:16`）、`cpu`（CpuProbe，`cpu.rs:46`）、`log`（LogProbe，`log.rs:33`）、`systemd`（SystemdProbe，`systemd.rs:23`）、`windows-service`（WindowsServiceProbe，`windows_service.rs:20`）、`docker-container`（DockerProbe，`docker.rs:21`）、`icmp`（PingProbe，`icmp.rs:26`）、`network-interface`（NetifProbe，`netif.rs:21`）、`default-gateway`（GatewayProbe，`netif.rs:270`）、`proxy`（ProxyProbe，`proxy.rs:27`）、`power-sleep`（SleepProbe，`power.rs:271`）、`power-wake`（WakeProbe，`power.rs:411`）、`power-downtime`（DowntimeProbe，`power.rs:491`）、`database`（DatabaseProbe，`database.rs:51`）——见工厂分发 `crates/custos-probe/src/factory.rs:38-160`。
+- `custom-command` 与 `tunnel` 仍委托给 ExecProbe（`crates/custos-probe/src/factory.rs:154-156`）；`service` 在配置 `unit` 时走原生 systemd / windows-service 探测，未配置时回退 exec（`crates/custos-probe/src/factory.rs:126-153`）。
 
 优先级按自愈引擎场景评定：高 = 覆盖最常见故障且是自愈触发的主要信号源；中 = 常见但可暂由 exec 兜底或场景较窄；低 = 长尾/特定行业。
 
@@ -118,9 +118,10 @@ title: 常见探测类型业界调研与 custos 差距分析
 
 | 探测类型 | 业界谁在用 | custos 现状 | 优先级 | 实现要点建议（未实现） |
 |---|---|---|---|---|
-| VPN/隧道端到端验证（不只是端口通，而是经隧道取到预期内容） | 无单一标准实现（check_http 经代理模式 `-I proxy` 最接近，[check_http 手册](https://www.monitoring-plugins.org/doc/man/index.html)） | ⚠️ `tunnel` 类型委托 exec（`factory.rs:142-144`）；`proxy` 类型为原生 `ProxyProbe`（`factory.rs:105-107`） | 中 | 原生化：隧道资源上跑"通过隧道发起 HTTP/TCP 请求并断言出口 IP/目标可达"，把探测面与自愈动作（重拨/重启隧道）对齐 |
+| VPN/隧道端到端验证（不只是端口通，而是经隧道取到预期内容） | 无单一标准实现（check_http 经代理模式 `-I proxy` 最接近，[check_http 手册](https://www.monitoring-plugins.org/doc/man/index.html)） | ⚠️ `tunnel` 类型委托 exec（`factory.rs:154-156`）；`proxy` 类型为原生 `ProxyProbe`（`factory.rs:105-107`） | 中 | 原生化：隧道资源上跑"通过隧道发起 HTTP/TCP 请求并断言出口 IP/目标可达"，把探测面与自愈动作（重拨/重启隧道）对齐 |
 | Push/主动心跳（被监控端主动上报，超时判死） | [Uptime Kuma Push](https://github.com/louislam/uptime-kuma) | ❌ 无 | 低 | 自愈引擎多为主动探测模型，心跳模型引入状态存储；按需后置 |
 | 游戏服务器（Steam/Source） | [Uptime Kuma Steam Game Server](https://github.com/louislam/uptime-kuma) | ❌ 无 | 低 | A2S 查询协议，长尾 |
+| 主机电源策略（这台机器能不能睡 / 有没有布防唤醒 / 现在是否在休眠窗口内） | 桌面运维代理会保持工位机不休眠（NUT、`caffeinate`/`systemd-inhibit` 使用者）；RTC 唤醒布防是标准能力（`rtcwake`、`pmset schedule`、Windows 计划任务唤醒位） | ✅ 三个只读探测（`power-sleep`/`power-wake`/`power-downtime`，`crates/custos-probe/src/power.rs`）加 `host.power` 权限 + confirm 令牌把关的高风险工具动作（`power.sleep.prevent/allow`、`power.wake.arm/disarm`，`crates/custos-platform/src/controller.rs` `PowerPolicyController`） | 已完成（todo.md 2026-11-22 令） | 实现：logind 抑制锁 + sleep.target mask 状态（Linux）、按 GUID 定位 `powercfg` 解析（Windows）、`pmset -g`（macOS）；唤醒走 `/sys/class/rtc/rtc0/wakealarm` 与 `pmset -g sched`；Windows 唤醒布防/撤防如实声明 `unsupported`（无跨语言稳定的操作面） |
 
 ## 26.11 建议实现顺序
 

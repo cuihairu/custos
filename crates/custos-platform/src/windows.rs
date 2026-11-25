@@ -11,6 +11,8 @@ use crate::controller::{
 };
 use crate::error::{PlatformError, PlatformResult};
 #[cfg(windows)]
+use crate::power_parsers::powercfg_standby_argv;
+#[cfg(windows)]
 use custos_probe::exec::run_controlled;
 #[cfg(windows)]
 use custos_probe::exec::ExecResult;
@@ -784,5 +786,78 @@ pub fn capabilities() -> PlatformCapabilitySet {
             "no Wi-Fi adapter detected via `netsh wlan show interfaces`",
         );
     }
-    set.native("dns.flush").native("system.reboot")
+    set.native("dns.flush")
+        .native("system.reboot")
+        // Sleep prevention is wired (powercfg standby timer); wake alarms
+        // are not (no locale-stable schtasks surface) — declared, not
+        // guessed (§11.1).
+        .native("power.sleep.prevent")
+        .native("power.sleep.allow")
+        .unsupported(
+            "power.wake.arm",
+            "the Task Scheduler wake bit has no locale-stable programmatic surface",
+        )
+        .unsupported(
+            "power.wake.disarm",
+            "the Task Scheduler wake bit has no locale-stable programmatic surface",
+        )
+}
+
+/// The Windows power policy adapter (todo.md power probe family): the
+/// standby idle timer via `powercfg /change` on both power sources. HIGH
+/// RISK: changes host power behavior; permission gate plus a second
+/// confirm token live in toolbox dispatch (ADR-0012). Wake alarms stay
+/// unsupported: the Task Scheduler wake bit has no stable
+/// locale-independent surface to set or clear programmatically, and
+/// guessing one would fake support (§11.1).
+pub struct WindowsPowerPolicyController;
+
+impl crate::controller::PowerPolicyController for WindowsPowerPolicyController {
+    fn prevent_sleep(&self) -> PlatformResult<()> {
+        #[cfg(windows)]
+        {
+            let ac = powercfg_standby_argv(true, 0);
+            let dc = powercfg_standby_argv(false, 0);
+            expect_success(run(&ac.iter().map(String::as_str).collect::<Vec<_>>()))?;
+            expect_success(run(&dc.iter().map(String::as_str).collect::<Vec<_>>()))
+        }
+        #[cfg(not(windows))]
+        {
+            Err(PlatformError::Unsupported(
+                "the Windows power adapter only executes on Windows".into(),
+            ))
+        }
+    }
+
+    fn allow_sleep(&self, _minutes: u64) -> PlatformResult<()> {
+        #[cfg(windows)]
+        {
+            let ac = powercfg_standby_argv(true, _minutes);
+            let dc = powercfg_standby_argv(false, _minutes);
+            expect_success(run(&ac.iter().map(String::as_str).collect::<Vec<_>>()))?;
+            expect_success(run(&dc.iter().map(String::as_str).collect::<Vec<_>>()))
+        }
+        #[cfg(not(windows))]
+        {
+            Err(PlatformError::Unsupported(
+                "the Windows power adapter only executes on Windows".into(),
+            ))
+        }
+    }
+
+    fn arm_wake(&self, _epoch_secs: u64) -> PlatformResult<()> {
+        Err(PlatformError::Unsupported(
+            "arming a wake on Windows needs the Task Scheduler wake bit, which has no \
+             locale-stable programmatic surface; not guessing (§11.1)"
+                .into(),
+        ))
+    }
+
+    fn disarm_wake(&self) -> PlatformResult<()> {
+        Err(PlatformError::Unsupported(
+            "clearing a wake on Windows needs the Task Scheduler wake bit, which has no \
+             locale-stable programmatic surface; not guessing (§11.1)"
+                .into(),
+        ))
+    }
 }

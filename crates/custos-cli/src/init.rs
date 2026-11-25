@@ -25,6 +25,9 @@ pub const TYPES: &[&str] = &[
     "memory",
     "cpu",
     "docker-container",
+    "power-sleep",
+    "power-wake",
+    "power-downtime",
 ];
 
 /// Parses `init` arguments and writes the template (stdout, or `--out FILE`
@@ -120,8 +123,92 @@ pub fn generate(kind: &str, id: &str) -> Option<String> {
         "memory" => Some(memory(id)),
         "cpu" => Some(cpu(id)),
         "docker-container" => Some(docker_container(id)),
+        "power-sleep" => Some(power_sleep(id)),
+        "power-wake" => Some(power_wake(id)),
+        "power-downtime" => Some(power_downtime(id)),
         _ => None,
     }
+}
+
+fn power_sleep(id: &str) -> String {
+    template(
+        "# Power sleep policy (power.rs, docs/guide/resources.md §3.1,
+# docs/guide/probe-diagnosis.md §5.4): Healthy when something prevents
+# suspension (masked sleep targets or a blocking logind inhibitor);
+# Unhealthy when the host may sleep freely — a fleet host that can suspend
+# is the fault this probe reports. Unreachable on hosts without a wired
+# power surface (never guessed).
+#
+# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the power
+# probes currently diagnose `unknown_failure`. A recovery plan whose
+# `applicable_faults` does not contain the fault actually diagnosed NEVER
+# runs — recovery exhausts with 0 attempts.
+#
+# Recovery placeholder: `power.sleep.prevent` is a high-risk builtin
+# (host.power permission + confirm token); wire it in a plan only with
+# explicit policy.
+",
+        "power-sleep",
+        id,
+        r#"[resources.probe]
+timeout_ms = 3000"#,
+        &["unknown_failure"],
+        r#"program = "systemctl"
+args = ["mask", "sleep.target", "suspend.target"]"#,
+    )
+}
+
+fn power_wake(id: &str) -> String {
+    template(
+        "# Power wake alarm (power.rs, docs/guide/resources.md §3.1,
+# docs/guide/probe-diagnosis.md §5.4): Healthy when a wake is armed (RTC
+# wakealarm non-zero on Linux, a scheduled wake on macOS); Unhealthy when
+# nothing will bring a suspended host back. Windows has no locale-stable
+# wake-bit surface — the probe reports Unreachable there instead of
+# guessing.
+#
+# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the power
+# probes currently diagnose `unknown_failure`. A recovery plan whose
+# `applicable_faults` does not contain the fault actually diagnosed NEVER
+# runs — recovery exhausts with 0 attempts.
+#
+# Recovery placeholder: arm the RTC through the high-risk builtin
+# `power.wake.arm` (host.power permission + confirm token).
+",
+        "power-wake",
+        id,
+        r#"[resources.probe]
+timeout_ms = 3000"#,
+        &["unknown_failure"],
+        r#"program = "rtcwake"
+args = ["-m", "no", "-t", "1764000000"]"#,
+    )
+}
+
+fn power_downtime(id: &str) -> String {
+    template(
+        "# Power downtime window (power.rs, docs/guide/resources.md §3.1,
+# docs/guide/probe-diagnosis.md §5.4): Healthy while the local time is
+# INSIDE the allowed sleep window (a suspend now is policy-legal);
+# Unhealthy outside it. The window may cross midnight (23:00-07:00).
+# Pure policy check — no platform power surface is touched.
+#
+# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the power
+# probes currently diagnose `unknown_failure`. A recovery plan whose
+# `applicable_faults` does not contain the fault actually diagnosed NEVER
+# runs — recovery exhausts with 0 attempts.
+#
+# Placeholders to edit: start, end.
+",
+        "power-downtime",
+        id,
+        r#"[resources.probe]
+start = "23:00"
+end = "07:00""#,
+        &["unknown_failure"],
+        r#"program = "true"
+args = []"#,
+    )
 }
 
 /// Escapes a value for a TOML basic string (`"…"`).

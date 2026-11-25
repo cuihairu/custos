@@ -119,6 +119,12 @@ pub(super) struct RawProbe {
     pub(crate) interface: Option<String>,
     #[serde(default)]
     pub(crate) connect_port: Option<u64>,
+    // power-downtime: window edges in local HH:MM; `end` may precede
+    // `start` to wrap midnight.
+    #[serde(default)]
+    pub(crate) start: Option<String>,
+    #[serde(default)]
+    pub(crate) end: Option<String>,
 }
 
 fn default_interval_ms() -> u64 {

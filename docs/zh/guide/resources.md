@@ -8,7 +8,7 @@ title: Resource 与 Dependency 模型
 
 Resource 是 Custos 监控和恢复的基本对象。
 
-接受的资源类型就是工厂分发的分支集（`crates/custos-probe/src/factory.rs:38-148`），其余一律在启动时被拒绝：
+接受的资源类型就是工厂分发的分支集（`crates/custos-probe/src/factory.rs:38-160`），其余一律在启动时被拒绝：
 
 - `process`
 - `custom-command`
@@ -25,11 +25,16 @@ Resource 是 Custos 监控和恢复的基本对象。
 - `network-interface`
 - `default-gateway`
 - `proxy`
+- `power-sleep`
+- `power-wake`
+- `power-downtime`
 - `database`
 - `service`
 - `tunnel`
 
-`service` 是唯一按子字段分发的类型：带 `probe.unit` 时走原生服务管理器探测（Linux 用 systemd、Windows 用 SCM，`crates/custos-probe/src/factory.rs:114-141`），改用 `command` 时回退到 exec 探测。`systemd`、`windows-service`、`tcp` 是探测模块名，不是资源类型；`exec` 是 `custom-command`/`tunnel` 背后的探测，不是独立类型。
+`service` 是唯一按子字段分发的类型：带 `probe.unit` 时走原生服务管理器探测（Linux 用 systemd、Windows 用 SCM，`crates/custos-probe/src/factory.rs:126-153`），改用 `command` 时回退到 exec 探测。`systemd`、`windows-service`、`tcp` 是探测模块名，不是资源类型；`exec` 是 `custom-command`/`tunnel` 背后的探测，不是独立类型。
+
+`power-*` 类型是只读的策略探测（`crates/custos-probe/src/power.rs`）：`power-sleep` 报告主机当前是否被阻止休眠，`power-wake` 报告是否已布防 RTC/计划唤醒，`power-downtime` 报告本地时间是否落在配置的休眠窗口内。与之配套的高风险动作（阻止休眠、布防唤醒）是工具箱内置工具，受 `host.power` 权限加显式 confirm 令牌双重把关——探测绝不直接执行动作。
 
 每个资源具有：
 

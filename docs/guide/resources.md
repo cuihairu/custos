@@ -8,7 +8,7 @@ title: Resource and Dependency Model
 
 A Resource is the basic object that Custos monitors and recovers.
 
-The accepted resource types are exactly the arms of the factory dispatch (`crates/custos-probe/src/factory.rs:38-148`); anything else is rejected at startup:
+The accepted resource types are exactly the arms of the factory dispatch (`crates/custos-probe/src/factory.rs:38-160`); anything else is rejected at startup:
 
 - `process`
 - `custom-command`
@@ -25,11 +25,16 @@ The accepted resource types are exactly the arms of the factory dispatch (`crate
 - `network-interface`
 - `default-gateway`
 - `proxy`
+- `power-sleep`
+- `power-wake`
+- `power-downtime`
 - `database`
 - `service`
 - `tunnel`
 
-`service` is the one entry that dispatches on a sub-field: with `probe.unit` it uses the native service-manager probe (systemd on Linux, Windows SCM on Windows, `crates/custos-probe/src/factory.rs:114-141`); with a `command` instead it falls back to the exec probe. `systemd`, `windows-service` and `tcp` are probe-module names, not resource types, and `exec` is the probe behind `custom-command`/`tunnel`, not a type of its own.
+`service` is the one entry that dispatches on a sub-field: with `probe.unit` it uses the native service-manager probe (systemd on Linux, Windows SCM on Windows, `crates/custos-probe/src/factory.rs:126-153`); with a `command` instead it falls back to the exec probe. `systemd`, `windows-service` and `tcp` are probe-module names, not resource types, and `exec` is the probe behind `custom-command`/`tunnel`, not a type of its own.
+
+The `power-*` types are observation-only policy probes (`crates/custos-probe/src/power.rs`): `power-sleep` reports whether anything blocks host suspension, `power-wake` whether an RTC/scheduled wake is armed, `power-downtime` whether the local clock sits inside the configured sleep window. Their high-risk action counterparts (sleep masking, wake arming) are toolbox builtins behind the `host.power` permission plus an explicit confirm token — never executed from a probe.
 
 Every resource has:
 

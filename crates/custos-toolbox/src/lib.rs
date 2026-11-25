@@ -21,6 +21,9 @@ pub mod process_tool;
 pub mod registry;
 
 pub use exec_tool::ExecTool;
-pub use platform_tools::{InterfaceResetTool, RebootTool, WifiReconnectTool};
+pub use platform_tools::{
+    AllowSleepTool, ArmWakeTool, DisarmWakeTool, InterfaceResetTool, PreventSleepTool, RebootTool,
+    WifiReconnectTool,
+};
 pub use process_tool::ProcessStatusTool;
 pub use registry::{DispatchedOutcome, ToolOutcome, ToolRegistry, ToolboxError, ToolboxErrorKind};

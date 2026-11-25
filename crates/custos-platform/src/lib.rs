@@ -35,13 +35,14 @@ pub mod ifconfig;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod openwrt;
+pub mod power_parsers;
 pub mod windows;
 
 pub use capability::PlatformCapabilitySet;
 pub use controller::{
     Connectivity, ConnectivityTarget, CredentialProvider, InterfaceStatus,
-    NetworkConnectivityProbe, NetworkInterfaceController, ProcessController, ProcessInfo,
-    RebootController, ServiceController, ServiceState,
+    NetworkConnectivityProbe, NetworkInterfaceController, PowerPolicyController, ProcessController,
+    ProcessInfo, RebootController, ServiceController, ServiceState,
 };
 pub use error::{PlatformError, PlatformResult};
 
@@ -90,6 +91,26 @@ pub fn default_network_controller() -> std::sync::Arc<dyn NetworkInterfaceContro
     #[cfg(target_os = "macos")]
     {
         std::sync::Arc::new(macos::MacosNetworkController)
+    }
+}
+
+/// The default power policy controller for THIS host (todo.md power probe
+/// family). Sleep masking and RTC wake arming are platform-specific; hosts
+/// without a wired implementation get the adapter that refuses each call
+/// with a concrete reason (authorization still lives in toolbox dispatch,
+/// ADR-0012).
+pub fn default_power_policy() -> std::sync::Arc<dyn PowerPolicyController> {
+    #[cfg(all(not(target_os = "macos"), not(target_os = "freebsd")))]
+    {
+        std::sync::Arc::new(linux::LinuxPowerPolicyController::detect())
+    }
+    #[cfg(target_os = "freebsd")]
+    {
+        std::sync::Arc::new(bsd::BsdPowerPolicyController)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::sync::Arc::new(macos::MacosPowerPolicyController)
     }
 }
 

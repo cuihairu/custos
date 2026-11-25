@@ -88,7 +88,7 @@ Thresholds only decide whether a fault state is entered; they must not be used t
 
 ## 5.4 Probe scope
 
-P0 landed the Process Probe and the Exec Probe; the later phases added the native HTTP, TCP, DNS, TLS-certificate, disk, memory, CPU, log, systemd, Windows-service, Docker, ICMP, network-interface, default-gateway, proxy and database probes (see the factory dispatch `crates/custos-probe/src/factory.rs:38-148`).
+P0 landed the Process Probe and the Exec Probe; the later phases added the native HTTP, TCP, DNS, TLS-certificate, disk, memory, CPU, log, systemd, Windows-service, Docker, ICMP, network-interface, default-gateway, proxy, power-policy (`power-sleep`/`power-wake`/`power-downtime`) and database probes (see the factory dispatch `crates/custos-probe/src/factory.rs:38-160`).
 
 The Process Probe checks whether a process exists plus any required process attributes.
 
