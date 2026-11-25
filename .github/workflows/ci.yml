@@ -36,6 +36,13 @@ jobs:
         run: cargo fmt --all --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # Lock the doc layer: broken intra-doc links were invisible here until
+      # a manual cargo doc pass cleaned 9 of them (2026-11-26). -D warnings
+      # turns any regression into a gate failure.
+      - name: rustdoc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps
       - name: test
         run: cargo test --workspace
 
