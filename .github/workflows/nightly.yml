@@ -62,6 +62,11 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace
+      # RustSec gate for the rolling binaries (RUSTSEC-2026-0592 was caught
+      # here first on 2026-11-26; Dependabot lagged). A newly published
+      # advisory fails this job and stops tonight's artifacts until bumped.
+      - name: cargo audit
+        run: cargo install cargo-audit --locked --quiet && cargo audit
 
   build:
     needs: check
