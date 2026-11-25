@@ -10,7 +10,7 @@ use crate::controller::{
     Connectivity, ConnectivityTarget, InterfaceStatus, NetworkConnectivityProbe,
     NetworkInterfaceController, RebootController, ServiceController,
 };
-use crate::error::PlatformResult;
+use crate::error::{PlatformError, PlatformResult};
 use crate::ifconfig::parse_ifconfig;
 use crate::power_parsers::{parse_date_r, pmset_disablesleep_argv, pmset_schedule_wake_argv};
 use custos_probe::exec::{run_controlled, ExecResult};
@@ -107,7 +107,6 @@ pub fn capabilities() -> PlatformCapabilitySet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::PlatformError;
 
     #[test]
     fn capabilities_declare_launchd_and_network_natively() {
