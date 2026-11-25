@@ -649,3 +649,8 @@
 - 处置：①`fmtTime` 同天保留时刻、跨天渲染完整本地日期（`toLocaleString zh-CN`）；②前端对过滤后的行按 `started_at DESC` 再排一次，可见列顺序与排序键完全对齐。
 - 验证：`cargo check -p custos-dashboard` 绿；`cargo test -p custos-dashboard` 绿（0 tests，无 rust 逻辑面）；node 脚本实测 fmtTime 四档 PASS（今天 08:16:43→`08:16:43`、昨天 20:36:05→`2026/11/21 20:36:05`、3 天前→`2026/11/19 06:52:42`、null→`—`）。
 - 边界：dashboard 是嵌入二进制的只读页面，需重新构建部署 custos 才在浏览器生效；通知表用同一 `fmtTime` 一并受益。
+
+## 2026-11-26 依赖安全批：glib advisory（依赖维护，非任务单项）
+
+- [x] Dependabot #10（GHSA-wrw7-89jp-8q8g，moderate）：glib 0.18.5 `VariantStrIter` unsoundness——溯源：custos-tray → tray-icon 0.26 → libappindicator 0.9 → gtk 0.18（Linux 后端传递闭包，仅存在于 Cargo.lock；发布面 Windows/macOS tray 走 win32/objc 栈，glib 从不编译进任何出货二进制）。修复=tray-icon 0.26→0.27 + muda 0.21→0.22（windows/macos 两段依赖同升；0.27 的 libappindicator 0.10 → gtk 0.19 → glib 0.22.11 为已修补线）。API 兼容性以 scratch 工程在 Linux 后端（gtk 路径全编译）实测 custos-tray 全部用点（Icon::from_rgba / TrayIconBuilder / menu::{Menu,MenuItem,CheckMenuItem,PredefinedMenuItem} / MenuEvent::receiver）零错误。验证：windows-gnu 全 workspace check 绿；clippy --workspace --all-targets -D warnings 0 错；fmt 绿；cargo test --workspace 699 passed / 0 failed；macOS 腿由 CI macos-15 实机腿覆盖（同 API 面，本地不可编）。
+- [x] 复核 2026-11-26 落账：4 项 BLOCKED（场景 2 Wi-Fi / 插件签名 / vitepress 2.0 / 语言自动切换）当日证据已逐条追加行内（imac 两无线电仍软关实测；npm latest=1.6.4/next=2.0.0-alpha.21；两项用户裁定未到），commit `4530e35`
