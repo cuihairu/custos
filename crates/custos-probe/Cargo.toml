@@ -16,7 +16,6 @@ rustls = { version = "0.23", default-features = false, features = [
     "tls12",
 ] }
 webpki-roots = "1"
-libc = "0.2"
 encoding_rs = "0.8"
 x509-parser = "0.16"
 ping = "0.10"
@@ -40,3 +39,8 @@ windows-sys = { version = "0.61", features = [
 rcgen = "0.13"
 time = "0.3"
 tempfile = "3"
+
+# libc::poll backs the exec-probe output deadline; the usage sits behind
+# #[cfg(unix)], so declaring it unix-only keeps the windows build clean.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
