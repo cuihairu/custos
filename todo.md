@@ -658,3 +658,4 @@
 ## 2026-11-26 账面清理批
 
 - [x] 过时注释全树清零：`crates/custos-core/src/lib.rs:10` 的「P0 TODO: assemble …」与已交付的 `pub mod assemble;` + todo.md 实施记录矛盾，改为已实现的事实描述（英文注释，未删注释规避检查）；扫描覆盖 .rs/.lua/.mts/.js/.toml/.yml/.sh/.htm/.vue/.css 全树，TODO/FIXME/XXX/HACK/todo!()/unimplemented!() 零命中。纯文档注释改动，fmt/check 绿、cargo test --workspace 699 passed / 0 failed。
+- [x] 文档一致性（2026-11-26，账面清理批续）：`docs/guide/source-architecture.md:37` 仍称「配置 schema 无 plugin 键、assembly 仅内建」——与已交付的插件运行时（`[[plugins]]` at `custos-config/src/build.rs:39`、resource `plugin` at `schema.rs:217`、recovery `plugin` at `custos-model/src/recovery.rs:40`、`assemble::build_plugin_supervisors` at `custos-core/src/assemble.rs:75`）矛盾；更正为现役 schema 描述。核实 `platforms.md:92` UCI「只读」声明仍属实（全树仅 `uci_get`，无 set/commit；网络适配器走 netsh/ip link），零改动。`pnpm docs:build` 绿。
