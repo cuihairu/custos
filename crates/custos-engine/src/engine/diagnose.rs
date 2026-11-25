@@ -15,7 +15,8 @@ impl Engine {
         let fault = match probe_kind.as_str() {
             "process" => FaultCode::ProcessExited,
             // Proxy verdicts distinguish the three failures that demand
-            // different actions (survey §26: 407 ≠ 宕机): switching nodes
+            // different actions (survey §26: a 407 proxy-auth failure is not
+            // the same as a dead target): switching nodes
             // cannot fix wrong credentials, and restarting cannot fix a
             // dead target — the plan ladder selects by these codes.
             "proxy" => match status {
