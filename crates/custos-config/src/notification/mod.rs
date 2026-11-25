@@ -4,9 +4,10 @@
 //! rules (global) decide *who hears about it* and *when*.
 //!
 //! The section is validated at load time (dashboard-cli-config.md §10.3
-//! step 10 "验证通知渠道配置"): unknown fields are errors, rules may only
-//! reference channels that exist, channel types are known, event/severity
-//! names are checked, and secrets are never echoed by `Debug`.
+//! step 10, validate the notification channel configuration): unknown
+//! fields are errors, rules may only reference channels that exist, channel
+//! types are known, event/severity names are checked, and secrets are never
+//! echoed by `Debug`.
 
 use custos_model::{EventType, ResourceId, Severity};
 use serde::Deserialize;
@@ -45,8 +46,8 @@ pub struct NotificationRule {
     /// Also write a line to the local structured audit log.
     pub log: bool,
     /// Suppress repeats of the same (event type, resource) fault within
-    /// this window (§8.5 聚合并抑制重复通知). `0` disables dedup for this
-    /// rule. Default 30 minutes.
+    /// this window (§8.5 aggregates faults and suppresses duplicate
+    /// notifications). `0` disables dedup for this rule. Default 30 minutes.
     pub dedup_window_ms: u64,
 }
 
