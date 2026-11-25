@@ -526,8 +526,10 @@ function fmtTime(ms) {
   if (!ms) return '—';
   var d = new Date(ms);
   var now = new Date();
-  // 只显示 HH:MM:SS 时,跨天记录(今早 06:52:42 排在昨晚 20:36:05 上面)看起来像乱序。
-  // 同一天保留时刻;跨天带日期,排序肉眼可验证。
+  // Showing only HH:MM:SS makes a cross-day record (this morning's
+  // 06:52:42 above last night's 20:36:05) look out of order.
+  // Keep the time within a day; cross-day rows carry the date, so the
+  // sort order is visually verifiable.
   if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
     return d.toLocaleTimeString('zh-CN', { hour12: false });
   }
@@ -578,7 +580,8 @@ function loadTab(tab, force) {
   var p = null;
   if (tab === 'overview' || tab === 'resources') p = fetchOverview();
   else if (tab === 'runs') p = fetchRuns();
-  // 通知/权限只在切入 tab 时拉取，不随 5 秒轮询全量刷新。
+  // Notifications/permissions are fetched only when entering a tab, not on
+  // every 5-second poll.
   else if (tab === 'notifications' && (force || !cache.notifs)) p = fetchNotifications();
   else if (tab === 'permissions' && (force || !cache.perms)) p = fetchPermissions();
   if (p) {
@@ -603,7 +606,8 @@ function show(tab) {
 }
 
 function refresh() {
-  // 通知/权限按切入拉取；其余 tab 保持 5 秒轮询。
+  // Notifications/permissions are fetched on tab entry; the other tabs keep
+  // the 5-second poll.
   if (active === 'overview' || active === 'resources' || active === 'runs') {
     loadTab(active, false);
   }
@@ -737,8 +741,12 @@ function renderRuns() {
   var rows = runs.filter(function (x) {
     return runFilter === 'all' || x.status === runFilter;
   });
-  // 列表按 updated_at DESC 排(后端 SQL 已排),时间列也显示 started_at 时跨天会显得乱。
-  // 时间列展示与排序键对齐:主列仍显示开始时刻,展开行已有 updated;排序感由 fmtTime 带日期解决。
+  // The list is sorted by updated_at DESC (the backend SQL already sorts
+  // it); showing started_at in the time column makes cross-day rows look
+  // jumbled.
+  // Keep the time column aligned with the sort key: the main column still
+  // shows the start time, expanded rows already carry updated, and the
+  // sort feel is solved by fmtTime carrying the date.
   rows = rows.slice().sort(function (a, b) {
     return (b.started_at_unix_ms || 0) - (a.started_at_unix_ms || 0);
   });
