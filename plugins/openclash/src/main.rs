@@ -1,15 +1,16 @@
-//! OpenClash plugin (todo.md 221: 节点诊断 + 有序切换) — one plugin process,
-//! one resource loop. OpenClash runs the clash core on OpenWrt; the core
-//! exposes the same external-controller API as mihomo, so probing and node
-//! switching reuse that surface through the shared `clash-api` client,
-//! while restart goes through OpenWrt's init script
+//! OpenClash plugin (todo.md 221: node diagnosis plus ordered switching) —
+//! one plugin process, one resource loop. OpenClash runs the clash core on
+//! OpenWrt; the core exposes the same external-controller API as mihomo, so
+//! probing and node switching reuse that surface through the shared
+//! `clash-api` client, while restart goes through OpenWrt's init script
 //! (`/etc/init.d/openclash restart`), not systemctl.
 //!
-//! Ordered recovery (有序切换): plan 1 diagnoses and switches to the best
-//! available node by measured delay; plan 2 restarts the service.
-//! Candidate nodes come from `clash_api::real_candidates`, which filters
-//! subscription info members (剩余流量/套餐到期/官网…) that carry healthy
-//! delays but are not proxies (2026-11-15 fix).
+//! Ordered recovery: plan 1 diagnoses and switches to the best available
+//! node by measured delay; plan 2 restarts the service. Candidate nodes
+//! come from `clash_api::real_candidates`, which filters subscription info
+//! members (remaining-traffic / plan-expiry / official-website rows,
+//! matched by their zh-CN labels) that carry healthy delays but are not
+//! proxies (2026-11-15 fix).
 //!
 //! Configuration via environment (§4.4):
 //!   OPENCLASH_API     controller base (default http://127.0.0.1:9090)
@@ -37,7 +38,7 @@ fn group() -> Option<String> {
 
 /// Probe: the controller answering is healthy; the managed group's current
 /// node (with its latest measured delay, when available) makes the
-/// observation actionable for 节点诊断.
+/// observation actionable for node diagnosis.
 fn probe() -> (bool, String) {
     let client = client();
     match client.version() {
@@ -57,7 +58,7 @@ fn probe() -> (bool, String) {
     }
 }
 
-/// Ordered switch (有序切换): measure every member's delay through the
+/// Ordered switch: measure every member's delay through the
 /// group, then pick the fastest *real* node — a diagnosis, not a blind
 /// round-robin. Delays come from one `/group/{group}/delay` query; nodes
 /// that fail the health URL are absent from the map and skipped. With no

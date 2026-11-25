@@ -64,7 +64,8 @@ const NETSH_STATES: [&str; 10] = [
 
 /// Parses the whole `netsh interface show interface` table. The three
 /// leading cells are state words; everything after them is the interface
-/// name (which may contain spaces: `ZeroTier One [..]`, `以太网 2`).
+/// name (which may contain spaces: `ZeroTier One [..]`, or a localized
+/// Chinese adapter name such as "Ethernet 2").
 pub fn parse_netsh_interfaces(output: &str) -> Vec<InterfaceState> {
     let mut interfaces = Vec::new();
     for line in output.lines() {

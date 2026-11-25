@@ -98,7 +98,7 @@ fn switch_with_a_group_reports_failure_when_core_is_unreachable() {
 
 /// LIVE check against a real controller (ignored by default):
 ///   LIVE_OPENCLASH_API=http://192.168.5.11:9090 \
-///   LIVE_OPENCLASH_SECRET=... LIVE_OPENCLASH_GROUP=三毛机场 \
+///   LIVE_OPENCLASH_SECRET=... LIVE_OPENCLASH_GROUP=<your-group-name> \
 ///   cargo test -p custos-openclash-plugin --test plugin -- --ignored --nocapture
 /// Read-only: probe through the full host session and print the
 /// observation — positive evidence the plugin path works on the router.

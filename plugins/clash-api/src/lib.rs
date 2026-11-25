@@ -5,15 +5,16 @@
 //! Both custos proxy plugins (`openclash`, `mihomo`) speak to the same
 //! external-controller API — OpenClash runs a clash/mihomo core whose
 //! controller is identical — so the client, the percent-encoding of group
-//! names (real subscriptions use emoji and spaces: `♻️ 自动选择`) and the
+//! names (real subscriptions use emoji and spaces: `♻️ auto-select`) and the
 //! subscription info-node filter live here.
 //!
 //! Real-scenario ruling (2026-11-15): subscription providers inject fake
-//! info members into the selector — `剩余流量：533.08 GB`, `套餐到期：
-//! 2027-01-16`, `官网 https://…` — which carry *healthy* delay numbers
-//! (the controller answers them locally) but are not real proxies. The
-//! best-node picker used to select one and break all traffic; everything
-//! that picks a node now goes through [`is_subscription_info_node`].
+//! info members into the selector — `remaining traffic: 533.08 GB`,
+//! `plan expires: 2027-01-16`, `provider site https://…` — which carry
+//! *healthy* delay numbers (the controller answers them locally) but are
+//! not real proxies. The best-node picker used to select one and break
+//! all traffic; everything that picks a node now goes through
+//! [`is_subscription_info_node`].
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -203,10 +204,11 @@ pub fn is_selectable_node(name: &str) -> bool {
     !is_pseudo_node(name) && !is_subscription_info_node(name)
 }
 
-/// Subscription info members (真实订阅注水节点, 2026-11-15): providers render
-/// traffic/expiry data as selector members. They pass the delay test but are
-/// not proxies — selecting one breaks all traffic. Matches zh-CN and zh-TW
-/// spellings plus the common English templates.
+/// Subscription info members (padding nodes injected by real subscriptions,
+/// 2026-11-15): providers render traffic/expiry data as selector members.
+/// They pass the delay test but are not proxies — selecting one breaks all
+/// traffic. Matches zh-CN and zh-TW spellings plus the common English
+/// templates.
 pub fn is_subscription_info_node(name: &str) -> bool {
     const KEYWORDS: [&str; 16] = [
         "剩余", "剩餘", // remaining traffic
@@ -247,7 +249,7 @@ pub fn best_by_delay<'a>(
 }
 
 /// Percent-encode a URL path segment (clash group/node names arrive as
-/// UTF-8 with emoji, spaces and CJK: `♻️ 自动选择`, `三毛机场`).
+/// UTF-8 with emoji, spaces and CJK: `♻️ auto-select`, `<your-group-name>`).
 pub fn encode_path_segment(segment: &str) -> String {
     encode(segment, false)
 }
@@ -455,7 +457,7 @@ mod tests {
     /// LIVE verification against a real controller (2026-11-15 router
     /// scenario). Ignored by default; run with the environment set:
     ///   LIVE_CLASH_API=http://192.168.5.11:9090 \
-    ///   LIVE_CLASH_SECRET=... LIVE_CLASH_GROUP=三毛机场 \
+    ///   LIVE_CLASH_SECRET=... LIVE_CLASH_GROUP=<your-group-name> \
     ///   cargo test -p clash-api -- --ignored
     /// Read-only except the final `select` — which puts the CURRENT node
     /// back, so no traffic path changes.

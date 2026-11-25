@@ -1,5 +1,5 @@
 //! mihomo (Clash.Meta) plugin — one plugin process, one resource loop
-//! (todo.md 217: 一插件一资源闭环口径).
+//! (todo.md 217: one plugin owns one resource loop).
 //!
 //! Probe: the external controller's `/version` (the controller answers only
 //! when the core is serving); when a proxy group is configured, the group's
@@ -11,7 +11,8 @@
 //!
 //! HTTP surface and candidate filtering come from the shared `clash-api`
 //! client: `next_plain_member` skips pseudo-nodes (DIRECT/REJECT) and
-//! subscription info members (剩余流量/套餐到期…) exactly like the
+//! subscription info members (remaining-traffic / plan-expiry rows, matched
+//! by their zh-CN labels in the shared filter) exactly like the
 //! openclash best-node picker (2026-11-15 fix).
 //!
 //! Configuration via environment (clean env per §4.4):
@@ -65,11 +66,12 @@ fn probe() -> (bool, String) {
 }
 
 /// The next plain member after `current`, wrapping around the list (pure).
-/// Routing directives (DIRECT/REJECT), selector members (自动/自動) and
-/// subscription info nodes are skipped via the shared [`is_selectable_node`]
-/// filter. Taking the *first* non-current member bounced repeated recovery
-/// between two nodes (R15): after switching A→B the next recovery picked A
-/// again. Walking from the position after `current` advances the rotation
+/// Routing directives (DIRECT/REJECT), selector members (the auto-select
+/// label, in both its zh-CN and zh-TW spellings) and subscription info
+/// nodes are skipped via the shared [`is_selectable_node`] filter. Taking
+/// the *first* non-current member bounced repeated recovery between two
+/// nodes (R15): after switching A→B the next recovery picked A again.
+/// Walking from the position after `current` advances the rotation
 /// A→B→C→A.
 fn next_plain_member(members: &[String], current: &str) -> Option<String> {
     let n = members.len();
@@ -236,9 +238,10 @@ mod tests {
 
     #[test]
     fn next_plain_member_skips_traditional_selectors_too() {
-        // AUD-C: zh-TW selector members use 自動; the doc always promised
-        // skipping both spellings — a traditional selector must never be
-        // picked as the switch target.
+        // AUD-C: zh-TW selector members use the traditional-character
+        // form of the auto-select label; the doc always promised skipping
+        // both spellings — a traditional selector must never be picked as
+        // the switch target.
         let members = vec!["X".to_owned(), "自動選擇".to_owned(), "Y".to_owned()];
         assert_eq!(next_plain_member(&members, "X").as_deref(), Some("Y"));
         // Wrapping skips the traditional selector.

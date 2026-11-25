@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# One plugin process, one resource loop (todo.md 217: 一插件一资源闭环口径).
+# One plugin process, one resource loop (todo.md 217: the one-plugin-one-resource-loop rule).
 [[bin]]
 name = "mihomo-plugin"
 path = "src/main.rs"

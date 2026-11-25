@@ -46,7 +46,8 @@ fn fetch(path: &str) -> Result<String, String> {
 
 /// Tunnel health from the Prometheus text format: `cloudflared_tunnel_ha_
 /// connections` counts live edge connections. Zero connections = tunnel
-/// down even when the process runs (todo.md P3: 服务在但隧道断 → 真故障).
+/// down even when the process runs (todo.md P3: the service is up but the
+/// tunnel is broken, which is a real fault).
 fn tunnel_health(metrics: &str) -> (bool, String) {
     let mut connections: Option<f64> = None;
     let mut unparsable: Option<String> = None;

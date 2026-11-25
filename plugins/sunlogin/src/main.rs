@@ -1,6 +1,7 @@
-//! Sunlogin (向日葵/AweSun) plugin — one plugin process, one resource loop.
+//! Sunlogin (SunloginClient / AweSun) plugin — one plugin process, one
+//! resource loop.
 //!
-//! 向日葵 is closed-source with no official API. The wrapper follows the
+//! Sunlogin is closed-source with no official API. The wrapper follows the
 //! clash-api principle: the de-facto API is whatever surface the product's
 //! own UI talks to. Two generations exist in the wild:
 //!
@@ -44,7 +45,7 @@ const PORT_MIN: u16 = 40_000;
 const PORT_MAX: u16 = 65_535;
 
 /// Client process-name fragments (lowercase `contains` match): the AweSun
-/// international build and the 中文 SunloginClient build.
+/// international build and the zh-CN SunloginClient build.
 const PROCESS_MARKERS: [&str; 2] = ["awesun", "sunlogin"];
 
 // ---------------------------------------------------------------------------
