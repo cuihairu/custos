@@ -1,4 +1,4 @@
-# Network outage detection and layered recovery — the "断网" scenario.
+# Network outage detection and layered recovery — the "no network" scenario.
 #
 # Two probes at different depths: the LAN gateway (inside the router) and a
 # public DNS anchor (past the router). The public probe DEPENDS on the gateway

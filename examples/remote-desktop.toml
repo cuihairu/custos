@@ -1,4 +1,4 @@
-# Remote-desktop supervision fleet — RustDesk / TeamViewer / Sunlogin(向日葵)
+# Remote-desktop supervision fleet — RustDesk / TeamViewer / Sunlogin
 # behind one network dependency. The canonical "I lost remote access" scenario:
 # if the network is down only network recovery runs; if the network is fine,
 # only the dead remote-desktop service is restarted.

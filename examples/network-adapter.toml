@@ -27,7 +27,7 @@ request_timeout_ms = 15000
 
 [plugins.env]
 # Supervision target: PREFER THE STABLE INTERFACE NAME. Non-ASCII names
-# (e.g. "以太网 2") travel fine as plugin env. Windows ifIndex as "if:19" is
+# (e.g. a localized Ethernet name) travel fine as plugin env. Windows ifIndex as "if:19" is
 # also accepted but changes across reboots (caught live: a pinned ifIndex
 # silently pointed at nothing after a reboot) — use it only as a fallback,
 # never as a permanent pin. Empty = ANY connected interface counts as

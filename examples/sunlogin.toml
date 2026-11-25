@@ -1,4 +1,4 @@
-# Sunlogin (向日葵) remote-desktop supervision — the canonical "PC goes
+# Sunlogin (Sunflower) remote-desktop supervision — the canonical "PC goes
 # offline" scenario (docs/guide/overview.md #1, docs/guide/roadmap.md
 # acceptance scenario 1). On Windows the SCM service is `SunloginService`
 # (verified present on the imac host, 2026-11-08); on Linux the equivalent

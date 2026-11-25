@@ -15,8 +15,9 @@
 #              Their recovery plans dispatch plugin operations
 #              (`plugin` + `operation_id`), no shell scripts involved.
 #
-# The plugin itself filters subscription info members (剩余流量/套餐到期/
-# 官网…) out of node selection — they carry healthy delays but are not
+# The plugin itself filters subscription info members (remaining traffic /
+# plan expiry / provider site …) out of node selection — they carry healthy
+# delays but are not
 # proxies (2026-11-15 fix, plugins/clash-api).
 #
 # Deploy: build the plugin, copy it next to the custos binary on the router
