@@ -1,11 +1,13 @@
-//! High-risk platform tools (todo.md P2 权限检查, ADR-0012): reboot and
-//! interface reset wrapped as toolbox capabilities whose `required_permission`
-//! the dispatch layer enforces — an unauthorized call is refused before the
-//! platform adapter ever runs. The adapters themselves never self-authorize.
-//! The two network-affecting operations also share a global mutex (todo.md
-//! P3 223): at most one network operation runs at a time, across resources.
+//! High-risk platform tools (todo.md P2 permission checks, ADR-0012): reboot
+//! and interface reset wrapped as toolbox capabilities whose
+//! `required_permission` the dispatch layer enforces — an unauthorized call
+//! is refused before the platform adapter ever runs. The adapters
+//! themselves never self-authorize. The two network-affecting operations
+//! also share a global mutex (todo.md P3 223): at most one network
+//! operation runs at a time, across resources.
 
-/// The global network-operations mutex (todo.md P3 223 网络操作互斥):
+/// The global network-operations mutex (todo.md P3 223, network-operation
+/// mutual exclusion).
 /// AT MOST ONE network operation (reset, reboot, any future
 /// network-affecting action) may run at a time, regardless of which
 /// resource requested it — concurrent interface changes would race with
