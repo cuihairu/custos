@@ -86,7 +86,7 @@ The rolling `nightly` prerelease publishes ready-made binaries built by `.github
 
 ## Status
 
-P0–P3 are implemented (core recovery engine, plugin runtime and notifications, platform base capabilities, and the network/proxy/self-healing scenarios; acceptance scenarios 1 and 2 and the full Windows Wi-Fi path still await verification on real hardware). The optional management interface (P4) has the read-only dashboard and desktop tray. macOS has compile-checked base branches (launchd, network interface, reboot, menu-bar tray) but none of them is acceptance-tested on a real Mac yet; BSD has no implementation; plugin signing is pending. See the [phased implementation plan](docs/guide/roadmap.md).
+P0–P3 are implemented (core recovery engine, plugin runtime and notifications, platform base capabilities, and the network/proxy/self-healing scenarios; acceptance scenarios 1 and 2 and the full Windows Wi-Fi path still await verification on real hardware). The optional management interface (P4) has the read-only dashboard and desktop tray. macOS base branches (launchd, network interface, reboot, menu-bar tray) run on a real macOS CI leg (read-only and probe paths verified; Wi-Fi association and privileged reset/reboot paths still await a real-machine walkthrough); BSD has no implementation; plugin signing is pending. See the [phased implementation plan](docs/guide/roadmap.md).
 
 ## License
 
