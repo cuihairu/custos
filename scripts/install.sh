@@ -61,11 +61,12 @@ download() {
   fi
 }
 
-# Assets are named custos-linux-<arch>.tar.gz (glibc) and, for x86_64,
-# custos-linux-musl-<arch>.tar.gz (fully static). Match the exact asset
-# suffix so a glibc build is never conflated with the static musl build.
-# OpenWrt/iStoreOS prefer the static musl tarball when one exists for this
-# architecture; otherwise (e.g. aarch64) fall back to the glibc build.
+# Assets are named custos-linux-<arch>.tar.gz (glibc) and
+# custos-linux-musl-<arch>.tar.gz (fully static, built for x86_64 and
+# aarch64). Match the exact asset suffix so a glibc build is never
+# conflated with the static musl build. OpenWrt/iStoreOS prefer the static
+# musl tarball when one exists for this architecture; otherwise fall back
+# to the glibc build.
 release_json=$(fetch "https://api.github.com/repos/${REPO}/releases/tags/${CHANNEL}") \
   || die "could not fetch release metadata for ${REPO}/${CHANNEL}"
 
