@@ -111,7 +111,7 @@ impl Store {
         .map_err(Into::into)
     }
     /// Increments the attempt count and schedules a retry. Same `sending`
-    /// lease guard as [`mark_notification_delivered`]: a delivered entry is
+    /// lease guard as [`Self::mark_notification_delivered`]: a delivered entry is
     /// never flipped back to a retry by a superseded claim.
     pub fn mark_notification_retry(
         &self,

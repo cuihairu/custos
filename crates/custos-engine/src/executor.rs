@@ -56,7 +56,7 @@ pub fn leaked_watchdog_workers() -> usize {
 /// records [`ActionOutcome::OutcomeUnknown`] and the tick moves on. The
 /// worker stays parked on the executor until it finally returns (counted in
 /// [`leaked_watchdog_workers`]); a result arriving that late is logged and
-/// discarded. Accounting goes through a per-execution [`WatchdogTicket`]:
+/// discarded. Accounting goes through a per-execution `WatchdogTicket`:
 /// a late result can never leave the leak count inflated, and a worker
 /// that died mid-execute (panic) is dead, not parked, so it is not counted.
 pub fn execute_with_watchdog(

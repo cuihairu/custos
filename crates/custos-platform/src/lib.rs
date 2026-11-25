@@ -8,7 +8,7 @@
 //! (§11.1, todo.md service-control matrix: never guess-execute).
 //!
 //! Dangerous primitives (interface reset, reboot) declare their risk via
-//! the toolbox [`Capability`] metadata; the permission gate lives in the
+//! the toolbox `Capability` metadata; the permission gate lives in the
 //! dispatch layer (`custos-toolbox`), adapters never self-authorize.
 
 pub mod capability;

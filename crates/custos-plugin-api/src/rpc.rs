@@ -2,7 +2,7 @@
 //! (docs/guide/plugins.md §4.3).
 //!
 //! Framing on stdio is newline-delimited JSON: one message per line, hard
-//! size cap per line ([`DEFAULT_MAX_MESSAGE_BYTES`]). stdout carries only
+//! size cap per line ([`crate::DEFAULT_MAX_MESSAGE_BYTES`]). stdout carries only
 //! protocol messages; stderr is plugin diagnostic logging and is NEVER
 //! parsed as protocol (§4.4).
 

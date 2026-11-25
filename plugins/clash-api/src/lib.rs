@@ -65,7 +65,7 @@ pub struct ClashClient {
 impl ClashClient {
     /// Client with an explicit 5 s global budget: probe and switch must both
     /// stay inside the plugin's per-request watchdog
-    /// ([[plugins]].request_timeout_ms, default 30 s).
+    /// (`[[plugins]]` request_timeout_ms, default 30 s).
     pub fn new(base: impl Into<String>, secret: Option<&str>) -> Self {
         let agent = ureq::Agent::new_with_config(
             ureq::config::Config::builder()
@@ -197,7 +197,7 @@ fn is_pseudo_node(name: &str) -> bool {
 }
 
 /// True when a member may serve as a switch target: not a routing
-/// directive ([`is_pseudo_node`]) and not subscription info data
+/// directive (`is_pseudo_node`) and not subscription info data
 /// ([`is_subscription_info_node`]). The one predicate every picker in
 /// every plugin goes through.
 pub fn is_selectable_node(name: &str) -> bool {
