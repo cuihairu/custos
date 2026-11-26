@@ -77,19 +77,30 @@ fn capabilities_gate_matches_host_reality() {
 #[test]
 fn connectivity_refusal_is_normalized_not_an_error() {
     let controller = SysnetInterfaceController;
-    // Bind and drop to get a guaranteed refused port.
-    let port = {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        port
-    };
-    let answer = controller
-        .probe_tcp(&ConnectivityTarget {
-            host: "127.0.0.1".into(),
-            port,
-        })
-        .expect("check completes");
+    // Bind and drop to get a refused port. The port can be grabbed by
+    // another socket in the tiny window between the drop and the probe
+    // (the same flake was seen on the FreeBSD leg), so retry until an
+    // actual refusal shows up.
+    let mut answer = None;
+    for _ in 0..16 {
+        let port = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            drop(listener);
+            port
+        };
+        let probe = controller
+            .probe_tcp(&ConnectivityTarget {
+                host: "127.0.0.1".into(),
+                port,
+            })
+            .expect("check completes");
+        if !matches!(probe, custos_platform::Connectivity::Reachable { .. }) {
+            answer = Some(probe);
+            break;
+        }
+    }
+    let answer = answer.expect("probing freshly dropped ports never saw a refusal");
     assert!(
         matches!(answer, custos_platform::Connectivity::Refused),
         "{answer:?}"

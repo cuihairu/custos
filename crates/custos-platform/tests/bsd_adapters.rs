@@ -25,19 +25,30 @@ fn interface_list_contains_loopback() {
 #[test]
 fn connectivity_refusal_is_normalized_not_an_error() {
     let controller = custos_platform::bsd::BsdNetworkController;
-    // Bind and drop to get a guaranteed refused port.
-    let port = {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        port
-    };
-    let answer = controller
-        .probe_tcp(&ConnectivityTarget {
-            host: "127.0.0.1".into(),
-            port,
-        })
-        .expect("check completes");
+    // Bind and drop to get a refused port. The port can be grabbed by
+    // another socket in the tiny window between the drop and the probe
+    // (observed flake: the probe reported Reachable on such a collision),
+    // so retry until we actually see a refusal.
+    let mut answer = None;
+    for _ in 0..16 {
+        let port = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            drop(listener);
+            port
+        };
+        let probe = controller
+            .probe_tcp(&ConnectivityTarget {
+                host: "127.0.0.1".into(),
+                port,
+            })
+            .expect("check completes");
+        if !matches!(probe, Connectivity::Reachable { .. }) {
+            answer = Some(probe);
+            break;
+        }
+    }
+    let answer = answer.expect("probing freshly dropped ports never saw a refusal");
     assert!(matches!(answer, Connectivity::Refused), "{answer:?}");
 }
 
