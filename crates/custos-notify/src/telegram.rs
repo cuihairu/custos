@@ -234,4 +234,31 @@ mod tests {
         // Retries=0 by default in test helper; responder only serves 1.
         assert!(!captured.lock().unwrap().is_empty());
     }
+
+    /// LIVE delivery against the real api.telegram.org (2026-11-26,
+    /// C-SET-UX-03/07 acceptance remainder): the isolated-instance run
+    /// covered the config surface (pair validation, token masking) but a
+    /// real delivery needs a real bot token, which only the user holds.
+    /// Ignored by default; run with the environment set:
+    ///   LIVE_TG_BOT_TOKEN=123456:ABC... LIVE_TG_CHAT_ID=-100... \
+    ///   cargo test -p custos-notify -- --ignored --nocapture
+    /// Sends exactly one message (single attempt; no retry ladder here).
+    #[test]
+    #[ignore]
+    fn live_delivery_to_real_telegram() {
+        let token = std::env::var("LIVE_TG_BOT_TOKEN").expect("LIVE_TG_BOT_TOKEN");
+        let chat = std::env::var("LIVE_TG_CHAT_ID").expect("LIVE_TG_CHAT_ID");
+        let channel = TelegramChannel::new("tg-acceptance", token, chat, 10_000);
+
+        let mut evt = event();
+        evt.summary = format!(
+            "C-SET-UX-03 live acceptance {}: sent by the ignored telegram test",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
+        channel.deliver(&evt).expect("live telegram delivery");
+        println!("delivered: [custos] {}", evt.summary);
+    }
 }
