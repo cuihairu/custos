@@ -405,8 +405,6 @@ dependencies = [
  "custos-dashboard",
  "custos-engine",
  "custos-model",
- "custos-notify",
- "custos-probe",
  "custos-store",
  "serde_json",
  "tracing",
@@ -455,7 +453,6 @@ name = "custos-dashboard"
 version = "0.1.0"
 dependencies = [
  "custos-config",
- "custos-model",
  "custos-store",
  "serde",
  "serde_json",
@@ -542,7 +539,6 @@ dependencies = [
 name = "custos-platform"
 version = "0.1.0"
 dependencies = [
- "custos-model",
  "custos-probe",
  "serde_json",
  "thiserror 2.0.21",
@@ -577,7 +573,6 @@ version = "0.1.0"
 dependencies = [
  "custos-model",
  "encoding_rs",
- "flate2",
  "known-codepages",
  "libc",
  "mysql",
@@ -618,7 +613,6 @@ dependencies = [
  "custos-engine",
  "custos-model",
  "custos-notify",
- "libsqlite3-sys",
  "serde",
  "serde_json",
  "sqlx",

@@ -8,12 +8,13 @@ license.workspace = true
 custos-engine = { workspace = true }
 custos-model = { workspace = true }
 custos-notify = { path = "../custos-notify" }
-# Compile SQLite from source so builds are hermetic on every OS (CI builds
-# for Linux/Windows/macOS must not require a system libsqlite3 or vcpkg).
-libsqlite3-sys = { version = "0.39", features = ["bundled"] }
+# sqlx 0.9's sqlite feature turns on sqlite-bundled, which compiles SQLite
+# from source: builds stay hermetic on every OS (no system libsqlite3 or
+# vcpkg needed). The old explicit libsqlite3-sys/bundled declaration is
+# redundant since that change (cargo machete adjudication, 2026-11-26).
+sqlx = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sqlx = { workspace = true }
 thiserror = { workspace = true }
 tracing = "0.1"
 tokio = { workspace = true }
