@@ -276,6 +276,19 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # Rolling semantics: the nightly release carries exactly tonight's
+      # artifacts. deb/rpm/ipk/msi names embed the version, so same-name
+      # overwrite alone never retires old builds. `delete_assets` in the
+      # release step below was never a real action-gh-release input (the
+      # action silently ignored it; found by actionlint 2026-11-26) — stale
+      # assets did accumulate (the duplicate custos-cli-*.msi). Prune
+      # explicitly instead. Missing release / no assets -> loop is a no-op.
+      - name: prune previous nightly assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view nightly --json assets --jq '.assets[].name' 2>/dev/null |
+            xargs -r -n1 gh release delete-asset nightly --yes
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly
@@ -285,5 +298,4 @@ jobs:
             Rolling nightly build. Unverified: binaries are gated on
             fmt + clippy + workspace tests but are NOT a formal release.
             No version tag is created.
-          delete_assets: true
           files: dist/*

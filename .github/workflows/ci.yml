@@ -33,6 +33,15 @@ jobs:
       # let pyo3 re-detect the interpreter of the current image.
       - name: refresh pyo3 build outputs
         run: cargo clean -p custos-python -p pyo3 -p pyo3-ffi
+      # Workflow lint: caught a silently-ignored dead action input
+      # (delete_assets on action-gh-release v2) that masked nightly asset
+      # accumulation. Pinned binary, ~15s, placed first to fail fast.
+      - name: actionlint
+        run: |
+          curl -sL --fail \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz |
+            tar xz actionlint
+          ./actionlint -color
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
