@@ -21,6 +21,13 @@ x509-parser = "0.16"
 ping = "0.10"
 postgres = { version = "0.19", default-features = false }
 mysql = { version = "28", default-features = false }
+# mysql_common pulls flate2 bare (no backend feature). Workspace builds
+# don't notice — png/ureq enable the default rust_backend — but isolated
+# graphs like the FreeBSD CI leg's `cargo test -p custos-platform`
+# compile flate2 with no backend and hit its compile_error!. This line
+# pins the pure-Rust backend for every graph shape (no C zlib on
+# mingw/musl either).
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 redis = { version = "1.8", default-features = false }
 known-codepages = { version = "0.0.4", default-features = false, features = ["all", "std"] }
 
@@ -38,6 +45,11 @@ windows-sys = { version = "0.61", features = [
 rcgen = "0.13"
 time = "0.3"
 tempfile = "3"
+
+# flate2 is never named in src/: it selects the compression backend for
+# flate2 arriving transitively via mysql_common (see the comment above).
+[package.metadata.cargo-machete]
+ignored = ["flate2"]
 
 # libc::poll backs the exec-probe output deadline; the usage sits behind
 # #[cfg(unix)], so declaring it unix-only keeps the windows build clean.
