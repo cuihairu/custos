@@ -22,14 +22,29 @@ pub struct Scrubber {
 }
 
 /// Extracts non-empty userinfo credentials from a URL so an error message
-/// echoing the URL cannot leak them.
+/// echoing the URL cannot leak them. Both the percent-encoded form (how the
+/// URL serializes) and the decoded form (how a peer would echo the secret
+/// back in an error string) are collected when they differ.
 fn collect_url_credentials(url: &str, needles: &mut Vec<String>) {
     if let Ok(parsed) = url::Url::parse(url) {
         if !parsed.username().is_empty() {
             needles.push(parsed.username().to_owned());
+            push_decoded(parsed.username(), needles);
         }
         if let Some(password) = parsed.password() {
             needles.push(password.to_owned());
+            push_decoded(password, needles);
+        }
+    }
+}
+
+/// Decodes a percent-encoded credential and collects the plaintext form;
+/// peers that received the decoded credential echo the decoded form, which
+/// the encoded needle would never match. Invalid UTF-8 decodes are skipped.
+fn push_decoded(encoded: &str, needles: &mut Vec<String>) {
+    if let Ok(decoded) = percent_encoding::percent_decode_str(encoded).decode_utf8() {
+        if decoded.as_ref() != encoded && !decoded.is_empty() {
+            needles.push(decoded.into_owned());
         }
     }
 }
@@ -220,6 +235,38 @@ mod tests {
         let scrubbed = scrubber.scrub("failed to reach https://deploy:leaky-pass@example.com/hook");
         assert!(!scrubbed.contains("leaky-pass"), "{scrubbed}");
         assert!(!scrubbed.contains("deploy:"), "{scrubbed}");
+    }
+
+    /// A peer that received the credential echoes the DECODED form ("p@ss"),
+    /// not the encoded serialization ("p%40ss") the URL stores — both must
+    /// be needles or the decoded echo leaks (e.g. a CONNECT proxy restating
+    /// the credentials it was given in a failure message).
+    #[test]
+    fn percent_encoded_userinfo_is_collected_in_both_forms() {
+        let mut channels = BTreeMap::new();
+        channels.insert(
+            "tg".to_owned(),
+            ChannelConfig::Telegram(TelegramConfig {
+                bot_token: SecretString::new("tg-bot-token"),
+                chat_id: "@ops".into(),
+                timeout_ms: 1000,
+                retries: 0,
+                backoff_ms: 1,
+                proxy: Some("http://us%65r:p%40ss@127.0.0.1:7890".into()),
+            }),
+        );
+        let config = NotificationConfig {
+            rules: vec![],
+            channels,
+        };
+        let scrubber = Scrubber::from_config(&config);
+        // Encoded form (URL echo).
+        let scrubbed = scrubber.scrub("connect failed for us%65r:p%40ss@127.0.0.1:7890");
+        assert!(!scrubbed.contains("p%40ss"), "{scrubbed}");
+        // Decoded form (peer echo).
+        let scrubbed = scrubber.scrub("proxy rejected user with p@ss");
+        assert!(!scrubbed.contains("p@ss"), "{scrubbed}");
+        assert!(!scrubbed.contains("user"), "{scrubbed}");
     }
 
     #[test]

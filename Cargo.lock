@@ -515,6 +515,7 @@ dependencies = [
  "custos-model",
  "hmac 0.12.1",
  "lettre",
+ "percent-encoding",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.21",
