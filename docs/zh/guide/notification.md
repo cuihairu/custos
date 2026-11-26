@@ -66,6 +66,8 @@ Core Engine 只产生结构化事件，不直接调用 Telegram、SMTP 或其他
 
 按 bot token 投递到配置的会话，OpenWrt init 脚本的覆盖通道用它（`CUSTOS_NOTIFY_TELEGRAM_TOKEN` / `CUSTOS_NOTIFY_TELEGRAM_CHAT`，见 §8.5）。
 
+在网络封锁 api.telegram.org 直连（DNS 污染、TCP 443 被滤）的环境，TOML 通道接受可选出站代理：`proxy = "http://user:pass@192.168.5.11:7890"`（仅 http/https）。URI 内嵌的凭据不会出现在 `Debug` 输出或持久化错误里——scrubber 会抹除。LuCI 覆盖不携带 proxy 字段；请在 TOML 通道块设置。
+
 ### Herald
 
 投递到 Herald 实例，支持 API-key 或 bearer 认证，SSRF 姿态与 webhook 通道一致。

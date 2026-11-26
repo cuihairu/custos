@@ -217,17 +217,28 @@ pub struct TelegramConfig {
     pub timeout_ms: u64,
     pub retries: u32,
     pub backoff_ms: u64,
+    /// Optional outbound proxy (`http://[user:pass@]host:port`) for
+    /// networks that block api.telegram.org directly. Credentials inside
+    /// the URI are redacted in `Debug` and scrubbed from errors.
+    pub proxy: Option<String>,
 }
 
 impl std::fmt::Debug for TelegramConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Never echo the bot token (notification.md 8.7).
+        // Never echo the bot token or proxy credentials (notification.md 8.7).
         f.debug_struct("TelegramConfig")
             .field("bot_token", &self.bot_token)
             .field("chat_id", &self.chat_id)
             .field("timeout_ms", &self.timeout_ms)
             .field("retries", &self.retries)
             .field("backoff_ms", &self.backoff_ms)
+            .field(
+                "proxy",
+                &self
+                    .proxy
+                    .as_deref()
+                    .map(crate::notification::raw::redact_uri_credentials),
+            )
             .finish()
     }
 }
@@ -366,6 +377,7 @@ fn env_overlay_from(
                 timeout_ms: TIMEOUT_MS,
                 retries: RETRIES,
                 backoff_ms: BACKOFF_MS,
+                proxy: None,
             }),
         );
         rule_channels.push("telegram".to_owned());

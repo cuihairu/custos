@@ -63,6 +63,9 @@ impl Scrubber {
                 }
                 ChannelConfig::Telegram(cfg) => {
                     needles.push(cfg.bot_token.expose().to_owned());
+                    if let Some(proxy) = &cfg.proxy {
+                        collect_url_credentials(proxy, &mut needles);
+                    }
                 }
                 ChannelConfig::LocalLog { .. } => {}
             }
@@ -94,7 +97,9 @@ impl Scrubber {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use custos_config::{HeraldConfig, SecretString, SmtpConfig, SsrfPolicy, WebhookConfig};
+    use custos_config::{
+        HeraldConfig, SecretString, SmtpConfig, SsrfPolicy, TelegramConfig, WebhookConfig,
+    };
     use std::collections::BTreeMap;
 
     fn config() -> NotificationConfig {
@@ -143,6 +148,17 @@ mod tests {
                 ssrf: SsrfPolicy::default_blocking(),
             }),
         );
+        channels.insert(
+            "tg".to_owned(),
+            ChannelConfig::Telegram(TelegramConfig {
+                bot_token: SecretString::new("tg-bot-token"),
+                chat_id: "@ops".into(),
+                timeout_ms: 1000,
+                retries: 0,
+                backoff_ms: 1,
+                proxy: Some("http://proxy-user:proxy-pass@127.0.0.1:7890".into()),
+            }),
+        );
         NotificationConfig {
             rules: vec![],
             channels,
@@ -154,13 +170,16 @@ mod tests {
         let scrubber = Scrubber::from_config(&config());
         assert!(!scrubber.is_empty());
 
-        let leaked = "webhook auth failed for Bearer super-token (hmac hmac-secret-value), smtp password smtp-password, herald token herald-trigger-token";
+        let leaked = "webhook auth failed for Bearer super-token (hmac hmac-secret-value), smtp password smtp-password, herald token herald-trigger-token, telegram token tg-bot-token via proxy-user:proxy-pass";
         let scrubbed = scrubber.scrub(leaked);
         assert!(!scrubbed.contains("super-token"), "{scrubbed}");
         assert!(!scrubbed.contains("hmac-secret-value"), "{scrubbed}");
         assert!(!scrubbed.contains("smtp-password"), "{scrubbed}");
         assert!(!scrubbed.contains("herald-trigger-token"), "{scrubbed}");
-        assert_eq!(scrubbed.matches(REDACTED).count(), 4);
+        assert!(!scrubbed.contains("tg-bot-token"), "{scrubbed}");
+        assert!(!scrubbed.contains("proxy-user"), "{scrubbed}");
+        assert!(!scrubbed.contains("proxy-pass"), "{scrubbed}");
+        assert_eq!(scrubbed.matches(REDACTED).count(), 7);
     }
 
     #[test]

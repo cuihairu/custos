@@ -439,6 +439,66 @@ chat_id = "@ops"
 }
 
 #[test]
+fn telegram_proxy_is_parsed_and_credentials_redacted_in_debug() {
+    let config = load(
+        r#"
+version = 1
+
+[[resources]]
+id = "web"
+type = "http-endpoint"
+
+[notification.channels.tg]
+type = "telegram"
+bot_token = "tg-hunter2"
+chat_id = "@ops"
+proxy = "http://proxy-user:proxy-pass@127.0.0.1:7890"
+"#,
+    )
+    .unwrap();
+    let channel = config.notification.channels.get("tg").unwrap();
+    match channel {
+        crate::ChannelConfig::Telegram(cfg) => {
+            assert_eq!(
+                cfg.proxy.as_deref(),
+                Some("http://proxy-user:proxy-pass@127.0.0.1:7890")
+            );
+        }
+        other => panic!("expected telegram channel, got {other:?}"),
+    }
+    let debug = format!("{channel:?}");
+    assert!(!debug.contains("proxy-user"), "leaked proxy user: {debug}");
+    assert!(!debug.contains("proxy-pass"), "leaked proxy pass: {debug}");
+    assert!(debug.contains("[redacted]@127.0.0.1:7890"), "got: {debug}");
+}
+
+#[test]
+fn telegram_rejects_a_non_http_proxy_scheme_without_echoing_credentials() {
+    let err = load(
+        r#"
+version = 1
+
+[[resources]]
+id = "web"
+type = "http-endpoint"
+
+[notification.channels.tg]
+type = "telegram"
+bot_token = "tg-hunter2"
+chat_id = "@ops"
+proxy = "ftp://proxy-user:proxy-pass@127.0.0.1:7890"
+"#,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("http:// or https://"), "{err}");
+    assert!(
+        !err.contains("proxy-pass"),
+        "leaked proxy credentials: {err}"
+    );
+}
+
+#[test]
 fn herald_channel_debug_redacts_the_token() {
     let config = load(
         r#"

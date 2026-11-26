@@ -164,12 +164,21 @@ impl<Q: NotificationQueue> NotificationEngine<Q> {
                     crate::herald::HeraldChannel::new(id.clone(), cfg.clone())
                         .map(|c| Box::new(c) as Box<dyn Channel>)
                 }
-                ChannelConfig::Telegram(cfg) => Ok(Box::new(crate::telegram::TelegramChannel::new(
-                    id.clone(),
-                    cfg.bot_token.expose(),
-                    cfg.chat_id.clone(),
-                    cfg.timeout_ms,
-                )) as Box<dyn Channel>),
+                ChannelConfig::Telegram(cfg) => {
+                    let channel = crate::telegram::TelegramChannel::new(
+                        id.clone(),
+                        cfg.bot_token.expose(),
+                        cfg.chat_id.clone(),
+                        cfg.timeout_ms,
+                    );
+                    let built = match &cfg.proxy {
+                        Some(proxy) => channel.with_proxy(proxy),
+                        None => Ok(channel),
+                    };
+                    built
+                        .map(|c| Box::new(c) as Box<dyn Channel>)
+                        .map_err(|e| ChannelError::new(ChannelErrorKind::Config, e))
+                }
             };
             match built {
                 Ok(channel) => {

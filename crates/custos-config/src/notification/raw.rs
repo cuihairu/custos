@@ -151,6 +151,9 @@ struct RawTelegram {
     retries: u32,
     #[serde(default = "default_backoff_ms")]
     backoff_ms: u64,
+    /// Optional outbound proxy for networks that block api.telegram.org.
+    #[serde(default)]
+    proxy: Option<String>,
 }
 
 fn default_herald_audiences() -> Vec<String> {
@@ -171,6 +174,22 @@ fn default_backoff_ms() -> u64 {
 }
 fn default_smtp_port() -> u16 {
     587
+}
+
+/// Redacts `user:pass@` inside a URI so error output never echoes proxy
+/// credentials (notification.md 8.7).
+pub(crate) fn redact_uri_credentials(uri: &str) -> String {
+    let Some(scheme_end) = uri.find("://") else {
+        return uri.to_owned();
+    };
+    let after = &uri[scheme_end + 3..];
+    if let Some(at) = after.find('@') {
+        let userinfo = &after[..at];
+        if !userinfo.is_empty() && !userinfo.contains('/') {
+            return format!("{}[redacted]{}", &uri[..scheme_end + 3], &after[at..]);
+        }
+    }
+    uri.to_owned()
 }
 
 /// Builds the validated notification config. `known_resources` is the set of
@@ -399,12 +418,24 @@ fn build_channel(id: &str, mut table: toml::Table) -> Result<ChannelConfig, Stri
             if raw.chat_id.trim().is_empty() {
                 return Err("telegram `chat_id` must not be empty".to_owned());
             }
+            // Scheme gate here (mirrors the webhook URL check); the
+            // authoritative parse happens when the channel builds.
+            let proxy = raw.proxy.map(|p| p.trim().to_owned()).filter(|p| !p.is_empty());
+            if let Some(proxy) = &proxy {
+                if !(proxy.starts_with("http://") || proxy.starts_with("https://")) {
+                    return Err(format!(
+                        "telegram `proxy` must be an http:// or https:// URI (got `{}`)",
+                        redact_uri_credentials(proxy)
+                    ));
+                }
+            }
             Ok(ChannelConfig::Telegram(TelegramConfig {
                 bot_token: raw.bot_token,
                 chat_id: raw.chat_id,
                 timeout_ms: raw.timeout_ms,
                 retries: raw.retries,
                 backoff_ms: raw.backoff_ms,
+                proxy,
             }))
         }
         other => Err(format!(

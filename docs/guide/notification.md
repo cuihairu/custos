@@ -66,6 +66,8 @@ Implemented behavior:
 
 Bot-token delivery to a configured chat, used by the OpenWrt init script overlay (`CUSTOS_NOTIFY_TELEGRAM_TOKEN` / `CUSTOS_NOTIFY_TELEGRAM_CHAT`, §8.5).
 
+On networks that block api.telegram.org directly (DNS-poisoned, TCP 443 filtered), the TOML channel accepts an optional outbound proxy: `proxy = "http://user:pass@192.168.5.11:7890"` (http/https only). Credentials inside the URI never appear in `Debug` output or persisted errors — the scrubber redacts them. The LuCI overlay does not carry the proxy field; set it in the TOML channel block.
+
 ### Herald
 
 Delivery to a Herald instance, with API-key or bearer authentication and the same SSRF posture as the webhook channel.

@@ -7,6 +7,8 @@
 //! bot_token = "123456:ABC-DEF..."
 //! chat_id = "-1001234567890"
 //! timeout_ms = 5000
+//! # Optional outbound proxy for networks that block api.telegram.org:
+//! # proxy = "http://user:pass@192.168.5.11:7890"
 //! ```
 //! One attempt per deliver: the queue engine owns retry and backoff
 //! (§8.6, C19/C22); the parsed `retries`/`backoff_ms` fields are accepted
@@ -28,6 +30,7 @@ pub struct TelegramChannel {
     id: String,
     bot_token: String,
     chat_id: String,
+    timeout_ms: u64,
     agent: ureq::Agent,
     api_base: String,
 }
@@ -48,6 +51,7 @@ impl TelegramChannel {
             id: id.into(),
             bot_token: bot_token.into(),
             chat_id: chat_id.into(),
+            timeout_ms,
             agent,
             api_base: TG_API_BASE.to_owned(),
         }
@@ -57,6 +61,24 @@ impl TelegramChannel {
     pub fn with_api_base(mut self, base: impl Into<String>) -> Self {
         self.api_base = base.into();
         self
+    }
+
+    /// Routes every delivery through an outbound HTTP(S) proxy of the form
+    /// `http://[user:pass@]host:port`. Networks that block api.telegram.org
+    /// directly (the live-acceptance deployment) deliver through the local
+    /// proxy instead; credentials embedded in the URI are never logged (the
+    /// scrubber collects the userinfo, and `Debug` redacts it).
+    /// `ureq::Proxy` is the authoritative parser: a bad URI is a config
+    /// error (terminal, never retried).
+    pub fn with_proxy(mut self, proxy: &str) -> Result<Self, String> {
+        let proxy = ureq::Proxy::new(proxy).map_err(|e| format!("invalid telegram proxy: {e}"))?;
+        self.agent = ureq::Agent::new_with_config(
+            ureq::config::Config::builder()
+                .timeout_global(Some(Duration::from_millis(self.timeout_ms)))
+                .proxy(Some(proxy))
+                .build(),
+        );
+        Ok(self)
     }
 
     fn endpoint(&self) -> String {
@@ -226,6 +248,32 @@ mod tests {
     }
 
     #[test]
+    fn invalid_proxy_scheme_is_a_config_error() {
+        let channel = TelegramChannel::new("tg", "123456:TEST-TOKEN", "-1001234567890", 2000);
+        let err = channel
+            .with_proxy("ftp://127.0.0.1:7890")
+            .err()
+            .expect("non-http proxy must be refused");
+        assert!(err.contains("invalid telegram proxy"), "{err}");
+    }
+
+    /// The api_base points at a local responder that would succeed, but the
+    /// proxy is a refused port: only a delivery actually routed through the
+    /// proxy fails, proving the proxy takes precedence over api_base.
+    #[test]
+    fn delivery_goes_through_the_configured_proxy() {
+        let (addr, captured) = responder(200, r#"{"ok":true}"#);
+        let channel = channel_with_addr(&addr.to_string())
+            .with_proxy("http://127.0.0.1:9")
+            .expect("http proxy parses");
+        let err = channel.deliver(&event()).unwrap_err();
+        assert_eq!(err.kind, ChannelErrorKind::Transport, "{err:?}");
+        // The responder never saw a request: the proxy intercepted it.
+        assert!(captured.lock().unwrap().is_empty());
+        let _ = addr;
+    }
+
+    #[test]
     fn server_5xx_is_http_retryable() {
         let (addr, captured) = responder(500, r#"{"ok":false,"error_code":500}"#);
         let channel = channel_with_addr(&addr.to_string());
@@ -241,14 +289,21 @@ mod tests {
     /// real delivery needs a real bot token, which only the user holds.
     /// Ignored by default; run with the environment set:
     ///   LIVE_TG_BOT_TOKEN=123456:ABC... LIVE_TG_CHAT_ID=-100... \
+    ///   [LIVE_TG_PROXY=http://user:pass@host:port] \
     ///   cargo test -p custos-notify -- --ignored --nocapture
+    /// LIVE_TG_PROXY is optional: networks that block api.telegram.org
+    /// directly (DNS-poisoned, TCP 443 filtered) need the local outbound
+    /// proxy, e.g. the router's authenticated mixed port.
     /// Sends exactly one message (single attempt; no retry ladder here).
     #[test]
     #[ignore]
     fn live_delivery_to_real_telegram() {
         let token = std::env::var("LIVE_TG_BOT_TOKEN").expect("LIVE_TG_BOT_TOKEN");
         let chat = std::env::var("LIVE_TG_CHAT_ID").expect("LIVE_TG_CHAT_ID");
-        let channel = TelegramChannel::new("tg-acceptance", token, chat, 10_000);
+        let mut channel = TelegramChannel::new("tg-acceptance", token, chat, 10_000);
+        if let Ok(proxy) = std::env::var("LIVE_TG_PROXY") {
+            channel = channel.with_proxy(&proxy).expect("LIVE_TG_PROXY");
+        }
 
         let mut evt = event();
         evt.summary = format!(
