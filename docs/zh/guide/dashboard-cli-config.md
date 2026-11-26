@@ -33,7 +33,7 @@ custos validate <CONFIG>           解析并校验配置（拒绝重复 ID、悬
 custos init <TYPE> --id <ID> [--out PATH] [--force]
                                    为某资源类型生成完整配置模板
                                    （占位值；使用前先编辑，再 validate）
-custos start <CONFIG> [OPTIONS]    运行引擎循环（--db PATH、--interval MS、--once）
+custos start <CONFIG> [OPTIONS]    运行引擎循环（--db PATH、--interval MS、--once、--strict-config）
 custos status [--db PATH] [--json]     存储计数与最近审计事件
 custos runs [--db PATH] [--json]       最近恢复任务（新→旧）
 custos incidents [--db PATH] [--json]  事件（incident）历史
@@ -45,6 +45,8 @@ custos graph <CONFIG>              依赖图（拓扑序）
 
 `start` 启动时先做崩溃恢复（未终态运行标记 outcome-unknown，绝不盲目重试），
 再进入探测/恢复 tick 循环；通知引擎随进程接线（事件入队 + 后台投递，断网补发）。
+
+**配置 last-known-good 回退**（2026-11-22 用户裁定：验证不过不许切换重启）：每次成功 `start` 会把通过校验的配置文本原子写入同目录 `<CONFIG>.last-good` 快照。运行时配置校验失败而快照可用时，引擎**在旧配置下继续运行并大声告警**，而不是退出——坏编辑绝不能让受监督机器从「有人看着」变成「无人值守、没信号」。快照只在干净加载后写入，坏配置不可能污染它。`--strict-config` 恢复 fail-fast（不回退）。`custos validate` 仍是纯检查器，从不触碰快照。
 
 三个只读历史命令（`status` / `runs` / `incidents`）的 `--json` 把同样的行输出为单个机器可读 JSON 文档——它就是 LuCI 状态面板的数据源。
 
@@ -67,44 +69,36 @@ custos graph <CONFIG>              依赖图（拓扑序）
 
 首版采用 TOML（单一主格式，`version = 1`）。
 
-## 10.2 示例：Cloudflare Tunnel 依赖代理
+## 10.2 示例：一个接到插件上的资源
 
-以下为目标配置形态，展示架构语义。`plugin:` / `config:` 资源键与 YAML 形态仅是目标形状——TOML schema（`deny_unknown_fields`）当前会拒绝它们，因为插件接入配置的接线尚未落地（`crates/custos-core/src/assemble.rs:43-56` 只装配内置探测）。
+下文的形态即已实现的 TOML schema。插件进程声明在 `[[plugins]]` 下；资源用 `plugin`（可选再加 `probe_operation`）引用其中一个，恢复计划在计划的 action 里用 `plugin` + `operation_id` 分发插件操作。下文 YAML 形态仅作示意——正式、经过校验的形态是 TOML；见 [docs/guide/plugins.md](plugins.md) 与仓库根目录的 `examples/openclash-failover.toml`。
 
-```yaml
-version: 1
+```toml
+version = 1
 
-resources:
-  - id: proxy.egress
-    type: proxy
-    plugin: mihomo
-    config:
-      endpoint: http://127.0.0.1:7890
+[[plugins]]
+name = "mihomo"
+binary = "/usr/local/bin/mihomo-plugin"
+request_timeout_ms = 10000
 
-  - id: tunnel.egress
-    type: tunnel
-    plugin: cloudflared
-    config:
-      entry: https://api.example.com
-    dependencies:
-      - resource: proxy.egress
-        requirement: required
+[plugins.env]
+MIHOMO_API = "http://127.0.0.1:9090"
+MIHOMO_GROUP = "CHANGE_ME"
 
-notification:
-  rules:
-    - event: recovery.exhausted
-      severity_min: critical
-      channels:
-        - primary-webhook
+[[resources]]
+id = "proxy.egress"
+type = "mihomo"
+plugin = "mihomo"
+probe_operation = "mihomo.probe"
 ```
 
-需要注意：
+注意：
 
-1. 代理健康检查应尽量区分代理认证失败、连接失败和目标服务异常。
-2. 如果代理并非 Tunnel 的必要依赖，则不应声明 Required。
-3. HTTP 探测今天已是原生探针（`crates/custos-probe/src/factory.rs:53`）；mihomo 与 cloudflared 插件二进制已存在且会说协议，但尚无法从配置接上（见上文说明）。
-4. 第一版的配置验证器可以先定义完整配置模型，但未实现的资源类型必须报出清楚的能力缺失错误，不能假装已经运行。
-5. 恢复动作必须与插件能力声明匹配。
+1. 代理健康检查区分代理认证失败（407 → `proxy_authentication_failed`）、连接失败（`proxy_connection_failed`）与目标服务异常（`remote_endpoint_unreachable`）——内置代理探测负责分类，计划阶梯按这些码选择。
+2. 如果代理不是 Tunnel 的必要依赖，就不得声明为 Required。
+3. 插件接线在加载时校验：未知插件名、无 `plugin` 的 `probe_operation`、以及 argv 与插件操作混用的动作形式，都是启动错误，绝不留到运行期才炸。
+4. 恢复动作必须与插件声明的能力匹配。
+5. 节点切换上，插件共用一个客户端（`plugins/clash-api`），其选择策略会过滤订阅信息节点——剩余流量/套餐到期这类成员延迟数字健康，但它们不是代理。
 
 ## 10.3 配置加载过程
 
@@ -115,7 +109,7 @@ notification:
 5. 验证依赖引用。
 6. 验证依赖图。
 7. 验证恢复动作引用。
-8. 验证插件能力。（计划中：插件尚未接入配置——加载器当前不做能力校验，`plugin_ref` 恒为未设，`crates/custos-config/src/build.rs:356`。）
+8. 验证插件能力。（已交付：加载器校验 `plugin` 指向已声明插件、探测动作的操作 id 非空、argv 与插件操作不混用，`crates/custos-config/src/build.rs`；运行期能力发现由插件的 `describe_capabilities` 完成。）
 9. 验证权限与风险策略。
 10. 验证通知渠道配置。
 11. 验证数据库迁移兼容性。（计划中：迁移在 store 打开时执行，`crates/custos-store/src/store/lifecycle.rs:39`；配置加载器不做迁移检查。）
