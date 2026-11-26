@@ -73,12 +73,15 @@ Wi-Fi 重连涉及凭据、网卡和系统权限，应使用系统支持的 API 
 
 ## 11.5 BSD
 
-后续支持：
+已实现（`crates/custos-platform/src/init_systems.rs` rcd 模块、`crates/custos-platform/src/bsd.rs`、`crates/custos-platform/src/ifconfig.rs`、`crates/custos-platform/src/lib.rs`）：
 
-- 进程检测。
-- rc.d 服务管理。
-- 网络接口与路由状态。
-- 系统重启。
+- 经 `/usr/sbin/service <unit> onestatus|onestart|onestop|onerestart` 做 rc.d 服务管理（`one` 前缀绕过 rc.conf 启用判定；状态由纯分类器归一）。
+- 网络接口与连通性状态走 FreeBSD 网络控制器（`ifconfig -a`，共用 BSD 家族解析器）。
+- 系统重启走 FreeBSD 重启控制器（`shutdown -r now`）。
+
+仍待做：
+
+- Wi-Fi 重连（FreeBSD 没有 Wi-Fi 适配路径）。
 
 ## 11.6 OpenWrt
 

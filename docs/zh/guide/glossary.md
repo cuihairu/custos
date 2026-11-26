@@ -24,7 +24,7 @@ title: 源码分层术语表
 | 恢复运行 | Recovery run | 一次故障处理实例和显式状态机；终态之外的所有关键转换必须持久化 | `crates/custos-model/src/recovery.rs:187` |
 | 恢复预算 | Recovery budget | 运行并发、尝试数、运行时长、重启率与高风险次数的上限和记账状态 | `crates/custos-engine/src/budget.rs:59` |
 | 协调循环 | Coordination loop | 依赖优先探测、失败诊断、依赖前置、计划选择、执行、健康验证、等待唤醒和崩溃续跑的主循环 | `crates/custos-engine/src/engine/orchestrate.rs:9` |
-| 恢复执行器 | Action executor | 将动作翻译为实际调用的边界；内置执行器只能执行本机命令，验证必须来自探测而非退出码 | `crates/custos-engine/src/executor.rs:10` |
+| 恢复执行器 | Action executor | 将动作翻译为实际调用的边界；内置执行器只能执行本机命令，验证必须来自探测而非退出码 | `crates/custos-engine/src/executor.rs:14` |
 | 运行仓储 | Run store | 引擎写运行、尝试、验证、探测、诊断、事件、步骤和未完成运行的抽象持久化端口 | `crates/custos-engine/src/events.rs:130` |
 | 运行时装配 | Runtime assembly | 唯一将配置、探测、引擎、SQLite 仓储、通知引擎和系统时钟连接起来的装配点，CLI 与 Python 共用 | `crates/custos-core/src/assemble.rs:59` |
 | 原生探测 | Builtin probe | 在主进程内运行的资源观测器，返回归一化探测报告但不决定恢复动作 | `crates/custos-probe/src/lib.rs:70` |

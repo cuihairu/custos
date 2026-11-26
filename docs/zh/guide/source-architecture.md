@@ -30,18 +30,18 @@ title: 源码架构
 
 **职责：** 归一化观测但不决定恢复，并为原生与外部能力提供同一个可审计权限边界。
 
-- **原生探测：** `Probe::probe` 返回归一化报告，绝不选择动作（`crates/custos-probe/src/lib.rs:70`）。`custos-core::build_probes` 在启动时把每个配置资源变成内置探测（`crates/custos-core/src/assemble.rs:42`）。
+- **原生探测：** `Probe::probe` 返回归一化报告，绝不选择动作（`crates/custos-probe/src/lib.rs:70`）。`custos-core::build_probes` 在启动时把每个配置资源变成内置探测（`crates/custos-core/src/assemble.rs:102`）。
 - **协议：** 原生探测没有 wire 协议；每个探测读取 `Resource.config` 的类型化切片。
 - **插件协议：** 换行分帧 JSON-RPC 方法和能力声明定义在 `crates/custos-plugin-api/src/rpc.rs:23` 与 `crates/custos-plugin-api/src/capability.rs:38`。宿主会话对双向管道做输出上限和超时（`crates/custos-plugin-host/src/session.rs:101`）；示例插件调用 `crates/custos-plugin-api/src/server.rs:32` 的 `serve`。
 - **权限/派发：** 内置工具与插件操作在 `ToolRegistry` 汇合；权限先于内置工具或插件执行（`crates/custos-toolbox/src/registry.rs:181`）。
-- **配置 schema：** 资源探测参数通过主 TOML 契约输入；插件可执行文件还没有——schema 里没有 plugin 键、装配只走内置（`crates/custos-core/src/assemble.rs:43-56`）。外部控制器配置由示例插件自行读取（`plugins/mihomo/src/main.rs:31`）。
+- **配置 schema：** 资源探测参数通过主 TOML 契约输入。插件通过 `[[plugins]]` 声明（`crates/custos-config/src/build.rs:39`），用 `plugin` + `probe_operation` 挂到资源上（`crates/custos-config/src/schema.rs:217`），用 `plugin` + `operation_id` 挂到恢复计划上（`crates/custos-model/src/recovery.rs:40`）；`assemble` 为每个声明拉起一个 supervisor（`crates/custos-core/src/assemble.rs:75`）。外部控制器配置由示例插件自行读取（`plugins/mihomo/src/main.rs:31`）。
 - **文案挂载：** `docs/zh/guide/plugins.md`、`docs/zh/guide/probe-survey.md`、`docs/zh/guide/security.md` 与 `docs/zh/adr/ADR-0003-why-jsonrpc-over-stdio.md`。
 
 ## 4. 执行与平台层
 
 **职责：** 通过受控 OS 原语执行被选中的本机动作，同时保留能力元数据和验证边界。
 
-- **恢复边界：** `ActionExecutor` 暴露 execute 和 verify；内置执行器运行配置 argv，验证必须是探测而不是退出码（`crates/custos-engine/src/executor.rs:10`）。
+- **恢复边界：** `ActionExecutor` 暴露 execute 和 verify；内置执行器运行配置 argv，验证必须是探测而不是退出码（`crates/custos-engine/src/executor.rs:14`）。
 - **OS 接口：** 进程、服务、网络接口、连通性、凭据和重启契约声明在 `crates/custos-platform/src/controller.rs:16` 至 `crates/custos-platform/src/controller.rs:104`；适配器实现 systemd/Windows SCM/netsh/reboot 路径（`crates/custos-platform/src/linux.rs:142`、`crates/custos-platform/src/windows.rs:165`）。
 - **能力门：** 每个适配器显式报告可支持的操作；不支持必须是显式错误（`crates/custos-platform/src/capability.rs:19`）。
 - **配置 schema：** 平台操作没有自己的 TOML schema；操作 ID 与风险/权限语义由工具和恢复计划提供。
@@ -93,7 +93,7 @@ title: 源码架构
 1. **先拒绝非法拓扑再执行。** 配置解析在启动时构造并校验依赖图，避免未知资源和依赖环变成恢复期递归（`crates/custos-model/src/graph.rs:59`；`crates/custos-config/src/build.rs:42`）。
 2. **能力提供者不进入控制流。** 探测只返回观测（`crates/custos-probe/src/lib.rs:70`），而引擎拥有依赖解析、计划选择、执行和最终健康判定（`crates/custos-engine/src/engine/orchestrate.rs:9`；`crates/custos-engine/src/engine/recover.rs:8`）。
 3. **原生与外部能力在同一个权限边界归一。** 内置工具和插件操作注册进一张表，拒绝发生在任一实现运行之前（`crates/custos-toolbox/src/registry.rs:181`），插件子进程无法获得未审查控制路径。
-4. **OS 执行可替换但不承载策略。** 恢复通过 `ActionExecutor` 委托执行（`crates/custos-engine/src/executor.rs:10`），具体 OS 能力声明并实现在平台契约后（`crates/custos-platform/src/controller.rs:41`；`crates/custos-platform/src/capability.rs:19`）。
+4. **OS 执行可替换但不承载策略。** 恢复通过 `ActionExecutor` 委托执行（`crates/custos-engine/src/executor.rs:14`），具体 OS 能力声明并实现在平台契约后（`crates/custos-platform/src/controller.rs:41`；`crates/custos-platform/src/capability.rs:19`）。
 5. **风险转换前后都持久化。** 引擎不直接依赖 SQL，而是通过 `RunStore` 写入（`crates/custos-engine/src/events.rs:130`）；SQLite 在同一个文件中实现持久运行与通知队列（`crates/custos-store/src/store/runs.rs:5`；`crates/custos-store/src/migrations.rs:180`）。
 6. **报告失败不进入恢复路径。** 恢复只向非阻塞通知 sink 发事件（`crates/custos-core/src/assemble.rs:30`）；通知规则入队（`crates/custos-notify/src/engine.rs:203`），后续由独立 worker 投递（`crates/custos-notify/src/engine.rs:293`）。
 7. **隔离崩溃影响范围。** 插件进程死亡由有界重启/降级监督器吸收（`crates/custos-plugin-host/src/supervisor.rs:66`）；被打断的引擎运行标记为未知，只通过显式 resume 逻辑重驱（`crates/custos-engine/src/engine/orchestrate.rs:224`）。
