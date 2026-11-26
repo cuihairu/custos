@@ -44,6 +44,14 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps
+      # Unused-dependency gate: cargo machete's naive string match flagged 6
+      # real dead deps in one manual run (2026-11-26, a92d030). Keep the
+      # check in CI so leftovers die at the door; a legitimately unused
+      # feature-propagation dep gets a [package.metadata.cargo-machete]
+      # ignore entry with a comment, not a deletion.
+      - uses: taiki-e/install-action@cargo-machete
+      - name: unused dependencies
+        run: cargo machete
       - name: test
         run: cargo test --workspace
 
