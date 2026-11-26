@@ -163,5 +163,5 @@ Check off each phase with its commit hash once it lands; for sources and accepta
 - [x] P0 core recovery engine (commit: `21cde62`)
 - [x] P1 plugin runtime and notification infrastructure (commit: `d30f8cb`)
 - [x] P2 platform base capabilities (commit: `c2f7325`)
-- [x] P3 network, proxy and real self-healing scenarios (commit: `52ea755`) — acceptance scenarios 1 (Sunlogin) and 2 (Wi-Fi) plus the full Windows Wi-Fi recovery path still await verification on real hardware.
-- [ ] P4 optional management interface and extensions — the web dashboard and desktop tray have landed; macOS base branches run on a real macOS CI leg (read-only and probe paths verified; Wi-Fi association and privileged reset/reboot paths await a real-machine walkthrough), BSD has no implementation, and plugin signing policy is pending.
+- [x] P3 network, proxy and real self-healing scenarios (commit: `52ea755`) — acceptance scenario 1 (Sunlogin) is verified on real hardware (`2c7a692`); scenario 2 (Wi-Fi) and the full Windows Wi-Fi recovery path still await verification on real hardware.
+- [ ] P4 optional management interface and extensions — the web dashboard and desktop tray have landed; macOS base branches run on a real macOS CI leg (read-only and probe paths verified; Wi-Fi association and privileged reset/reboot paths await a real-machine walkthrough), BSD adaptation is implemented and covered by a real FreeBSD CI leg (`b3050c2`), and plugin signing policy awaits the user's decision.
