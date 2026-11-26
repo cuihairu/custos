@@ -21,7 +21,7 @@
 - [x] **C-SET-UX-01 [P1] 拆开服务、资源与通知设置。**
   - **问题** 当前 CBI 将运行参数和通知覆盖放在同页，用户需要自己判断改的是 UCI 还是 TOML。
   - **怎么做** 保留已存在的 LuCI 路由与权限，分组说明配置来源、启用作用域与重启时机。引擎周期用秒显示并保留毫秒精度。
-  - **怎么验证** 用默认值和 1500 ms 非整秒配置验证往返；只改数据库路径时只改变对应 UCI 键。核对已有入口、窄窗口和长路径。 [CBI 设置](packaging/openwrt/usr/lib/lua/luci/model/cbi/custos.lua)
+  - **怎么验证** 用默认值和 1500 ms 非整秒配置验证往返；只改数据库路径时只改变对应 UCI 键。核对已有入口、窄窗口和长路径。 [CBI 设置](packaging/openwrt/usr/lib/lua/luci/model/cbi/custos-service.lua)
   - 实现注记 `7c94d42`（2026-11-24）：拆为 `custos-service.lua`（main 段）与 `custos-notify.lua`（notify 段）两页，控制器路由保留既有 entry 与权限（路径不变，main 页 cbi 模型换 `custos-service`，新增 notify 子路由）；UCI 仍存毫秒（init.d `--interval` 契约不动），UI 秒显示毫秒精度，换算/校验在纯函数模块 `luci.custos.settings`（`to_ms`/`to_seconds`），1500 ms↔1.5 s 往返等 45 断言 host Lua 5.4 通过，`luac -p` 4/4；「只改数据库路径只改对应 UCI 键」由拆页结构保证（服务页仅写 main 段）+ 页面「配置来源」说明（运行参数=UCI / 资源=TOML / 通知=覆盖或 TOML）。。
   - 收口注记 `7f273e3`（2026-11-26，C-SET-UX-07 隔离实例）：UCI 毫秒差分实测（表单 2 s→UCI 2000→argv `--interval 2000` 同一次提交；Save-only 仅 stage interval、已提交面不动）；760 px 三页视觉；截屏与 CLI/procd 断言见 `docs/design/settings-redesign/setux-07-isolated-acceptance.md` §2。
 - [x] **C-SET-UX-02 [P1] 资源先选对象，再编辑探测与恢复。**
