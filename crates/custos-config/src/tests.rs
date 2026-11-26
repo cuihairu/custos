@@ -667,3 +667,25 @@ listen = "not-an-address"
     .unwrap_err();
     assert!(err.to_string().contains("dashboard.listen"), "got: {err}");
 }
+
+// The examples/ directory ships inside every nightly artifact (tar/zip/dmg/
+// msi embed it), so schema drift breaks shipped files silently — nothing
+// else in CI loads them. Walk the real files at repo-root/examples and run
+// each through the same load gate the CLI validate command uses.
+#[test]
+fn bundled_examples_still_validate() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).expect("examples dir exists") {
+        let path = entry.expect("readable dir entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        load(&text)
+            .unwrap_or_else(|e| panic!("example {} no longer validates: {e}", path.display()));
+        checked += 1;
+    }
+    assert!(checked >= 5, "expected the example corpus, found {checked}");
+}
