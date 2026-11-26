@@ -139,7 +139,7 @@ fn power_sleep(id: &str) -> String {
 # is the fault this probe reports. Unreachable on hosts without a wired
 # power surface (never guessed).
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the power
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): the power
 # probes currently diagnose `unknown_failure`. A recovery plan whose
 # `applicable_faults` does not contain the fault actually diagnosed NEVER
 # runs — recovery exhausts with 0 attempts.
@@ -167,7 +167,7 @@ fn power_wake(id: &str) -> String {
 # wake-bit surface — the probe reports Unreachable there instead of
 # guessing.
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the power
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): the power
 # probes currently diagnose `unknown_failure`. A recovery plan whose
 # `applicable_faults` does not contain the fault actually diagnosed NEVER
 # runs — recovery exhausts with 0 attempts.
@@ -193,7 +193,7 @@ fn power_downtime(id: &str) -> String {
 # Unhealthy outside it. The window may cross midnight (23:00-07:00).
 # Pure policy check — no platform power surface is touched.
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the power
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): the power
 # probes currently diagnose `unknown_failure`. A recovery plan whose
 # `applicable_faults` does not contain the fault actually diagnosed NEVER
 # runs — recovery exhausts with 0 attempts.
@@ -276,7 +276,7 @@ fn process(id: &str) -> String {
         "# Process supervision: watch a PID file, restart via the plan below
 # (docs/guide/resources.md §3.1, docs/guide/probe-diagnosis.md §5.4).
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): a failing
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): a failing
 # `process` probe diagnoses `process_exited`. A recovery plan whose
 # `applicable_faults` does not contain the fault actually diagnosed NEVER
 # runs — recovery exhausts with 0 attempts.
@@ -304,7 +304,7 @@ fn custom_command(id: &str) -> String {
 # exit code (docs/guide/resources.md §3.1, docs/guide/probe-diagnosis.md
 # §5.4).
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): a failing
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): a failing
 # exec/custom-command probe diagnoses `remote_endpoint_unreachable`
 # (Unhealthy verdict) or `probe_timeout` (Unreachable/timeout verdict). A
 # recovery plan whose `applicable_faults` does not contain the fault actually
@@ -332,7 +332,7 @@ fn windows_service(id: &str) -> String {
 # resource type. docs/guide/resources.md §3.1 lists it among the example
 # types for this reason.
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the native
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): the native
 # service probes currently diagnose `unknown_failure`. A recovery plan whose
 # `applicable_faults` does not contain the fault actually diagnosed NEVER
 # runs — recovery exhausts with 0 attempts
@@ -359,7 +359,7 @@ fn service(id: &str) -> String {
 # to the exec probe (factory.rs:114-141, docs/guide/resources.md §3.1,
 # docs/guide/probe-diagnosis.md §5.4).
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the native
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): the native
 # service probes currently diagnose `unknown_failure`. A recovery plan whose
 # `applicable_faults` does not contain the fault actually diagnosed NEVER
 # runs — recovery exhausts with 0 attempts.
@@ -383,7 +383,7 @@ fn http_endpoint(id: &str) -> String {
 # keyword assertions and the response-time threshold (http.rs,
 # docs/guide/resources.md §3.1, docs/guide/probe-diagnosis.md §5.4).
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the native
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): the native
 # http probe currently diagnoses `unknown_failure`. A recovery plan whose
 # `applicable_faults` does not contain the fault actually diagnosed NEVER
 # runs — recovery exhausts with 0 attempts.
@@ -408,7 +408,7 @@ fn network_connectivity(id: &str) -> String {
         "# TCP connectivity: connect to host:port, optionally over TLS
 # (tcp.rs, docs/guide/resources.md §3.1, docs/guide/probe-diagnosis.md §5.4).
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the native
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): the native
 # tcp probe currently diagnoses `unknown_failure`. A recovery plan whose
 # `applicable_faults` does not contain the fault actually diagnosed NEVER
 # runs — recovery exhausts with 0 attempts.
@@ -433,7 +433,7 @@ fn disk(id: &str) -> String {
         "# Disk usage: warn/crit percentage thresholds on one mount point
 # (disk.rs, docs/guide/resources.md §3.1, docs/guide/probe-diagnosis.md §5.4).
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the native
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): the native
 # disk probe currently diagnoses `unknown_failure`. A recovery plan whose
 # `applicable_faults` does not contain the fault actually diagnosed NEVER
 # runs — recovery exhausts with 0 attempts.
@@ -459,7 +459,7 @@ fn memory(id: &str) -> String {
 # swap (mem.rs, docs/guide/resources.md §3.1, docs/guide/probe-diagnosis.md
 # §5.4).
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the native
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): the native
 # memory probe currently diagnoses `unknown_failure`. A recovery plan whose
 # `applicable_faults` does not contain the fault actually diagnosed NEVER
 # runs — recovery exhausts with 0 attempts.
@@ -483,7 +483,7 @@ fn cpu(id: &str) -> String {
         "# CPU load: warn/crit load-average thresholds (cpu.rs,
 # docs/guide/resources.md §3.1, docs/guide/probe-diagnosis.md §5.4).
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the native
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): the native
 # cpu probe currently diagnoses `unknown_failure`. A recovery plan whose
 # `applicable_faults` does not contain the fault actually diagnosed NEVER
 # runs — recovery exhausts with 0 attempts.
@@ -507,7 +507,7 @@ fn docker_container(id: &str) -> String {
 # crash-loop threshold (docker.rs, docs/guide/resources.md §3.1,
 # docs/guide/probe-diagnosis.md §5.4).
 #
-# Fault mapping (crates/custos-engine/src/engine.rs `diagnose()`): the native
+# Fault mapping (crates/custos-engine/src/engine/diagnose.rs `diagnose()`): the native
 # docker probe currently diagnoses `unknown_failure`. A recovery plan whose
 # `applicable_faults` does not contain the fault actually diagnosed NEVER
 # runs — recovery exhausts with 0 attempts.
