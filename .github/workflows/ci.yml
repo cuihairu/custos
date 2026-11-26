@@ -63,6 +63,17 @@ jobs:
         run: cargo machete
       - name: test
         run: cargo test --workspace
+      # LuCI lua suites (apply 69 / settings 45 / tomledit 44 assertions):
+      # the write chain these cover is acceptance-tested only on a real
+      # OpenWrt instance (user-gated), so CI is their only regression gate.
+      # Tests exit 1 on the first failed assertion.
+      - name: lua unit tests
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lua5.4
+          for t in packaging/openwrt/tests/*-test.lua; do
+            echo "== $t"
+            lua5.4 "$t"
+          done
 
   mingw:
     # The Windows (gnu) build is a supported target: keep it compiling.
