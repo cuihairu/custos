@@ -52,7 +52,7 @@ Ready-to-run monitoring configurations in `examples/` (each validates with `cust
 
 - [basic-process.toml](examples/basic-process.toml) — watch a PID file, restart via plan.
 - [dependency-chain.toml](examples/dependency-chain.toml) — tunnel → proxy → network recovery order.
-- [notifications.toml](examples/notifications.toml) — webhook / local-log / Herald notification wiring.
+- [notifications.toml](examples/notifications.toml) — webhook / local-log / Herald notification wiring (a commented Telegram block shows bot delivery with an optional outbound proxy).
 - [sunlogin.toml](examples/sunlogin.toml) — 向日葵 (Sunlogin) remote-desktop supervision: PC offline detection and only-Sunlogin recovery, the canonical self-healing scenario (Windows `SunloginService`, Linux `oray-sunlogin.service`).
 - [sunlogin-plugin.toml](examples/sunlogin-plugin.toml) — the plugin-wrapped twin: layered probe (service + client processes + cloud session — the AweSun 16.x model, legacy loopback HTTP kept as optional enrichment; no official API needed), service restart plan, re-login reserved as high risk; see docs/guide/plugins.md §5.8.
 - [remote-desktop.toml](examples/remote-desktop.toml) — RustDesk + TeamViewer + 向日葵 behind one network dependency: if the network is down only network recovery runs; otherwise only the dead remote-desktop service is restarted.

@@ -3,7 +3,8 @@
 # The `[notification]` section is independent from recovery rules: recovery
 # policy decides *how to fix*, notification rules decide *who hears about it*.
 # Local log is the always-on base audit; webhook and Herald are the remote
-# channels used here (SMTP is supported too, see docs/guide/notification.md §8.2).
+# channels used here (SMTP and Telegram are supported too, with a commented
+# Telegram block at the bottom, see docs/guide/notification.md §8.2).
 version = 1
 
 [[resources]]
@@ -97,3 +98,17 @@ audiences = ["log"]     # bare channel names, "user:<id>", "group:<id>"
 block_private = true
 block_loopback = true
 block_redirects = true
+
+# Telegram bot delivery, commented out: an active block with placeholder
+# credentials would fire real (failing) deliveries on any deployment that
+# copies this file. Fill in a real bot token and chat id to enable. The
+# optional `proxy` (http/https only) routes delivery through an outbound
+# proxy for networks that block api.telegram.org directly (docs/guide/
+# notification.md §8.2); credentials inside the proxy URI never appear in
+# Debug output or persisted errors — the scrubber redacts them.
+# [notification.channels.tg-alerts]
+# type = "telegram"
+# bot_token = "123456:CHANGE_ME"
+# chat_id = "-1001234567890"
+# timeout_ms = 5000
+# proxy = "http://user:pass@192.168.5.11:7890"

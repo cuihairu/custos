@@ -52,7 +52,7 @@ pnpm run docs:build  # 构建
 
 - [basic-process.toml](examples/basic-process.toml) — 监控 PID 文件，按方案重启。
 - [dependency-chain.toml](examples/dependency-chain.toml) — tunnel → proxy → network 的恢复顺序。
-- [notifications.toml](examples/notifications.toml) — webhook / local-log / Herald 通知接线。
+- [notifications.toml](examples/notifications.toml) — webhook / local-log / Herald 通知接线（文末注释掉的 Telegram 块演示 bot 投递与可选出站代理）。
 - [sunlogin.toml](examples/sunlogin.toml) — 向日葵远程桌面监控：PC 离线检测、只恢复向日葵，自愈的经典场景（Windows `SunloginService`，Linux `oray-sunlogin.service`）。
 - [sunlogin-plugin.toml](examples/sunlogin-plugin.toml) — 插件封装版：分层探测（服务 + 客户端进程 + 云会话 —— AweSun 16.x 模型；旧版回环 HTTP 降级为可选增强；无需官方 API）、服务重启方案、重登录预留高风险位；见 docs/guide/plugins.md §5.8。
 - [remote-desktop.toml](examples/remote-desktop.toml) — RustDesk + TeamViewer + 向日葵统一挂在同一网络依赖下：断网时只修网络，网络正常时只重启挂掉的远程桌面服务。
