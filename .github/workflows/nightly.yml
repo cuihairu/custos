@@ -278,16 +278,23 @@ jobs:
           merge-multiple: true
       # Rolling semantics: the nightly release carries exactly tonight's
       # artifacts. deb/rpm/ipk/msi names embed the version, so same-name
-      # overwrite alone never retires old builds. `delete_assets` in the
-      # release step below was never a real action-gh-release input (the
-      # action silently ignored it; found by actionlint 2026-11-26) — stale
-      # assets did accumulate (the duplicate custos-cli-*.msi). Prune
-      # explicitly instead. Missing release / no assets -> loop is a no-op.
+      # overwrite alone never retires old builds (the action deletes only
+      # the names it re-uploads; the duplicate custos-cli-*.msi survived).
+      # Prune everything, then the release step uploads tonight's set.
+      # --repo is mandatory: this job has no checkout, so gh cannot infer
+      # the repository from a git remote (GITHUB_REPOSITORY is ignored by
+      # gh). A missing release (fresh repo, before softprops creates it)
+      # is nothing to prune, not an error.
       - name: prune previous nightly assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release view nightly --json assets --jq '.assets[].name' 2>/dev/null |
+          if ! gh release view nightly --json assets >/dev/null; then
+            echo "no existing nightly release; nothing to prune"
+            exit 0
+          fi
+          gh release view nightly --json assets --jq '.assets[].name' |
             xargs -r -n1 gh release delete-asset nightly --yes
       - uses: softprops/action-gh-release@v2
         with:
