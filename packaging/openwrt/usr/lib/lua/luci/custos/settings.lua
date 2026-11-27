@@ -258,10 +258,9 @@ function M.effective_source(enabled, local_log, tg_token, tg_chat, herald_url)
 	return "toml"
 end
 
--- The human-facing explanation for the effective source. `uci_effective`
--- describes what the running service uses right now (computed from UCI);
--- `pending` shifts the wording to after-apply when the form is being
--- configured differently from the stored values.
+-- The human-facing explanation for the effective source. Without `pending`
+-- it describes the service right now (computed from UCI); with `pending` it
+-- describes what a Save would switch to (computed from submitted fields).
 function M.source_note(enabled, local_log, tg_token, tg_chat, herald_url, pending)
 	local source = M.effective_source(enabled, local_log, tg_token, tg_chat, herald_url)
 	local prefix = pending and "应用后将生效：" or "当前生效："
@@ -272,6 +271,24 @@ function M.source_note(enabled, local_log, tg_token, tg_chat, herald_url, pendin
 		return prefix .. "监控文件 [notification] 段（覆盖已打开，但没有完整渠道：本地日志未勾选、Telegram 两项未成对、Herald 地址为空——半配渠道按未配置处理，不会让引擎报错）"
 	end
 	return prefix .. "监控文件 [notification] 段（LuCI 覆盖关闭，引擎按 TOML 已有规则投递）"
+end
+
+-- Values a Save would apply: submitted form fields win (including an
+-- explicit empty string from an unchecked flag), absent fields fall back to
+-- the stored UCI values. Token values are only inspected for presence by
+-- source_note; this module never renders them.
+function M.pending_values(form, stored)
+	local values = {}
+	for _, key in ipairs({
+		"enabled", "local_log", "telegram_token", "telegram_chat", "herald_url"
+	}) do
+		local value = form and form[key]
+		if value == nil then
+			value = stored and stored[key]
+		end
+		values[key] = value
+	end
+	return values
 end
 
 return M

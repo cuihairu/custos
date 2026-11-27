@@ -40,15 +40,62 @@ o.rmempty = false
 o.description = translate(
 	"打开且至少启用一个完整渠道（本地日志勾选 / Telegram 两项成对 / Herald 地址）后，LuCI 渠道整体替换监控文件的通知段；关闭或无完整渠道时恢复按 TOML 执行")
 
--- Which source is effective right now, computed from the stored UCI values
--- with the same rule the engine applies to its environment variables.
+-- Which source is effective right now, plus what a Save would switch to.
+-- Both rows use the same selector rule the engine applies to its environment
+-- variables; the pending row reads submitted form values and falls back to
+-- the stored ones for fields the browser did not submit.
+local selector_keys = {
+	"enabled", "local_log", "telegram_token", "telegram_chat", "herald_url"
+}
+local flag_keys = { enabled = true, local_log = true }
+
+local function stored_values(section)
+	local values = {}
+	for _, key in ipairs(selector_keys) do
+		values[key] = m.uci:get("custos", section, key)
+	end
+	return values
+end
+
+local function note(values, pending)
+	return settings.source_note(values.enabled, values.local_log,
+		values.telegram_token, values.telegram_chat, values.herald_url, pending)
+end
+
 d = n:option(DummyValue, "_effective_source", translate("当前谁在生效"))
 function d.cfgvalue(self, section)
-	local function get(key)
-		return m.uci:get("custos", section, key)
+	return note(stored_values(section), false)
+end
+
+d = n:option(DummyValue, "_pending_source", translate("应用后谁生效"))
+function d.cfgvalue(self, section)
+	local form, submitted = {}, false
+	for _, key in ipairs(selector_keys) do
+		if flag_keys[key] then
+			-- A checkbox posts its cbid only when checked; its cbe marker is
+			-- posted whenever the page was submitted, so marker present but
+			-- cbid absent means explicitly unchecked, and neither means the
+			-- field was not part of the submit at all.
+			local checked = luci.http.formvalue("cbid.custos.notify." .. key)
+			local rendered = luci.http.formvalue("cbi.cbe.custos.notify." .. key)
+			if checked ~= nil then
+				form[key] = "1"
+			elseif rendered ~= nil then
+				form[key] = "0"
+			else
+				form[key] = nil
+			end
+		else
+			form[key] = luci.http.formvalue("cbid.custos.notify." .. key)
+		end
+		if form[key] ~= nil then
+			submitted = true
+		end
 	end
-	return settings.source_note(get("enabled"), get("local_log"),
-		get("telegram_token"), get("telegram_chat"), get("herald_url"), false)
+	if not submitted then
+		return translate("无待应用改动（提交后此处显示应用后的生效来源）")
+	end
+	return note(settings.pending_values(form, stored_values(section)), true)
 end
 
 o = n:option(ListValue, "min_severity", translate("最低通知级别"))

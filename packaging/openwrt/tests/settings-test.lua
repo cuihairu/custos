@@ -144,4 +144,16 @@ ok(settings.source_note("0", "", "", "", "", false):find("TOML", 1, true) ~= nil
 ok(settings.source_note("1", "", "", "", "", false):find("半配", 1, true) ~= nil,
 	"override-without-channel note explains the half-pair rule")
 
+-- ---- pending source values (form overlay for the after-apply note) --------
+local pending = settings.pending_values({
+	enabled = "1", local_log = "1", telegram_token = "", telegram_chat = ""
+}, { herald_url = "http://8.8.8.8", telegram_token = "SECRET" })
+eq(pending.enabled, "1", "submitted enabled wins over stored")
+eq(pending.local_log, "1", "submitted local log wins over stored")
+eq(pending.herald_url, "http://8.8.8.8", "absent field falls back to stored")
+eq(pending.telegram_token, "", "explicit empty token wins over stored secret")
+eq(settings.effective_source(pending.enabled, pending.local_log,
+	pending.telegram_token, pending.telegram_chat, pending.herald_url), "luci",
+	"pending values drive the same selector rule")
+
 print("\nall " .. passed .. " assertions passed")
