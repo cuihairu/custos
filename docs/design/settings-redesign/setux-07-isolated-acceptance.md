@@ -98,5 +98,19 @@
 
 ## 6. 未闭余项（07 保持不勾的部分）
 
-- Telegram **真实投递**对照：隔离实例无外网 bot token；配置面（配对校验、env 下发、掩显）已全部验证。
+- Telegram **真实投递**对照：隔离实例无外网 bot token；配置面（配对校验、env 下发、掩显）已全部验证；实际投递对照（本地日志/Herald 路径）已由 `setux-03-delivery-acceptance.md`（2026-11-27）补齐。
 - 「新用户独立调整探测周期、找到资源依赖、说清通知来源」journey：属用户评估，本记录提供全截屏链作为材料。
+
+## 7. 补充验收（2026-11-27，全新重烤实例：键盘 / 长路径 / 应用后刷新）
+
+任务单「怎么验证」的三个机械项在 2026-11-26 记录中未显式覆盖，本节补齐。实例为**从仓库状态全新重烤**（imagebuilder 24.10.8 + `build-ipk.sh` 0.1.0-1 + imagebuilder 装入 luci/luci-lua-runtime/luci-compat/luci-lib-nixio，files overlay uci-defaults 仅 `enabled=1` 与 lan proto=dhcp 适配 slirp hostfwd），镜像内容经 manifest 核对（custos 三包 + compat 层 + uhttpd/ubus），Playwright + Chromium 760 px（Chromium 拒 10080 不安全端口，本机 socat relay 绕行——与 §1 同一手法）。断言输出全 7 PASS：
+
+| 项 | 方法 | 结果 |
+|---|---|---|
+| 键盘 | interval 字段 `.focus()` 断言 activeElement；字段内 Tab 前进；字段内 Enter 提交 | **PASS** ×3——focusable；Tab 到相邻表单控件 `cbid.custos.main.conf`（语义相邻，非跳链接即测试通过口径）；Enter 触发表单提交导航（`07_keyboard_focus.png`） |
+| 长路径 | db 填 120 字符路径保存；状态页 760 px 检查 | **PASS** ×2——长路径在状态页可见；`scrollWidth-clientWidth=0` 零横向溢出（`07_longpath_service_applied.png` / `07_longpath_status_760.png`）。**且功能层活体**：procd 引擎 argv 逐字携带长 db 路径并 running（`/proc/<pid>/cmdline` 实读），非仅显示层 |
+| 应用后刷新 | interval 5→1.5 一次 Save & Apply，页面 reload 后读字段 | **PASS**——刷新后字段显 `1.5`（`07_apply_refresh_1p5.png`）；UCI 同步验证后恢复 5 |
+
+补充：本节实例为 2026-11-27 代码状态（含 `917ead4` herald scheme 校验、scubber 系列提交后的全新构建），写链 round-trip（表单→UCI→procd argv）在新烤镜像上复验一致——01 的 UCI 毫秒差分结论在全新镜像上仍然成立。无新增实现缺陷。
+
+排障记录（非交付面问题）：烤机镜像首次启动 hang 的根因是 OpenWrt 默认 br-lan 静态 192.168.1.1 与 qemu slirp（10.0.2.15 + hostfwd）网段不匹配，SSH/HTTP 转发皆不可达——串口截图确认系统实际启动完成（Enter 激活 console 后 root shell 正常）。files overlay 加 lan proto=dhcp uci-defaults 后全新重烤解决。离线 debugfs 直写 ext4 已挂载过（非干净卸载）的镜像会因脏日志触发 ext4 journal abort 转 read-only（`deleted inode referenced`），本节改用重烤而非离线修补。
