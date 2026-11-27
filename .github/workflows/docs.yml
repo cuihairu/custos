@@ -42,6 +42,8 @@ jobs:
           cache: pnpm
       - name: install
         run: pnpm install --frozen-lockfile
+      - name: locale contract
+        run: pnpm docs:locale-test
       - name: build
         run: pnpm docs:build
       - name: configure-pages
