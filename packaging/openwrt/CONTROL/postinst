@@ -4,4 +4,14 @@ mkdir -p /usr/lib/lua/luci/controller
 mkdir -p /usr/lib/lua/luci/model/cbi
 mkdir -p /usr/lib/lua/luci/view/custos
 [ -x /etc/init.d/custos ] && /etc/init.d/custos enable
+# prerm stopped the engine to swap the binary; an enabled service that is
+# still down after the files have landed must come back up, or every
+# `opkg upgrade` would leave a router without its self-healing engine
+# until the next reboot. Covers upgrades from older revisions whose prerm
+# stopped the engine without any was-running handshake: enabled+down =
+# restart, disabled stays stopped.
+if [ -x /etc/init.d/custos ] && /etc/init.d/custos enabled && \
+	! /etc/init.d/custos status 2>/dev/null | grep -q running; then
+	/etc/init.d/custos start 2>/dev/null
+fi
 exit 0
