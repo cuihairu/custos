@@ -95,8 +95,10 @@ o.validate = telegram_pair("telegram_token")
 o.description = translate("数字 ID、@channelname 或频道用户名")
 
 -- The engine's env overlay rejects a non-http/https herald URL by failing
--- the entire config load (notification::env_overlay), so catch it here before
--- the value is committed and the restart breaks the service.
+-- the entire config load (notification::env_overlay) and hardcodes the
+-- default-blocking SSRF policy (loopback/private refused, no allowlist), so
+-- catch both here before the value is committed and the restart breaks the
+-- service or the channel silently dead-letters every event.
 local function herald_url(self, value)
 	local err = settings.herald_url_error(value)
 	if err then
@@ -107,7 +109,8 @@ end
 
 o = n:option(Value, "herald_url", translate("Herald 服务地址"))
 o.validate = herald_url
-o.description = translate("如 http://127.0.0.1:8080（须 http/https）")
+o.description = translate(
+	"如 https://herald.example.com（须 http/https，且为公网可达地址；回环/私网会被引擎 SSRF 策略拒绝。内网 Herald 请关闭覆盖并在 TOML 通道配置 ssrf allowlist）")
 
 o = n:option(Value, "herald_app", translate("Herald 应用 ID"))
 o.default = "custos"

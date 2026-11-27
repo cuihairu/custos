@@ -4,7 +4,10 @@
 -- Unit tests for the LuCI settings helpers (settings.lua): the
 -- seconds<->milliseconds conversion behind the C-SET-UX-01 "engine interval
 -- in seconds, millisecond precision" contract, the Telegram pair rule and
--- the effective-notification-source computation behind C-SET-UX-03.
+-- the effective-notification-source computation behind C-SET-UX-03. The
+-- Herald cases cover both engine-side rules: the http/https scheme check and
+-- the hardcoded default-blocking SSRF policy (literal loopback/private
+-- targets must be refused by the editor before they dead-letter).
 -- Run:  lua packaging/openwrt/tests/settings-test.lua
 
 local function script_dir()
@@ -74,17 +77,44 @@ ok(settings.telegram_pair_error("", "chat") ~= nil, "chat without token rejected
 ok(settings.telegram_pair_error("tok", nil) ~= nil, "nil chat with token rejected")
 ok(settings.telegram_pair_error(nil, "chat") ~= nil, "nil token with chat rejected")
 
--- ---- herald url scheme rule (mirrors env_overlay's http/https rejection) --
+-- ---- herald url rule (mirrors env_overlay's scheme + SSRF rejection) ------
 eq(settings.herald_url_error(""), nil, "herald url absent is fine")
 eq(settings.herald_url_error(nil), nil, "herald url nil is fine")
-eq(settings.herald_url_error("http://127.0.0.1:8080"), nil, "http herald url accepted")
-eq(settings.herald_url_error("https://herald.lan"), nil, "https herald url accepted")
-eq(settings.herald_url_error("HTTP://herald.lan"), nil, "scheme case-insensitive")
-eq(settings.herald_url_error("Http://127.0.0.1:8080"), nil, "mixed-case scheme accepted")
-ok(settings.herald_url_error("ftp://herald.lan") ~= nil, "ftp scheme rejected")
-ok(settings.herald_url_error("herald.lan") ~= nil, "missing scheme rejected")
-ok(settings.herald_url_error("http:/herald.lan") ~= nil, "single slash rejected")
+eq(settings.herald_url_error("http://8.8.8.8"), nil, "public http herald url accepted")
+eq(settings.herald_url_error("https://herald.example.com/hook"), nil, "public https herald url accepted")
+eq(settings.herald_url_error("HTTP://Herald.Example.com"), nil, "scheme case-insensitive")
+eq(settings.herald_url_error("https://fc.example.com"), nil, "hostname starting with fc is not IPv6")
+eq(settings.herald_url_error("http://172.32.0.1"), nil, "172.32 is outside the private block")
+eq(settings.herald_url_error("http://100.128.0.1"), nil, "100.128 is outside CGNAT")
+eq(settings.herald_url_error("http://[2001:4860:4860::8888]"), nil, "public IPv6 accepted")
+ok(settings.herald_url_error("ftp://herald.example.com") ~= nil, "ftp scheme rejected")
+ok(settings.herald_url_error("herald.example.com") ~= nil, "missing scheme rejected")
+ok(settings.herald_url_error("http:/herald.example.com") ~= nil, "single slash rejected")
 ok(settings.herald_url_error("tcp://127.0.0.1") ~= nil, "tcp scheme rejected")
+
+-- Literal targets the env overlay's SsrfPolicy::default_blocking() refuses.
+ok(settings.herald_url_error("http://127.0.0.1:8080") ~= nil, "loopback rejected")
+ok(settings.herald_url_error("http://127.0.0.2") ~= nil, "loopback range rejected")
+ok(settings.herald_url_error("http://localhost:8080") ~= nil, "localhost rejected")
+ok(settings.herald_url_error("http://user:pass@127.0.0.1:8080") ~= nil, "loopback behind userinfo rejected")
+ok(settings.herald_url_error("http://0.0.0.0") ~= nil, "unspecified IPv4 rejected")
+ok(settings.herald_url_error("http://10.1.2.3") ~= nil, "10/8 rejected")
+ok(settings.herald_url_error("http://172.16.0.1") ~= nil, "172.16/12 start rejected")
+ok(settings.herald_url_error("http://172.31.255.255") ~= nil, "172.16/12 end rejected")
+ok(settings.herald_url_error("http://192.168.1.1") ~= nil, "192.168/16 rejected")
+ok(settings.herald_url_error("http://169.254.1.1") ~= nil, "link-local IPv4 rejected")
+ok(settings.herald_url_error("http://100.64.0.1") ~= nil, "CGNAT start rejected")
+ok(settings.herald_url_error("http://100.127.255.255") ~= nil, "CGNAT end rejected")
+ok(settings.herald_url_error("http://[::1]:8080") ~= nil, "IPv6 loopback rejected")
+ok(settings.herald_url_error("http://[::]") ~= nil, "IPv6 unspecified rejected")
+ok(settings.herald_url_error("http://[0:0:0:0:0:0:0:1]") ~= nil, "long IPv6 loopback rejected")
+ok(settings.herald_url_error("http://[fc00::1]") ~= nil, "IPv6 unique-local fc rejected")
+ok(settings.herald_url_error("http://[fd12::1]") ~= nil, "IPv6 unique-local fd rejected")
+ok(settings.herald_url_error("http://[fe80::1]") ~= nil, "IPv6 link-local rejected")
+ok(settings.herald_url_error("http://[febf::1]") ~= nil, "IPv6 link-local end rejected")
+ok(settings.herald_url_error("http://[::ffff:192.168.0.1]") ~= nil, "IPv4-mapped private rejected")
+ok(settings.herald_url_error("http://[::ffff:127.0.0.1]") ~= nil, "IPv4-mapped loopback rejected")
+eq(settings.herald_url_error("http://[::ffff:8.8.8.8]"), nil, "IPv4-mapped public accepted")
 
 -- ---- effective notification source (mirrors env_overlay + notify_pairs) --
 eq(settings.effective_source("0", "1", "t", "c", "http://x"), "toml",

@@ -70,7 +70,7 @@ On networks that block api.telegram.org directly (DNS-poisoned, TCP 443 filtered
 
 ### Herald
 
-Delivery to a Herald instance, with API-key or bearer authentication and the same SSRF posture as the webhook channel.
+Delivery to a Herald instance, with API-key or bearer authentication and the same SSRF posture as the webhook channel. Under the OpenWrt LuCI overlay (`CUSTOS_NOTIFY_HERALD_URL`), the SSRF policy is hardcoded to `default_blocking()` — loopback/private targets are refused and there is no allowlist, so the editor only accepts a public http/https address; configure the channel in TOML with an explicit `ssrf.allowlist` if Herald runs on an internal network.
 
 Console is not one of them: there is no console channel in the configuration or in `crates/custos-notify`. Local observation runs through the local-log channel and the CLI's own `status`, `runs` and `incidents` output.
 

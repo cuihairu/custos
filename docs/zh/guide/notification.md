@@ -70,7 +70,7 @@ Core Engine 只产生结构化事件，不直接调用 Telegram、SMTP 或其他
 
 ### Herald
 
-投递到 Herald 实例，支持 API-key 或 bearer 认证，SSRF 姿态与 webhook 通道一致。
+投递到 Herald 实例，支持 API-key 或 bearer 认证，SSRF 姿态与 webhook 通道一致。OpenWrt LuCI 覆盖（`CUSTOS_NOTIFY_HERALD_URL`）下 SSRF 策略硬编码为 `default_blocking()`——拒绝回环/私网且无 allowlist，因此编辑器只接受公网 http/https 地址；若 Herald 部署在内网，请在 TOML 通道配置显式 `ssrf.allowlist`。
 
 Console 不在其中：配置里没有 console 通道，`crates/custos-notify` 里也没有 console 通道实现。本地观察靠本地日志通道，加上 CLI 自身的 `status`、`runs`、`incidents` 输出。
 
