@@ -1,0 +1,49 @@
+# Plugin manifest archive (todo.md line 312, option 1: in-repo record).
+#
+# The repository currently has NO distribution source and NO signing
+# infrastructure: plugin binaries are built from this tree (workspace
+# members, `version.workspace = true`) and referenced from deployment TOML
+# by absolute path, and the nightly workflow ships only the core `custos`
+# and `custos-tray` binaries — never plugins. This manifest archives what
+# each plugin IS (binary name, source path) and states plainly that nothing
+# here is signed. When a distribution source and a trust anchor arrive
+# (todo.md decision points 2 and 3), payload hashes keyed by a source ref
+# extend this file; until then, the git commit that last touched each
+# plugin directory is the only anchor.
+#
+# Also in plugins/ but not binaries: clash-api is a shared library linked
+# by the mihomo and openclash plugins; python/ ships the script-plugin shim
+# plus examples, launched by custos-plugin-host's python loader.
+#
+# Machine-checked by crates/custos-config/tests/plugin_manifest.rs: every
+# plugin crate declaring a [[bin]] must be archived here with a matching
+# binary name, and `version` must track the workspace version.
+
+version = "0.1.0"
+signed = false
+distribution = "none"
+
+[[plugin]]
+name = "cloudflared"
+binary = "cloudflared-plugin"
+source = "plugins/cloudflared"
+
+[[plugin]]
+name = "mihomo"
+binary = "mihomo-plugin"
+source = "plugins/mihomo"
+
+[[plugin]]
+name = "network-adapter"
+binary = "network-adapter-plugin"
+source = "plugins/network-adapter"
+
+[[plugin]]
+name = "openclash"
+binary = "openclash-plugin"
+source = "plugins/openclash"
+
+[[plugin]]
+name = "sunlogin"
+binary = "sunlogin-plugin"
+source = "plugins/sunlogin"
