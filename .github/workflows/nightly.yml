@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 60
     outputs:
       fresh: ${{ steps.fresh.outputs.fresh }}
+      ipkrel: ${{ steps.ipkrel.outputs.ipkrel }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -45,6 +46,15 @@ jobs:
           else
             echo "fresh=true" >> "$GITHUB_OUTPUT"
           fi
+      # One date-stamp for tonight's whole ipk trio: the rolling feed
+      # prunes and re-uploads same-name assets, but opkg decides "is there
+      # an upgrade?" by version comparison, so a frozen `0.1.0-1` would
+      # make every nightly look already-installed. The revision is the UTC
+      # date (`0.1.0-20261127`), computed once here so the x86_64 and
+      # aarch64 legs cannot split across a midnight rollover.
+      - id: ipkrel
+        name: date-stamp for tonight's ipk revision
+        run: echo "ipkrel=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@stable
       # custos-python links -lpython3.x: the 26.04 runner image no longer
       # ships the dev headers the 24.04 image had.
@@ -184,7 +194,8 @@ jobs:
         if: runner.os == 'Linux' && matrix.static
         run: |
           sh packaging/openwrt/build-ipk.sh "target/${{ matrix.target }}/release/custos" dist/ \
-            --arch "$(echo '${{ matrix.target }}' | sed 's/-unknown-linux-musl//')"
+            --arch "$(echo '${{ matrix.target }}' | sed 's/-unknown-linux-musl//')" \
+            --rel "${{ needs.check.outputs.ipkrel }}"
 
       # Windows: zip binary + msi.
       - name: package binary zip
