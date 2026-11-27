@@ -94,8 +94,19 @@ o = n:option(Value, "telegram_chat", translate("Telegram 接收会话 ID"))
 o.validate = telegram_pair("telegram_token")
 o.description = translate("数字 ID、@channelname 或频道用户名")
 
+-- The engine's env overlay rejects a non-http/https herald URL by failing
+-- the entire config load (notification::env_overlay), so catch it here before
+-- the value is committed and the restart breaks the service.
+local function herald_url(self, value)
+	local err = settings.herald_url_error(value)
+	if err then
+		return nil, translate(err)
+	end
+	return no_space(self, value)
+end
+
 o = n:option(Value, "herald_url", translate("Herald 服务地址"))
-o.validate = no_space
+o.validate = herald_url
 o.description = translate("如 http://127.0.0.1:8080（须 http/https）")
 
 o = n:option(Value, "herald_app", translate("Herald 应用 ID"))

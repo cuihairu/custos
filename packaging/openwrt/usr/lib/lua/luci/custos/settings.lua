@@ -14,6 +14,9 @@
 --     one channel, and init.d notify_pairs() drops a half-set pair, so a
 --     half-filled form must be caught at the editor instead of silently
 --     meaning "no channel" (crates/custos-config notification::env_overlay).
+--   * the Herald URL scheme rule: the engine rejects a non-http/https
+--     herald address by failing the whole config load, so the editor must
+--     refuse it before it ever reaches UCI (same env overlay).
 --   * the effective notification source: the overlay REPLACES the TOML
 --     [notification] section only when the override flag is on AND at least
 --     one complete channel selector exists; otherwise the TOML section
@@ -70,6 +73,24 @@ function M.to_seconds(ms)
 	-- Trim trailing zeros so 1500 -> "1.5" instead of "1.500".
 	text = text:gsub("0+$", "")
 	return whole .. "." .. text
+end
+
+-- The Herald channel only accepts an http/https base URL. Returns the
+-- editor-level error message, or nil when the value is absent or carries an
+-- http/https scheme. Mirrors the engine's env overlay rule verbatim
+-- (crates/custos-config notification::env_overlay): there a non-http scheme
+-- fails the whole config load, so saving such a value would keep the engine
+-- from starting at all.
+function M.herald_url_error(value)
+	if value == nil or value == "" then
+		return nil
+	end
+	local scheme = value:match("^(.-)://")
+	local lower = scheme and scheme:lower() or nil
+	if lower ~= "http" and lower ~= "https" then
+		return "须以 http:// 或 https:// 开头（否则引擎启动时会拒绝整个配置）"
+	end
+	return nil
 end
 
 -- The Telegram channel counts only when bot token and chat id are present

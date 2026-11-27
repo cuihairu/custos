@@ -74,6 +74,18 @@ ok(settings.telegram_pair_error("", "chat") ~= nil, "chat without token rejected
 ok(settings.telegram_pair_error("tok", nil) ~= nil, "nil chat with token rejected")
 ok(settings.telegram_pair_error(nil, "chat") ~= nil, "nil token with chat rejected")
 
+-- ---- herald url scheme rule (mirrors env_overlay's http/https rejection) --
+eq(settings.herald_url_error(""), nil, "herald url absent is fine")
+eq(settings.herald_url_error(nil), nil, "herald url nil is fine")
+eq(settings.herald_url_error("http://127.0.0.1:8080"), nil, "http herald url accepted")
+eq(settings.herald_url_error("https://herald.lan"), nil, "https herald url accepted")
+eq(settings.herald_url_error("HTTP://herald.lan"), nil, "scheme case-insensitive")
+eq(settings.herald_url_error("Http://127.0.0.1:8080"), nil, "mixed-case scheme accepted")
+ok(settings.herald_url_error("ftp://herald.lan") ~= nil, "ftp scheme rejected")
+ok(settings.herald_url_error("herald.lan") ~= nil, "missing scheme rejected")
+ok(settings.herald_url_error("http:/herald.lan") ~= nil, "single slash rejected")
+ok(settings.herald_url_error("tcp://127.0.0.1") ~= nil, "tcp scheme rejected")
+
 -- ---- effective notification source (mirrors env_overlay + notify_pairs) --
 eq(settings.effective_source("0", "1", "t", "c", "http://x"), "toml",
 	"override off means TOML even with channels")
