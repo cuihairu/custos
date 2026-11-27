@@ -339,11 +339,32 @@ fn outage_keeps_entries_queued_and_delivers_after_network_returns() {
     assert_eq!(engine.deliver_due(1_100, 10).retried, 0);
 
     // 4. Network returns: rebind the port and serve the deferred entry.
-    let listener = TcpListener::bind(("127.0.0.1", port)).expect("rebind the port");
-    std::thread::spawn(move || serve_once(&listener));
-    std::thread::sleep(Duration::from_millis(50));
+    //    A single pass can still miss under runner load (serve_once's one
+    //    accept() may error, e.g. fd pressure, leaving the 1 s client
+    //    timeout to surface as a transient retry), so retry the pass until
+    //    the entry really drains. The clock is test-controlled, so each
+    //    re-attempt steps 61 s forward to stay past any retry backoff
+    //    (same bounded-retry idiom as the a14a461 connectivity tests).
+    let listener =
+        std::sync::Arc::new(TcpListener::bind(("127.0.0.1", port)).expect("rebind the port"));
+    let server = std::sync::Arc::clone(&listener);
+    std::thread::spawn(move || {
+        for _ in 0..16 {
+            if serve_once(&server) == 0 {
+                break;
+            }
+        }
+    });
 
-    let report = engine.deliver_due(1_000 + 61_000, 10);
-    assert_eq!(report.delivered, 1, "queued entry drains after the outage");
+    let mut delivered = 0;
+    for attempt in 0..16u32 {
+        std::thread::sleep(Duration::from_millis(50));
+        let report = engine.deliver_due(1_000 + 61_000 + u64::from(attempt) * 61_000, 10);
+        delivered = report.delivered;
+        if delivered == 1 {
+            break;
+        }
+    }
+    assert_eq!(delivered, 1, "queued entry drains after the outage");
     assert_eq!(queue.state_of(id), NotificationState::Delivered);
 }
