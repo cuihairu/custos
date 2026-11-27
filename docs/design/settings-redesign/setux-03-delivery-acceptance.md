@@ -36,7 +36,9 @@ delivered 信封（severity→urgency、fault→state=down 映射真实生效）
 
 本批发现并修复：LuCI 页 `herald_url` 此前仅 `no_space` 校验，非法 scheme 可入库；而引擎侧是**整体拒绝**（`build.rs:517` `?` 传播，且 last-known-good 快照同一进程内装载会被同一批 `CUSTOS_NOTIFY_*` 再度毒化，回退也失败）→ 保存即引擎起不来、页面仍显示「LuCI 在生效」。修复 `917ead4`：`settings.herald_url_error` 逐字镜像 env_overlay 规则（`^(.-)://` 取 scheme、大小写不敏感 http/https），编辑器层即拒（no_space+scheme 链），settings-test 55 断言 + `luac -p` 绿。上表「非法 scheme」路径即该修复的后端契约活体证据。
 
-同批再补强：编辑器示例曾是 `http://127.0.0.1:8080`——env_overlay 的 SSRF 为硬编码 `default_blocking()`（loopback/私网拒绝、空 allowlist），该地址能入库却让通道构建失败（引擎只 log+跳过通道，事件 dead-letter），页面却仍称 LuCI 生效，比非法 scheme 更隐蔽。`settings.herald_url_error` 现同时镜像**两条**目标规则：scheme 校验之外，解析 authority（剥 userinfo、剥端口、剥 `[...]`）后逐字镜像字面 IP 判定——0.0.0.0、10/8、172.16/12、192.168/16、169.254/16、CGNAT 100.64/10、127/8、localhost、IPv6 ::/::1、fc00::/7、fe80::/10、IPv4-mapped；**非字面主机名留给引擎 DNS 解析后判定**（解析权在 `webhook_ssrf::validate_target`）。settings-test 55→80 断言（新增 SSRF 字面判定 24 例） + `luac -p` 绿；CBI 描述改为公网示例并提示内网 Herald 需在 TOML 配 ssrf allowlist。
+同批再补强：编辑器示例曾是 `http://127.0.0.1:8080`——env_overlay 的 SSRF 为硬编码 `default_blocking()`（loopback/私网拒绝、空 allowlist），该地址能入库却让通道构建失败（引擎只 log+跳过通道，事件 dead-letter），页面却仍称 LuCI 生效，比非法 scheme 更隐蔽。修复 `db5edc4`：`settings.herald_url_error` 现同时镜像**两条**目标规则：scheme 校验之外，解析 authority（剥 userinfo、剥端口、剥 `[...]`）后逐字镜像字面 IP 判定——0.0.0.0、10/8、172.16/12、192.168/16、169.254/16、CGNAT 100.64/10、127/8、localhost、IPv6 ::/::1、fc00::/7、fe80::/10、IPv4-mapped；**非字面主机名留给引擎 DNS 解析后判定**（解析权在 `webhook_ssrf::validate_target`）。settings-test 55→80 断言（新增 SSRF 字面判定 24 例） + `luac -p` 绿；CBI 描述改为公网示例并提示内网 Herald 需在 TOML 配 ssrf allowlist。
+
+第三项补强 `6634737`：任务「怎么做」要求同时明确当前与**待应用**来源，此前只显示当前生效来源。通知页现有两行 DummyValue——「当前谁在生效」读已提交 UCI，「应用后谁生效」读同一次提交的表单字段（勾选框用 cbid 选中态与 cbe 存在标记区分「显式未勾」和「未提交」；文本字段直读），两者共用 `settings.effective_source` 判定，令牌值只参与判空不回显；未提交表单时第二行显示「无待应用改动」。settings-test 80→85 断言（form-over-stored 合并与显式空令牌覆盖存量令牌）全绿。
 
 ## 4. 余项
 
