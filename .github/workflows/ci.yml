@@ -74,6 +74,11 @@ jobs:
             echo "== $t"
             lua5.4 "$t"
           done
+      # Engine ipk postinst restart-on-upgrade regression (f941d3b): the
+      # QEMU rehearsal found that prerm stopped the engine and postinst
+      # never restarted it. This fake-root shell suite locks the fix in CI.
+      - name: openwrt control script tests
+        run: sh packaging/openwrt/tests/postinst-test.sh
 
   mingw:
     # The Windows (gnu) build is a supported target: keep it compiling.
